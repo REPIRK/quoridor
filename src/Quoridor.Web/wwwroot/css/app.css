@@ -288,12 +288,16 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
 
 .setup .actions { margin-top: 26px; }
 
-/* ================================================================== board ==== */
+/* ================================================================== board ====
 
-.backdrop { fill: var(--board); stroke: var(--line); stroke-width: 1; }
-.cell { fill: var(--cell); opacity: 0.9; }
+   Every selector here is scoped under .board. The page and the board both have a
+   thing called a hint and a thing called a ghost, and an unscoped `.ghost` with
+   pointer-events: none once made every button on the page unclickable. */
 
-.coord {
+.board .backdrop { fill: var(--board); stroke: var(--line); stroke-width: 1; }
+.board .cell { fill: var(--cell); opacity: 0.9; }
+
+.board .coord {
     fill: var(--muted);
     opacity: 0.75;
     font-family: ui-monospace, Consolas, monospace;
@@ -301,38 +305,38 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
     text-anchor: middle;
 }
 
-.goal { opacity: 0.09; }
-.finish { opacity: 0.7; }
-.goal.p0, .finish.p0 { fill: var(--p0); }
-.goal.p1, .finish.p1 { fill: var(--p1); }
+.board .goal { opacity: 0.09; }
+.board .finish { opacity: 0.7; }
+.board .goal.p0, .board .finish.p0 { fill: var(--p0); }
+.board .goal.p1, .board .finish.p1 { fill: var(--p1); }
 
-.wall { stroke: var(--wall-edge); stroke-width: 0.75; }
-.wall.p0 { fill: var(--p0); }
-.wall.p1 { fill: var(--p1); }
+.board .wall { stroke: var(--wall-edge); stroke-width: 0.75; }
+.board .wall.p0 { fill: var(--p0); }
+.board .wall.p1 { fill: var(--p1); }
 
-.ghost { opacity: 0.5; pointer-events: none; }
-.ghost.p0 { fill: var(--p0); }
-.ghost.p1 { fill: var(--p1); }
-.ghost.bad { fill: none; stroke: var(--p1); stroke-width: 1.2; opacity: 0.55; }
+.board .wall-preview { opacity: 0.5; pointer-events: none; }
+.board .wall-preview.p0 { fill: var(--p0); }
+.board .wall-preview.p1 { fill: var(--p1); }
+.board .wall-preview.bad { fill: none; stroke: var(--p1); stroke-width: 1.2; opacity: 0.55; }
 
-.hint { opacity: 0.42; pointer-events: none; }
-.hint.p0 { fill: var(--p0); }
-.hint.p1 { fill: var(--p1); }
+.board .hint-dot { opacity: 0.42; pointer-events: none; }
+.board .hint-dot.p0 { fill: var(--p0); }
+.board .hint-dot.p1 { fill: var(--p1); }
 
-.last { fill: none; stroke-width: 1.5; opacity: 0.6; pointer-events: none; }
-.last.p0 { stroke: var(--p0); }
-.last.p1 { stroke: var(--p1); }
+.board .last { fill: none; stroke-width: 1.5; opacity: 0.6; pointer-events: none; }
+.board .last.p0 { stroke: var(--p0); }
+.board .last.p1 { stroke: var(--p1); }
 
-.route { fill: none; stroke-width: 2; stroke-dasharray: 1.4 2.2; stroke-linecap: round; opacity: 0.6; pointer-events: none; }
-.route.p0 { stroke: var(--p0); }
-.route.p1 { stroke: var(--p1); }
+.board .route { fill: none; stroke-width: 2; stroke-dasharray: 1.4 2.2; stroke-linecap: round; opacity: 0.6; pointer-events: none; }
+.board .route.p0 { stroke: var(--p0); }
+.board .route.p1 { stroke: var(--p1); }
 
-.pawn { opacity: 0.72; }
-.pawn.active { opacity: 1; }
-.pawn.p0 { fill: var(--p0); }
-.pawn.p1 { fill: var(--p1); }
+.board .pawn { opacity: 0.72; }
+.board .pawn.active { opacity: 1; }
+.board .pawn.p0 { fill: var(--p0); }
+.board .pawn.p1 { fill: var(--p1); }
 
-.hit { fill: transparent; cursor: pointer; }
+.board .hit { fill: transparent; cursor: pointer; }
 
 /* ============================================================== narrow ==== */
 

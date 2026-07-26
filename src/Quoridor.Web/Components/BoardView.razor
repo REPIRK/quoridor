@@ -56,7 +56,7 @@
 
     @foreach (int cell in Hints())
     {
-        <circle class="hint @(State.SideToMove == 0 ? "p0" : "p1")"
+        <circle class="hint-dot @(State.SideToMove == 0 ? "p0" : "p1")"
                 cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="7" />
     }
 
@@ -70,7 +70,7 @@
 
     @if (_ghost is { } ghost)
     {
-        <rect class="ghost @(_ghostLegal ? (State.SideToMove == 0 ? "p0" : "p1") : "bad")" rx="2"
+        <rect class="wall-preview @(_ghostLegal ? (State.SideToMove == 0 ? "p0" : "p1") : "bad")" rx="2"
               x="@WallX(ghost.Kind, ghost.Col)" y="@WallY(ghost.Kind, ghost.Row)"
               width="@(ghost.IsHorizontal ? WallLength : Gap)"
               height="@(ghost.IsHorizontal ? Gap : WallLength)" />
