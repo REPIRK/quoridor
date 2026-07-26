@@ -26,11 +26,15 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      # Ahead-of-time compilation. Interpreted WebAssembly costs the engine four or
-      # five plies, which is the difference between a sparring partner and a pushover.
+      # Ahead-of-time compilation. Interpreted WebAssembly costs the engine three
+      # plies, which is the difference between a sparring partner and a pushover.
       # This step is why the job takes minutes rather than seconds.
+      #
+      # "restore" rather than "install wasm-tools": the workload is versioned per
+      # target framework, so naming it directly installs the wrong one whenever the
+      # runner's default SDK is newer than the framework the project targets.
       - name: Install the WebAssembly toolchain
-        run: dotnet workload install wasm-tools
+        run: dotnet workload restore src/Quoridor.Web/Quoridor.Web.csproj
 
       - name: Publish
         run: dotnet publish src/Quoridor.Web -c Release -o published

@@ -17,6 +17,11 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # The solution includes the browser build, which needs the WebAssembly workload
+      # even to compile.
+      - name: Workloads
+        run: dotnet workload restore src/Quoridor.Web/Quoridor.Web.csproj
+
       - name: Build
         run: dotnet build Quoridor.sln -c Release --nologo
 
@@ -37,6 +42,9 @@ jobs:
 
       - name: Rules and engine checks
         run: dotnet run --project tests/Quoridor.Selftest -c Release
+
+      - name: Workloads
+        run: dotnet workload restore src/Quoridor.Web/Quoridor.Web.csproj
 
       - name: Browser build
         run: dotnet build src/Quoridor.Web -c Release
