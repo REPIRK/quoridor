@@ -1,4 +1,7 @@
 @using Quoridor.Engine
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject NavigationManager Nav
 
 <div class="app" data-theme="@(_light ? "light" : "dark")">
 
@@ -6,7 +9,7 @@
         <div class="brand">Quoridor</div>
         <div class="mode">@Title</div>
         <div class="actions">
-            <button class="ghost" @onclick="() => _showSetup = true">New game</button>
+            <button class="ghost" @onclick="OpenSetup">New game</button>
             <button class="ghost @(_routes ? "on" : "")" @onclick="() => _routes = !_routes">Routes</button>
             <button class="ghost" @onclick="() => _light = !_light">@(_light ? "Dark" : "Light")</button>
         </div>
@@ -90,7 +93,7 @@
                 <p>@_session.Moves.Count moves played</p>
                 <div class="actions">
                     <button class="ghost" @onclick="Restart">Rematch</button>
-                    <button class="ghost" @onclick="() => _showSetup = true">New game</button>
+                    <button class="ghost" @onclick="OpenSetup">New game</button>
                 </div>
             </div>
         </div>
@@ -108,9 +111,11 @@
                 <div class="row">
                     <span class="label">Opponent</span>
                     <button class="seg @(_mode == WebMode.VersusBot ? "on" : "")"
-                            @onclick="() => _mode = WebMode.VersusBot">The engine</button>
+                            @onclick="() => SelectMode(WebMode.VersusBot)">The engine</button>
                     <button class="seg @(_mode == WebMode.Hotseat ? "on" : "")"
-                            @onclick="() => _mode = WebMode.Hotseat">A friend, here</button>
+                            @onclick="() => SelectMode(WebMode.Hotseat)">A friend, here</button>
+                    <button class="seg @(_mode == WebMode.Online ? "on" : "")"
+                            @onclick="() => SelectMode(WebMode.Online)">A friend, online</button>
                 </div>
 
                 @if (_mode == WebMode.VersusBot)
@@ -126,15 +131,74 @@
                     </div>
                 }
 
+                @if (_mode == WebMode.Online)
+                {
+                    <div class="online">
+                        @if (_net.State == NetState.Idle)
+                        {
+                            <div class="row">
+                                <button class="ghost primary" @onclick="HostGame">Create a game</button>
+                            </div>
+                            <div class="row">
+                                <input class="code" placeholder="or paste an invite code"
+                                       value="@_joinCode"
+                                       @oninput="e => _joinCode = e.Value?.ToString() ?? string.Empty" />
+                                <button class="ghost" disabled="@string.IsNullOrWhiteSpace(_joinCode)"
+                                        @onclick="JoinGame">Join</button>
+                            </div>
+                        }
+                        else if (_net.State == NetState.Hosting)
+                        {
+                            <p class="fine">
+                                @(string.IsNullOrEmpty(_net.Code)
+                                    ? "Setting up…"
+                                    : "Send this link to the other player. The game starts the moment they open it.")
+                            </p>
+                            @if (!string.IsNullOrEmpty(_net.Code))
+                            {
+                                <input class="code wide" readonly value="@ShareLink" @onfocus="SelectAll" />
+                            }
+                        }
+                        else if (_net.State == NetState.Joining)
+                        {
+                            <p class="fine">Connecting…</p>
+                        }
+                        else if (_net.State == NetState.Failed)
+                        {
+                            <p class="fine">@_net.Trouble</p>
+                            <div class="row">
+                                <button class="ghost" @onclick="ResetNet">Try again</button>
+                            </div>
+                        }
+                    </div>
+                }
+
                 <p class="fine">
-                    Click a square to step, or hover the groove between two squares to place a wall.
-                    Hard runs a real alpha-beta search — in a browser it gets one thread, so it thinks
-                    a little less deeply than the desktop build.
+                    @if (_mode == WebMode.Online)
+                    {
+                        <text>
+                            The two browsers talk directly to each other over WebRTC — there is no
+                            server of ours in the middle. A free public service is used once, only to
+                            introduce them; after that the moves never touch a third party. Strict
+                            networks sometimes block the direct connection.
+                        </text>
+                    }
+                    else
+                    {
+                        <text>
+                            Click a square to step, or hover the groove between two squares to place a
+                            wall. Hard runs a real alpha-beta search — in a browser it gets one thread,
+                            so it thinks a little less deeply than the desktop build.
+                        </text>
+                    }
                 </p>
 
-                <div class="actions">
-                    <button class="ghost primary" @onclick="StartGame">Play</button>
-                </div>
+                @if (_mode != WebMode.Online)
+                {
+                    <div class="actions">
+                        <button class="ghost primary" @onclick="StartGame">Play</button>
+                    </div>
+                }
             </div>
         </div>
     }
@@ -143,6 +207,7 @@
 @code {
     // The full engine is the default; the two heuristic bots are the handicap.
     private WebSession _session = new(WebMode.VersusBot, BotStrength.Hard);
+    private NetLink _net = default!;
 
     private WebMode _mode = WebMode.VersusBot;
     private BotStrength _strength = BotStrength.Hard;
@@ -152,10 +217,33 @@
     private bool _light;
     private bool _routes;
     private string? _preview;
+    private string _joinCode = string.Empty;
 
-    private string Title => _session.Mode == WebMode.Hotseat
-        ? "Two players, one screen"
-        : $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine";
+    protected override async Task OnInitializedAsync()
+    {
+        _net = new NetLink(Js);
+        _net.Changed += OnNetChanged;
+        _net.Received += OnNetMessage;
+
+        // Arriving through an invite link goes straight to connecting.
+        var uri = new Uri(Nav.Uri);
+        string? invite = System.Web.HttpUtility.ParseQueryString(uri.Query).Get("join");
+
+        if (string.IsNullOrWhiteSpace(invite)) return;
+
+        _mode = WebMode.Online;
+        _joinCode = invite;
+        await _net.JoinAsync(invite);
+    }
+
+    private string ShareLink => $"{Nav.BaseUri}?join={_net.Code}";
+
+    private string Title => _session.Mode switch
+    {
+        WebMode.Hotseat => "Two players, one screen",
+        WebMode.Online => _net.IsConnected ? "Online game" : "Online game · disconnected",
+        _ => $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine",
+    };
 
     private string Status
     {
@@ -164,17 +252,29 @@
             if (_session.IsOver) return WinnerLabel;
             if (_thinking) return "Thinking";
 
+            if (_session.Mode == WebMode.Online)
+                return _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
+
             return _session.Mode == WebMode.VersusBot && _session.IsHumanTurn
                 ? "Your move"
                 : $"{_session.PlayerName(_session.State.SideToMove)} to move";
         }
     }
 
-    private string Hint => _session.IsOver
-        ? "Rematch to play again."
-        : _session.State.WallsOf(_session.State.SideToMove) == 0
-            ? "No walls left — it is a straight race now."
-            : "Click a square to step, or hover a groove between squares to place a wall.";
+    private string Hint
+    {
+        get
+        {
+            if (_session.IsOver) return "Rematch to play again.";
+
+            if (_session.Mode == WebMode.Online && !_net.IsConnected)
+                return _net.Trouble.Length > 0 ? _net.Trouble : "The connection is gone.";
+
+            return _session.State.WallsOf(_session.State.SideToMove) == 0
+                ? "No walls left — it is a straight race now."
+                : "Click a square to step, or hover a groove between squares to place a wall.";
+        }
+    }
 
     private string WinnerLabel
     {
@@ -183,9 +283,12 @@
             int winner = _session.Winner;
             if (winner < 0) return string.Empty;
 
-            return _session.Mode == WebMode.VersusBot
-                ? winner == 0 ? "You win" : "The engine wins"
-                : $"{_session.PlayerName(winner)} wins";
+            return _session.Mode switch
+            {
+                WebMode.VersusBot => winner == 0 ? "You win" : "The engine wins",
+                WebMode.Online => winner == _session.LocalSeat ? "You win" : "Your opponent wins",
+                _ => $"{_session.PlayerName(winner)} wins",
+            };
         }
     }
 
@@ -214,6 +317,20 @@
         return distance < 0 ? "no route" : distance == 0 ? "home" : $"{distance} to go";
     }
 
+    // ================================================================== setup ==
+
+    private void OpenSetup()
+    {
+        _showSetup = true;
+        ResetNet();
+    }
+
+    private void SelectMode(WebMode mode)
+    {
+        _mode = mode;
+        if (mode != WebMode.Online) ResetNet();
+    }
+
     private void StartGame()
     {
         _session = new WebSession(_mode, _strength);
@@ -223,8 +340,11 @@
 
     private void Restart()
     {
-        _session = new WebSession(_session.Mode, _session.Strength);
+        // Online, a restart has to be agreed: tell the other side and both begin again.
+        _session = new WebSession(_session.Mode, _session.Strength, _session.LocalSeat < 0 ? 0 : _session.LocalSeat);
         _preview = null;
+
+        if (_session.Mode == WebMode.Online) _ = _net.SendAsync("restart");
     }
 
     private void Undo()
@@ -233,12 +353,80 @@
         _preview = null;
     }
 
+    // =================================================================== link ==
+
+    private async Task HostGame() => await _net.HostAsync();
+
+    private async Task JoinGame() => await _net.JoinAsync(_joinCode);
+
+    private void ResetNet()
+    {
+        _ = _net.SendAsync(string.Empty);
+        _ = _net.DisposeAsync().AsTask();
+
+        _net = new NetLink(Js);
+        _net.Changed += OnNetChanged;
+        _net.Received += OnNetMessage;
+    }
+
+    private void OnNetChanged() => InvokeAsync(() =>
+    {
+        // Whoever created the game takes the first seat, which is also the first move.
+        if (_net.IsConnected && (_session.Mode != WebMode.Online || _showSetup))
+        {
+            int seat = _net.Code.Length > 0 ? 0 : 1;
+            _session = new WebSession(WebMode.Online, BotStrength.Normal, seat);
+            _showSetup = false;
+            _preview = null;
+        }
+
+        StateHasChanged();
+    });
+
+    private void OnNetMessage(string message) => InvokeAsync(() =>
+    {
+        if (message == "restart")
+        {
+            _session = new WebSession(WebMode.Online, BotStrength.Normal, _session.LocalSeat);
+            _preview = null;
+            StateHasChanged();
+            return;
+        }
+
+        // "move|<ply>|<notation>". The ply guards against a duplicate or a message that
+        // overtook another; anything that does not line up is dropped rather than
+        // guessed at, because both sides hold the same position and can afford to wait.
+        string[] parts = message.Split('|');
+
+        if (parts.Length == 3 &&
+            parts[0] == "move" &&
+            int.TryParse(parts[1], out int ply) &&
+            ply == _session.Moves.Count &&
+            Notation.TryParse(parts[2], out Move move))
+        {
+            _session.Apply(move);
+        }
+
+        StateHasChanged();
+    });
+
+    // =================================================================== play ==
+
     private async Task OnMove(Move move)
     {
         if (_thinking || !_session.IsHumanTurn) return;
+
+        int ply = _session.Moves.Count;
         if (!_session.Apply(move)) return;
 
         _preview = null;
+
+        if (_session.Mode == WebMode.Online)
+        {
+            await _net.SendAsync($"move|{ply}|{Notation.Format(move)}");
+            return;
+        }
+
         await RunEngine();
     }
 
@@ -263,4 +451,9 @@
             await Task.Delay(1);
         }
     }
+
+    private async Task SelectAll(FocusEventArgs _) =>
+        await Js.InvokeVoidAsync("document.execCommand", "selectAll", false, null);
+
+    public async ValueTask DisposeAsync() => await _net.DisposeAsync();
 }

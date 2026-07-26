@@ -7,6 +7,7 @@ public enum WebMode
 {
     Hotseat,
     VersusBot,
+    Online,
 }
 
 /// <summary>
@@ -23,10 +24,18 @@ public sealed class WebSession
     private readonly List<Move> _moves = new();
     private readonly IQuoridorAgent? _bot;
 
-    public WebSession(WebMode mode, BotStrength strength)
+    public WebSession(WebMode mode, BotStrength strength, int localSeat = 0)
     {
         Mode = mode;
         Strength = strength;
+
+        // Hotseat has no remote side, so both seats are played from this keyboard.
+        LocalSeat = mode switch
+        {
+            WebMode.Hotseat => -1,
+            WebMode.Online => localSeat,
+            _ => 0,
+        };
 
         // WebAssembly runs the search on the only thread there is, so the budget is
         // also how long the page stops answering. Kept short on purpose.
@@ -40,6 +49,9 @@ public sealed class WebSession
     public WebMode Mode { get; }
 
     public BotStrength Strength { get; }
+
+    /// <summary>Which seat this browser plays, or -1 when it plays both.</summary>
+    public int LocalSeat { get; }
 
     public GameState State { get; private set; }
 
@@ -55,9 +67,18 @@ public sealed class WebSession
 
     public bool IsBotTurn => !IsOver && _bot is not null && State.SideToMove == 1;
 
-    public bool IsHumanTurn => !IsOver && !IsBotTurn;
+    /// <summary>Whether the person at this keyboard may move right now.</summary>
+    public bool IsHumanTurn =>
+        !IsOver && !IsBotTurn && (LocalSeat < 0 || State.SideToMove == LocalSeat);
 
-    public bool CanUndo => _bot is null ? _moves.Count > 0 : _moves.Count >= 2;
+    // Taking a move back needs the other player's agreement, which there is no way to
+    // ask for — so online games do not offer it.
+    public bool CanUndo => Mode switch
+    {
+        WebMode.Online => false,
+        WebMode.Hotseat => _moves.Count > 0,
+        _ => _moves.Count >= 2,
+    };
 
     public bool Apply(Move move)
     {
@@ -110,7 +131,9 @@ public sealed class WebSession
 
     public string PlayerName(int player)
     {
+        if (Mode == WebMode.Online) return player == LocalSeat ? "You" : "Opponent";
         if (_bot is null) return $"Player {player + 1}";
+
         return player == 0 ? "You" : _bot.Name;
     }
 }

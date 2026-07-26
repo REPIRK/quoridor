@@ -17,7 +17,8 @@ a player without a route.
 
 The desktop build has local play, three engine strengths, a chess clock, a mode where
 two engines play each other, review of the game so far, and a light and a dark theme.
-The browser build is deliberately smaller: play a friend or play the engine.
+The browser build is smaller, but it is the one you can share: play the engine, play a
+friend on the same screen, or **send someone a link and play them online**.
 
 | | |
 | --- | --- |
@@ -106,6 +107,20 @@ depth 4 : depth 2      21 : 3
 depth 6 : depth 4      14 : 9
 depth 4 : heuristic    23 : 1
 ```
+
+### Playing someone online, with no server
+
+The site is on static hosting, so there is no backend to relay moves through and none
+to pay for. The two browsers connect straight to each other over a WebRTC data channel:
+create a game, send the link, and the game starts when the other person opens it. Moves
+travel as their notation — `e2`, `e6h` — carrying a ply number so a duplicate or a
+message that overtook another is dropped rather than guessed at.
+
+A free public signalling service introduces the two browsers to each other. It is used
+once, at the start; after that nothing else is in the path, and a game already running
+is unaffected if that service goes down. Two honest limitations: a new game cannot be
+started while it is down, and some strict networks block the direct connection outright.
+A real relay server would fix both, and would need hosting.
 
 ### Things that did not work
 
