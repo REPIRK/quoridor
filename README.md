@@ -5,6 +5,9 @@ A Quoridor game for Windows, and the alpha-beta engine behind it.
 **[Play it in your browser →](https://REPIRK.github.io/quoridor/)**
 — the same engine, compiled to WebAssembly. No install, no account.
 
+**[Download for Windows →](https://github.com/REPIRK/quoridor/releases/latest)**
+— one file, nothing to install, no .NET needed.
+
 *Русская версия с подробностями по движку: [README.ru.md](README.ru.md).*
 
 ---

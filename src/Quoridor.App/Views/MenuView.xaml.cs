@@ -29,8 +29,11 @@ public partial class MenuView : UserControl
     };
 
     private CancellationTokenSource? _demoCancellation;
+    private NetPeer? _peer;
+    private bool _handedOver;
     private bool _rulesOpen;
     private bool _settingsOpen;
+    private bool _networkOpen;
 
     public MenuView(MainWindow host)
     {
@@ -47,6 +50,11 @@ public partial class MenuView : UserControl
         BotButton.Click += (_, _) => _host.StartGame(
             GameOptions.VersusBot(SelectedStrength(), SelectedClock(), MoveFirstOption.IsChecked == true));
         SpectateButton.Click += (_, _) => _host.StartGame(GameOptions.Spectate(SelectedStrength()));
+
+        NetworkButton.Click += (_, _) => ShowNetwork(true);
+        CloseNetworkButton.Click += (_, _) => ShowNetwork(false);
+        HostButton.Click += (_, _) => StartHosting();
+        JoinButton.Click += (_, _) => StartJoining();
         RulesButton.Click += (_, _) => ShowRules(true);
         CloseRulesButton.Click += (_, _) => ShowRules(false);
         QuitButton.Click += (_, _) => Application.Current.Shutdown();
@@ -76,6 +84,10 @@ public partial class MenuView : UserControl
         {
             Palette.Changed -= themeHandler;
             StopDemo();
+
+            // The peer is handed to the game view once a game starts; anything still
+            // sitting here was abandoned.
+            if (!_handedOver) _peer?.Dispose();
         };
 
         KeyDown += (_, e) =>
@@ -272,6 +284,100 @@ public partial class MenuView : UserControl
             });
     }
 
+    // =============================================================== network ==
+
+    private void StartHosting()
+    {
+        NetPeer peer = FreshPeer();
+
+        NetworkStatus.Text = $"Waiting for the other player on port {NetPeer.DefaultPort}.";
+
+        IReadOnlyList<string> addresses = NetPeer.LocalAddresses();
+        NetworkAddresses.Text = addresses.Count > 0
+            ? "They should type:  " + string.Join("   or   ", addresses)
+            : "No network address found — is this machine on a network?";
+
+        _ = peer.HostAsync(NetPeer.DefaultPort);
+    }
+
+    private void StartJoining()
+    {
+        string address = AddressBox.Text.Trim();
+
+        if (address.Length == 0)
+        {
+            NetworkStatus.Text = "Type the address the host read out.";
+            return;
+        }
+
+        // "1.2.3.4" or "1.2.3.4:25123" — the port is only worth typing if it was changed.
+        int port = NetPeer.DefaultPort;
+        int colon = address.LastIndexOf(':');
+
+        if (colon > 0 && int.TryParse(address[(colon + 1)..], out int typed))
+        {
+            port = typed;
+            address = address[..colon];
+        }
+
+        NetPeer peer = FreshPeer();
+        NetworkStatus.Text = $"Connecting to {address}…";
+        NetworkAddresses.Text = string.Empty;
+
+        _ = peer.JoinAsync(address, port);
+    }
+
+    private NetPeer FreshPeer()
+    {
+        _peer?.Dispose();
+        _handedOver = false;
+
+        var peer = new NetPeer();
+        peer.Changed += () => Dispatcher.Invoke(() => OnPeerChanged(peer));
+
+        _peer = peer;
+        return peer;
+    }
+
+    private void OnPeerChanged(NetPeer peer)
+    {
+        if (!ReferenceEquals(peer, _peer)) return;
+
+        switch (peer.State)
+        {
+            case NetState.Connected:
+                // Hand the live connection to the game; it owns it from here.
+                _handedOver = true;
+                _host.StartNetworkGame(peer);
+                break;
+
+            case NetState.Failed:
+                NetworkStatus.Text = peer.Trouble;
+                NetworkAddresses.Text = string.Empty;
+                break;
+        }
+    }
+
+    private void ShowNetwork(bool visible)
+    {
+        if (_networkOpen == visible) return;
+        _networkOpen = visible;
+
+        if (visible)
+        {
+            NetworkOverlay.Visibility = Visibility.Visible;
+            NetworkStatus.Text = string.Empty;
+            NetworkAddresses.Text = string.Empty;
+        }
+        else
+        {
+            _peer?.Dispose();
+            _peer = null;
+        }
+
+        Fade(NetworkOverlay, NetworkScale, visible);
+    }
+
     // ============================================================== settings ==
 
     private void BuildSettings()
@@ -327,20 +433,25 @@ public partial class MenuView : UserControl
         _settingsOpen = visible;
 
         if (visible) SettingsOverlay.Visibility = Visibility.Visible;
+        Fade(SettingsOverlay, SettingsScale, visible);
+    }
 
+    /// <summary>Shared entrance and exit for the three overlays this screen can raise.</summary>
+    private static void Fade(UIElement overlay, ScaleTransform scale, bool visible)
+    {
         var fade = new DoubleAnimation(visible ? 1 : 0, TimeSpan.FromMilliseconds(visible ? 220 : 160));
         if (!visible)
-            fade.Completed += (_, _) => SettingsOverlay.Visibility = Visibility.Collapsed;
+            fade.Completed += (_, _) => overlay.Visibility = Visibility.Collapsed;
 
-        SettingsOverlay.BeginAnimation(OpacityProperty, fade);
+        overlay.BeginAnimation(OpacityProperty, fade);
 
-        var scale = new DoubleAnimation(visible ? 1 : 0.97, TimeSpan.FromMilliseconds(visible ? 320 : 160))
+        var grow = new DoubleAnimation(visible ? 1 : 0.97, TimeSpan.FromMilliseconds(visible ? 320 : 160))
         {
             EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut },
         };
 
-        SettingsScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
-        SettingsScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
     }
 
     // ================================================================= rules ==
@@ -351,19 +462,6 @@ public partial class MenuView : UserControl
         _rulesOpen = visible;
 
         if (visible) RulesOverlay.Visibility = Visibility.Visible;
-
-        var fade = new DoubleAnimation(visible ? 1 : 0, TimeSpan.FromMilliseconds(visible ? 220 : 160));
-        if (!visible)
-            fade.Completed += (_, _) => RulesOverlay.Visibility = Visibility.Collapsed;
-
-        RulesOverlay.BeginAnimation(OpacityProperty, fade);
-
-        var scale = new DoubleAnimation(visible ? 1 : 0.97, TimeSpan.FromMilliseconds(visible ? 320 : 160))
-        {
-            EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut },
-        };
-
-        RulesScale.BeginAnimation(ScaleTransform.ScaleXProperty, scale);
-        RulesScale.BeginAnimation(ScaleTransform.ScaleYProperty, scale);
+        Fade(RulesOverlay, RulesScale, visible);
     }
 }

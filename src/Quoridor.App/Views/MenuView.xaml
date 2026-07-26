@@ -29,6 +29,7 @@
                     <Button x:Name="LocalButton" Style="{StaticResource Button.Menu}" Content="Local match" />
                     <Button x:Name="BotButton" Style="{StaticResource Button.Menu}" Content="Play the bot" />
                     <Button x:Name="SpectateButton" Style="{StaticResource Button.Menu}" Content="Watch two engines" />
+                    <Button x:Name="NetworkButton" Style="{StaticResource Button.Menu}" Content="Play over the network" />
                     <Button x:Name="RulesButton" Style="{StaticResource Button.Menu}" Content="How to play" />
                     <Button x:Name="QuitButton" Style="{StaticResource Button.Menu}" Content="Quit" />
                 </StackPanel>
@@ -105,6 +106,70 @@
                         Style="{StaticResource Button.Ghost}"
                         Content="Light theme" />
             </StackPanel>
+        </Grid>
+
+        <!-- ================================================ network overlay ==== -->
+        <Grid x:Name="NetworkOverlay"
+              Background="{DynamicResource Brush.Overlay}"
+              Visibility="Collapsed"
+              Opacity="0">
+            <Border x:Name="NetworkCard"
+                    Style="{StaticResource Card}"
+                    MaxWidth="580"
+                    Padding="36,32"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="NetworkScale" ScaleX="0.96" ScaleY="0.96" />
+                </Border.RenderTransform>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Text.Display}" FontSize="30" Text="Play over the network" />
+
+                    <TextBlock Style="{StaticResource Text.Body}" Margin="0,18,0,0"
+                               Text="One of you hosts and reads out an address; the other types it in. On the same network this needs nothing else — no account, no server, no internet." />
+
+                    <Rectangle Style="{StaticResource Rule}" Margin="0,22,0,20" />
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="HostButton" Style="{StaticResource Button.Ghost}"
+                                Content="Host a game" Padding="18,9" Margin="0,0,10,0" />
+                        <TextBox x:Name="AddressBox"
+                                 Width="190"
+                                 Padding="10,8"
+                                 Margin="0,0,8,0"
+                                 VerticalContentAlignment="Center"
+                                 FontFamily="Consolas"
+                                 FontSize="12.5"
+                                 Background="Transparent"
+                                 Foreground="{DynamicResource Brush.Text}"
+                                 BorderBrush="{DynamicResource Brush.Line}"
+                                 BorderThickness="1" />
+                        <Button x:Name="JoinButton" Style="{StaticResource Button.Ghost}"
+                                Content="Join" Padding="18,9" />
+                    </StackPanel>
+
+                    <TextBlock x:Name="NetworkStatus"
+                               Style="{StaticResource Text.Body}"
+                               Margin="0,20,0,0"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock x:Name="NetworkAddresses"
+                               Style="{StaticResource Text.Mono}"
+                               Margin="0,10,0,0"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,20,0,0" TextWrapping="Wrap"
+                               Text="Across the internet the host has to forward the port. If that is a nuisance, the browser version connects two people from a link with nothing to set up." />
+
+                    <Button x:Name="CloseNetworkButton"
+                            Style="{StaticResource Button.Ghost}"
+                            Content="Cancel"
+                            HorizontalAlignment="Right"
+                            Margin="0,24,0,0" />
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- =============================================== settings overlay ==== -->

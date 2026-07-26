@@ -1,0 +1,48 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # Nothing ships that has not passed the rules and engine checks.
+      - name: Checks
+        run: dotnet run --project tests/Quoridor.Selftest -c Release
+
+      # Self-contained and single-file: the person downloading this should not have to
+      # know what .NET is.
+      - name: Publish
+        run: >
+          dotnet publish src/Quoridor.App/Quoridor.App.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none
+          -o release
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create ${{ github.ref_name }} release/Quoridor.exe
+          --title "Quoridor ${{ github.ref_name }}"
+          --notes "Windows app. Download **Quoridor.exe** and run it — nothing to install, no .NET needed.
+
+          Local play, three engine strengths, a chess clock, engine against engine, game review, and play against someone else over your network.
+
+          Prefer not to download anything? The browser version is at https://repirk.github.io/quoridor/"

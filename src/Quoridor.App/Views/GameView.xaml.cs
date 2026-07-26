@@ -24,6 +24,7 @@ public partial class GameView : UserControl
 
     private readonly DispatcherTimer? _clockTimer;
     private readonly Stopwatch _clockStopwatch = new();
+    private readonly NetPeer? _peer;
 
     private CancellationTokenSource? _thinking;
     private bool _busy;
@@ -31,12 +32,19 @@ public partial class GameView : UserControl
     /// <summary>Ply being looked at while stepping back through the game; null means live.</summary>
     private int? _reviewPly;
 
-    public GameView(MainWindow host, GameOptions options)
+    public GameView(MainWindow host, GameOptions options, NetPeer? peer = null)
     {
         _host = host;
         _session = new GameSession(options);
+        _peer = peer;
 
         InitializeComponent();
+
+        if (_peer is not null)
+        {
+            _peer.Received += line => Dispatcher.Invoke(() => OnPeerMessage(line));
+            _peer.Changed += () => Dispatcher.Invoke(UpdateUi);
+        }
 
         ModeLabel.Text = options.Title;
 
@@ -105,6 +113,7 @@ public partial class GameView : UserControl
             Palette.Changed -= themeHandler;
             _clockTimer?.Stop();
             _thinking?.Cancel();
+            _peer?.Dispose();
         };
 
         Loaded += (_, _) =>
@@ -128,7 +137,16 @@ public partial class GameView : UserControl
         {
             if (_busy || !_session.IsHumanTurn) return;
 
+            int ply = _session.Moves.Count;
+
             await PlayAsync(move);
+
+            if (_peer is not null)
+            {
+                await _peer.SendAsync($"move|{ply}|{Notation.Format(move)}");
+                return;
+            }
+
             await RunEngineAsync();
         }
         catch (OperationCanceledException)
@@ -199,6 +217,39 @@ public partial class GameView : UserControl
         }
     }
 
+    /// <summary>
+    /// A move from the other side. The ply guards against a duplicate or a message that
+    /// overtook another; anything that does not line up is dropped rather than guessed
+    /// at, because both sides hold the same position and can afford to wait.
+    /// </summary>
+    private async void OnPeerMessage(string line)
+    {
+        try
+        {
+            if (line == "restart")
+            {
+                Restart(broadcast: false);
+                return;
+            }
+
+            string[] parts = line.Split('|');
+
+            if (parts.Length != 3 ||
+                parts[0] != "move" ||
+                !int.TryParse(parts[1], out int ply) ||
+                ply != _session.Moves.Count ||
+                !Notation.TryParse(parts[2], out Move move))
+            {
+                return;
+            }
+
+            await PlayAsync(move);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
     private void Undo()
     {
         if (_busy) return;
@@ -212,11 +263,16 @@ public partial class GameView : UserControl
         StartClock();
     }
 
-    private void Restart()
+    private void Restart() => Restart(broadcast: true);
+
+    private void Restart(bool broadcast)
     {
         // Rebuilding the board mid-animation would let the finishing animation write
         // the old position back over the fresh one.
         if (_busy) return;
+
+        // Over the network a restart is a joint decision, so tell the other side.
+        if (broadcast && _peer is not null) _ = _peer.SendAsync("restart");
 
         _thinking?.Cancel();
         _session.Restart();
@@ -434,6 +490,22 @@ public partial class GameView : UserControl
         }
 
         int side = state.SideToMove;
+
+        if (_peer is not null)
+        {
+            if (!_peer.IsConnected)
+            {
+                StatusText.Text = "Disconnected";
+                HintText.Text = _peer.Trouble.Length > 0 ? _peer.Trouble : "The link to the other player is gone.";
+                return;
+            }
+
+            StatusText.Text = _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
+            HintText.Text = state.WallsOf(side) == 0
+                ? "No walls left — it is a straight race now."
+                : "Click a square to step, or hover a groove between squares to place a wall.";
+            return;
+        }
 
         if (_session.Options.Mode == GameMode.Spectate)
         {

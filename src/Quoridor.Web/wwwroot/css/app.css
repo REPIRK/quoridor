@@ -286,6 +286,9 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
 
 .setup .fine { color: var(--muted); font-size: 12.5px; margin: 22px 0 0; line-height: 1.5; }
 
+.setup a { color: var(--p0); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.setup a:hover { color: var(--p1); }
+
 .setup .online { margin: 18px 0 0; }
 .setup .online .row { margin-bottom: 10px; }
 .setup .online .fine { margin: 0 0 10px; }

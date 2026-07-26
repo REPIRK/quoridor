@@ -8,6 +8,7 @@ public enum GameMode
     Hotseat,
     VersusBot,
     Spectate,
+    Online,
 }
 
 public sealed record GameOptions(
@@ -24,12 +25,16 @@ public sealed record GameOptions(
     public static GameOptions Spectate(BotStrength strength) =>
         new(GameMode.Spectate, strength, TimeControl.None);
 
+    /// <summary>The host of a network game takes the first seat, and so the first move.</summary>
+    public static GameOptions Online(bool isHost) =>
+        new(GameMode.Online, BotStrength.Normal, TimeControl.None, HumanMovesFirst: isHost);
+
     /// <summary>
     /// Which seat the local player occupies. Player 0 always moves first by the rules,
     /// so "you move second" means taking seat 1 — and the board gets turned around so
     /// that seat is still the near edge.
     /// </summary>
-    public int HumanSeat => Mode == GameMode.VersusBot && !HumanMovesFirst ? 1 : 0;
+    public int HumanSeat => !HumanMovesFirst && Mode is GameMode.VersusBot or GameMode.Online ? 1 : 0;
 
     public string Title
     {
@@ -39,6 +44,7 @@ public sealed record GameOptions(
             {
                 GameMode.Hotseat => "Local match",
                 GameMode.Spectate => "Two engines",
+                GameMode.Online => "Network game",
                 _ => $"Versus {Strength.ToString().ToLowerInvariant()} bot",
             };
 
@@ -125,9 +131,18 @@ public sealed class GameSession
 
     public bool IsBotTurn => !IsOver && _agents[State.SideToMove] is not null;
 
-    public bool IsHumanTurn => !IsOver && _agents[State.SideToMove] is null;
+    /// <summary>
+    /// Whether the person at this keyboard may move. In a network game only one seat is
+    /// theirs; in a local match both are.
+    /// </summary>
+    public bool IsHumanTurn => !IsOver && _agents[State.SideToMove] is null &&
+        (Options.Mode != GameMode.Online || State.SideToMove == Options.HumanSeat);
 
-    /// <summary>In a bot game an undo rewinds a full round, so the human moves again.</summary>
+    /// <summary>
+    /// In a bot game an undo rewinds a full round, so the human moves again. Over the
+    /// network it would need the other player's agreement, which there is no way to ask
+    /// for, so it is not offered.
+    /// </summary>
     public bool CanUndo => Options.Mode switch
     {
         GameMode.Hotseat => _moves.Count > 0,
@@ -232,6 +247,9 @@ public sealed class GameSession
     {
         if (_agents[player] is { } agent)
             return Options.Mode == GameMode.Spectate && player == 0 ? "Engine" : agent.Name;
+
+        if (Options.Mode == GameMode.Online)
+            return player == Options.HumanSeat ? "You" : "Opponent";
 
         return Options.Mode == GameMode.Hotseat ? $"Player {player + 1}" : "You";
     }
