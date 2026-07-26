@@ -18,7 +18,7 @@ namespace Quoridor.App.Views;
 public partial class GameView : UserControl
 {
     private readonly MainWindow _host;
-    private readonly GameSession _session;
+    private GameSession _session;
     private readonly BoardView _board = new();
     private readonly PlayerCard[] _cards = new PlayerCard[2];
 
@@ -46,28 +46,7 @@ public partial class GameView : UserControl
             _peer.Changed += () => Dispatcher.Invoke(UpdateUi);
         }
 
-        ModeLabel.Text = options.Title;
-
-        // Whoever the local player is sits at the near edge, so the board turns around
-        // when they take the second seat.
-        _board.Flipped = options.HumanSeat == 1;
-
-        int nearPlayer = options.HumanSeat;
-        int farPlayer = nearPlayer ^ 1;
-
-        _cards[farPlayer] = new PlayerCard(farPlayer == 0 ? Palette.Accent0 : Palette.Accent1);
-        _cards[nearPlayer] = new PlayerCard(nearPlayer == 0 ? Palette.Accent0 : Palette.Accent1)
-        {
-            Margin = new Thickness(0, 22, 0, 0),
-        };
-
-        PlayerColumn.Children.Add(_cards[farPlayer]);
-        PlayerColumn.Children.Add(new Rectangle
-        {
-            Style = (Style)FindResource("Rule"),
-            Margin = new Thickness(0, 22, 0, 0),
-        });
-        PlayerColumn.Children.Add(_cards[nearPlayer]);
+        ApplySeating();
 
         BoardHost.Children.Add(_board);
         _board.MoveChosen += OnMoveChosen;
@@ -84,6 +63,11 @@ public partial class GameView : UserControl
         UndoButton.Click += (_, _) => Undo();
         RestartButton.Click += (_, _) => Restart();
         RematchButton.Click += (_, _) => Restart();
+        SwapSidesButton.Click += (_, _) => Restart(swap: true, broadcast: true);
+
+        // Changing places only means anything when the two sides are different.
+        if (options.Mode is GameMode.VersusBot or GameMode.Online)
+            SwapSidesButton.Visibility = Visibility.Visible;
         RoutesButton.Click += (_, _) => ToggleRoutes();
         ReviewPrevButton.Click += (_, _) => StepReview(-1);
         ReviewNextButton.Click += (_, _) => StepReview(+1);
@@ -171,6 +155,8 @@ public partial class GameView : UserControl
     {
         if (!_session.Apply(move)) return;
 
+        Sfx.Play(move.Kind == MoveKind.Pawn ? Sound.Move : Sound.Wall);
+
         _busy = true;
         UpdateUi();
 
@@ -226,9 +212,9 @@ public partial class GameView : UserControl
     {
         try
         {
-            if (line == "restart")
+            if (line is "restart" or "restart|swap")
             {
-                Restart(broadcast: false);
+                Restart(swap: line.EndsWith("swap", StringComparison.Ordinal), broadcast: false);
                 return;
             }
 
@@ -263,19 +249,68 @@ public partial class GameView : UserControl
         StartClock();
     }
 
-    private void Restart() => Restart(broadcast: true);
+    /// <summary>
+    /// Puts the local player on the near edge, whichever seat that is, and orders the
+    /// two cards to match. Called again when the players change places.
+    /// </summary>
+    private void ApplySeating()
+    {
+        GameOptions options = _session.Options;
 
-    private void Restart(bool broadcast)
+        ModeLabel.Text = options.Title;
+
+        // Whoever the local player is sits at the near edge, so the board turns around
+        // when they take the second seat.
+        _board.Flipped = options.HumanSeat == 1;
+        _board.Holes = Layouts.Holes(options.Layout);
+
+        int nearPlayer = options.HumanSeat;
+        int farPlayer = nearPlayer ^ 1;
+
+        _cards[farPlayer] = new PlayerCard(farPlayer == 0 ? Palette.Accent0 : Palette.Accent1);
+        _cards[nearPlayer] = new PlayerCard(nearPlayer == 0 ? Palette.Accent0 : Palette.Accent1)
+        {
+            Margin = new Thickness(0, 22, 0, 0),
+        };
+
+        PlayerColumn.Children.Clear();
+        PlayerColumn.Children.Add(_cards[farPlayer]);
+        PlayerColumn.Children.Add(new Rectangle
+        {
+            Style = (Style)FindResource("Rule"),
+            Margin = new Thickness(0, 22, 0, 0),
+        });
+        PlayerColumn.Children.Add(_cards[nearPlayer]);
+    }
+
+    private void Restart() => Restart(swap: false, broadcast: true);
+
+    private void Restart(bool swap, bool broadcast)
     {
         // Rebuilding the board mid-animation would let the finishing animation write
         // the old position back over the fresh one.
         if (_busy) return;
 
         // Over the network a restart is a joint decision, so tell the other side.
-        if (broadcast && _peer is not null) _ = _peer.SendAsync("restart");
+        if (broadcast && _peer is not null) _ = _peer.SendAsync(swap ? "restart|swap" : "restart");
 
         _thinking?.Cancel();
-        _session.Restart();
+
+        if (swap)
+        {
+            // A different seat changes the board's orientation and who the engine plays,
+            // which is the whole session — so it is built again rather than reset.
+            _session = new GameSession(_session.Options with
+            {
+                HumanMovesFirst = !_session.Options.HumanMovesFirst,
+            });
+
+            ApplySeating();
+        }
+        else
+        {
+            _session.Restart();
+        }
 
         HideResult();
         _board.Reset(_session.State, LastMove);
@@ -294,6 +329,13 @@ public partial class GameView : UserControl
     private void Finish()
     {
         _clockTimer?.Stop();
+
+        // In a hotseat or a watched game nobody at this keyboard lost, so it is a fanfare
+        // either way; against an opponent it depends on which seat is ours.
+        bool ours = _session.Options.Mode is GameMode.Hotseat or GameMode.Spectate ||
+                    _session.Winner == _session.Options.HumanSeat;
+
+        Sfx.Play(ours ? Sound.Win : Sound.Lose);
         ShowResult(_session.Winner);
     }
 

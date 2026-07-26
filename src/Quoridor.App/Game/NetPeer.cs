@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Quoridor.Core;
 
 namespace Quoridor.App.Game;
 
@@ -47,13 +48,17 @@ public sealed class NetPeer : IDisposable
 
     public bool IsConnected => State == NetState.Connected;
 
-    /// <summary>Which seat this instance plays: the host moves first.</summary>
+    /// <summary>Which seat this instance plays. The host picks; the other side is told.</summary>
     public int LocalSeat { get; private set; }
 
-    public async Task HostAsync(int port)
+    /// <summary>The board the host set up. Likewise agreed on connecting.</summary>
+    public BoardLayout Layout { get; private set; }
+
+    public async Task HostAsync(int port, int seat = 0, BoardLayout layout = BoardLayout.Open)
     {
         Close();
-        LocalSeat = 0;
+        LocalSeat = seat == 1 ? 1 : 0;
+        Layout = layout;
         Set(NetState.Listening);
 
         try
@@ -66,7 +71,7 @@ public sealed class NetPeer : IDisposable
             _listener.Stop();
             _listener = null;
 
-            Attach(client);
+            await AttachAsync(client, host: true);
         }
         catch (OperationCanceledException)
         {
@@ -82,13 +87,14 @@ public sealed class NetPeer : IDisposable
     {
         Close();
         LocalSeat = 1;
+        Layout = BoardLayout.Open;
         Set(NetState.Connecting);
 
         try
         {
             var client = new TcpClient();
             await client.ConnectAsync(address, port, _life.Token);
-            Attach(client);
+            await AttachAsync(client, host: false);
         }
         catch (OperationCanceledException)
         {
@@ -133,44 +139,84 @@ public sealed class NetPeer : IDisposable
         }
     }
 
-    private void Attach(TcpClient client)
+    /// <summary>
+    /// Completes the link. The side that set the game up chose the seats, so it says which
+    /// one is left before anything else crosses the wire, and the other side waits for
+    /// that line rather than assuming. A copy too old to send it just times out, which
+    /// leaves the seats where they always used to be.
+    /// </summary>
+    private async Task AttachAsync(TcpClient client, bool host)
     {
         _client = client;
         client.NoDelay = true;
 
         NetworkStream stream = client.GetStream();
-        _writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+        var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+        var reader = new StreamReader(stream, new UTF8Encoding(false));
+
+        _writer = writer;
+
+        if (host)
+        {
+            await writer.WriteLineAsync($"seat|{LocalSeat ^ 1}|{(int)Layout}");
+        }
+        else
+        {
+            using var handshake = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
+            handshake.CancelAfter(TimeSpan.FromSeconds(4));
+
+            string? hello = null;
+            try
+            {
+                hello = await reader.ReadLineAsync(handshake.Token);
+            }
+            catch (OperationCanceledException) when (!_life.IsCancellationRequested)
+            {
+            }
+
+            string[] terms = hello?.Split('|') ?? Array.Empty<string>();
+
+            if (terms.Length == 3 &&
+                terms[0] == "seat" &&
+                int.TryParse(terms[1], out int seat) && seat is 0 or 1 &&
+                int.TryParse(terms[2], out int shape) && Enum.IsDefined(typeof(BoardLayout), shape))
+            {
+                LocalSeat = seat;
+                Layout = (BoardLayout)shape;
+            }
+        }
 
         Set(NetState.Connected);
 
-        _ = Task.Run(() => ReadLoopAsync(stream), _life.Token);
+        _ = Task.Run(() => ReadLoopAsync(reader), _life.Token);
     }
 
-    private async Task ReadLoopAsync(NetworkStream stream)
+    private async Task ReadLoopAsync(StreamReader reader)
     {
-        using var reader = new StreamReader(stream, new UTF8Encoding(false));
-
-        try
+        using (reader)
         {
-            while (!_life.IsCancellationRequested)
+            try
             {
-                string? line = await reader.ReadLineAsync(_life.Token);
-
-                if (line is null)
+                while (!_life.IsCancellationRequested)
                 {
-                    Fail("The other player disconnected.");
-                    return;
-                }
+                    string? line = await reader.ReadLineAsync(_life.Token);
 
-                Received?.Invoke(line);
+                    if (line is null)
+                    {
+                        Fail("The other player disconnected.");
+                        return;
+                    }
+
+                    Received?.Invoke(line);
+                }
             }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Fail($"The connection dropped. {ex.Message}");
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Fail($"The connection dropped. {ex.Message}");
+            }
         }
     }
 

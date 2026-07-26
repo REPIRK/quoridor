@@ -5,8 +5,9 @@ A Quoridor game for Windows, and the alpha-beta engine behind it.
 **[Play it in your browser →](https://REPIRK.github.io/quoridor/)**
 — the same engine, compiled to WebAssembly. No install, no account.
 
-**[Download for Windows →](https://github.com/REPIRK/quoridor/releases/latest)**
-— one file, nothing to install, no .NET needed.
+**[Download for Windows →](https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe)**
+— one file, nothing to install, no .NET needed. (That link is the app itself. The
+"Source code" archives on the releases page are this repository, not the game.)
 
 *Русская версия с подробностями по движку: [README.ru.md](README.ru.md).*
 
@@ -19,9 +20,22 @@ stepping diagonally when a wall is behind it, and the rule that no wall may ever
 a player without a route.
 
 The desktop build has local play, three engine strengths, a chess clock, a mode where
-two engines play each other, review of the game so far, and a light and a dark theme.
-The browser build is smaller, but it is the one you can share: play the engine, play a
-friend on the same screen, or **send someone a link and play them online**.
+two engines play each other, review of the game so far, play over your own network, and
+a light and a dark theme. The browser build is smaller, but it is the one you can share:
+play the engine, play a friend on the same screen, or **send someone a link and play
+them online**. It works on a phone, and it keeps premoves and a move list.
+
+Either build lets you choose which side you take — before the game and again on a
+rematch — and either can be played on a board with squares taken out of play:
+
+| Board | |
+| --- | --- |
+| **Classic** | the game as it is normally played |
+| **Pillars** | four squares out of play, wide apart |
+| **Diamond** | four squares out of play around the centre |
+
+Both alternatives are symmetric under a half turn, so whatever a hole does to your
+route it does to your opponent's.
 
 | | |
 | --- | --- |
@@ -74,6 +88,12 @@ shortest route is a flood fill: one step advances the whole frontier in four shi
 four ANDs. **About 30 ns per query**, which matters because checking that a wall does
 not seal a player in runs it twice for each of ~30 candidate walls at every node.
 
+Those same four boards are what makes the alternative boards nearly free: a square out
+of play is sealed on all four sides, and its neighbours are sealed against stepping into
+it. After that the rules, the flood fill and the search need no idea that holes exist —
+they are already walls as far as the masks are concerned. The one place that does care
+is noted below.
+
 ### The engine
 
 Alpha-beta with a principal variation search: transposition table, killers, history,
@@ -86,6 +106,14 @@ opponent. And a wall provably cannot change any distance unless it closes an edg
 two squares whose distances differ, which is four array reads instead of a flood fill.
 That claim is exact, the search leans on it hard, and it is verified by exhaustive audit
 in the self-tests.
+
+The second shortcut is the one holes break. A wall can only cut the board in two if it
+joins a chain running from one border to another, so unless two of its three grid points
+already touch a wall or a border it provably cannot seal anyone in — and the two flood
+fills can be skipped. That argument knows about walls and borders; a square out of play
+is neither, and a chain could run to one and cut the board with nothing else attached.
+So on those boards the shortcut is simply not taken and the exact check always runs.
+Slower, and correct.
 
 ```
                      depth reached, one thread
@@ -117,7 +145,13 @@ The site is on static hosting, so there is no backend to relay moves through and
 to pay for. The two browsers connect straight to each other over a WebRTC data channel:
 create a game, send the link, and the game starts when the other person opens it. Moves
 travel as their notation — `e2`, `e6h` — carrying a ply number so a duplicate or a
-message that overtook another is dropped rather than guessed at.
+message that overtook another is dropped rather than guessed at. Whoever creates the
+game chooses the sides and the board, and says so in the first message across the
+link, so neither browser has to assume.
+
+The desktop app plays over a network too, but differently: one copy listens on a port
+and the other dials it, with no service in the middle at all. On the same network that
+needs nothing set up. The two builds do not talk to each other.
 
 A free public signalling service introduces the two browsers to each other. It is used
 once, at the start; after that nothing else is in the path, and a game already running

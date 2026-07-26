@@ -62,6 +62,11 @@ public sealed class BoardView : UserControl
     private bool _preferHorizontal = true;
     private bool _showRoutes;
     private int _hoverCell = -1;
+
+    /// <summary>The square rectangles, in screen order, so holes can be restyled later.</summary>
+    private readonly Rectangle[] _cells = new Rectangle[Board.CellCount];
+
+    private UInt128 _holes;
     private Move? _ghostMove;
     private bool _ghostLegal;
 
@@ -133,7 +138,45 @@ public sealed class BoardView : UserControl
             _flipped = value;
             BuildCoordinates();
             BuildGoalMarks();
+            ApplyHoles();
             Reset(_state);
+        }
+    }
+
+    /// <summary>
+    /// The squares taken out of play, as a cell mask. Drawn as gaps in the board rather
+    /// than as darker squares, so they read as somewhere there is nothing to stand on.
+    /// </summary>
+    public UInt128 Holes
+    {
+        get => _holes;
+        set
+        {
+            if (_holes == value) return;
+
+            _holes = value;
+            ApplyHoles();
+        }
+    }
+
+    private void ApplyHoles()
+    {
+        for (int row = 0; row < Board.Size; row++)
+        {
+            for (int col = 0; col < Board.Size; col++)
+            {
+                bool hole = (_holes & Board.Bit(Board.Index(row, col))) != 0;
+
+                // The squares were laid out in screen order, so a model cell has to be
+                // mapped through the same turn the rest of the board uses.
+                Rectangle square = _cells[Board.Index(ViewIndex(row), ViewIndex(col))];
+
+                square.Fill = hole ? null : Palette.BrushOf(Palette.Cell);
+                square.Stroke = hole ? Palette.BrushOf(Palette.Line) : null;
+                square.StrokeThickness = hole ? 1 : 0;
+                square.StrokeDashArray = hole ? new DoubleCollection { 3, 5 } : null;
+                square.Opacity = hole ? 0.5 : 0.9;
+            }
         }
     }
 
@@ -190,6 +233,7 @@ public sealed class BoardView : UserControl
                 };
                 Place(cell, Origin(col), Origin(row));
                 cellLayer.Children.Add(cell);
+                _cells[Board.Index(row, col)] = cell;
             }
         }
 
@@ -686,6 +730,21 @@ public sealed class BoardView : UserControl
         Cursor = Cursors.Arrow;
     }
 
+    /// <summary>
+    /// Re-reads what the cursor is pointing at without waiting for it to move.
+    ///
+    /// Hover normally only updates on mouse movement, so a cursor left resting on the
+    /// square you intend to take is dead when your turn arrives — you would have to
+    /// move off it and back before the click registered. The same applies after any
+    /// move, when what is legal under the cursor has changed.
+    /// </summary>
+    private void RefreshHover()
+    {
+        if (!_interactive || _busy || !_root.IsMouseOver) return;
+
+        UpdateHover(Mouse.GetPosition(_root));
+    }
+
     private void OnLeftClick(object sender, MouseButtonEventArgs e)
     {
         if (!_interactive || _busy) return;
@@ -715,6 +774,7 @@ public sealed class BoardView : UserControl
             SetPulse(player, live && player == active);
 
         RefreshRoutes();
+        RefreshHover();
 
         if (!_interactive || !live) return;
 

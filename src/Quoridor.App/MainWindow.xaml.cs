@@ -22,7 +22,15 @@ public partial class MainWindow : Window
 
         Palette.Changed += _ => ApplyTitleBarTheme();
 
-        Loaded += (_, _) => ShowMenu();
+        Loaded += (_, _) =>
+        {
+            ShowMenu();
+
+            // Synthesising the sounds takes a moment, and none of it needs the UI thread.
+            Task.Run(Sfx.Warm).ContinueWith(
+                _ => { if (Settings.Current.Music) Sfx.Music(true); },
+                TaskScheduler.FromCurrentSynchronizationContext());
+        };
         SourceInitialized += (_, _) => ApplyTitleBarTheme();
         PreviewKeyDown += OnPreviewKeyDown;
     }
@@ -33,7 +41,7 @@ public partial class MainWindow : Window
 
     /// <summary>Starts a game on an already-connected link. The game view owns it from here.</summary>
     public void StartNetworkGame(NetPeer peer) =>
-        Navigate(new GameView(this, GameOptions.Online(peer.LocalSeat == 0), peer));
+        Navigate(new GameView(this, GameOptions.Online(peer.LocalSeat == 0, peer.Layout), peer));
 
     /// <summary>
     /// Cross-fades the old view out and the new one in, with a short vertical

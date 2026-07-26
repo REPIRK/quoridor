@@ -32,6 +32,12 @@ public sealed class Settings
     /// <summary>Whether the shortest routes are drawn without being asked for.</summary>
     public bool ShowRoutes { get; set; }
 
+    /// <summary>The click of a step and the knock of a wall. On, because they are brief.</summary>
+    public bool Sound { get; set; } = true;
+
+    /// <summary>The ambient loop. Off, because that is a matter of taste.</summary>
+    public bool Music { get; set; }
+
     public static Settings Current { get; } = Load();
 
     public TimeSpan EngineMoveTime => TimeSpan.FromMilliseconds(EngineMoveTimeMs);

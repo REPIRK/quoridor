@@ -41,7 +41,11 @@ jobs:
         run: >
           gh release create ${{ github.ref_name }} release/Quoridor.exe
           --title "Quoridor ${{ github.ref_name }}"
-          --notes "Windows app. Download **Quoridor.exe** and run it — nothing to install, no .NET needed.
+          --notes "### Download **Quoridor.exe** below — that one file is the game.
+
+          Run it and play. Nothing to install, no .NET needed.
+
+          The two *Source code* archives are added by GitHub automatically. They are this repository, not the game — you do not need them.
 
           Local play, three engine strengths, a chess clock, engine against engine, game review, and play against someone else over your network.
 

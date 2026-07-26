@@ -11,6 +11,9 @@
         <div class="actions">
             <button class="ghost" @onclick="OpenSetup">New game</button>
             <button class="ghost @(_routes ? "on" : "")" @onclick="() => _routes = !_routes">Routes</button>
+            <button class="ghost @(_confirm ? "on" : "")" @onclick="() => _confirm = !_confirm">Confirm</button>
+            <button class="ghost @(_sound ? "on" : "")" @onclick="() => _sound = !_sound">Sound</button>
+            <button class="ghost @(_music ? "on" : "")" @onclick="ToggleMusic">Music</button>
             <button class="ghost" @onclick="() => _light = !_light">@(_light ? "Dark" : "Light")</button>
         </div>
     </header>
@@ -41,10 +44,15 @@
         </aside>
 
         <div class="board-wrap">
-            <BoardView State="_session.State"
-                       Interactive="@(_session.IsHumanTurn && !_thinking && !_session.IsOver)"
+            <BoardView State="Shown"
+                       Interactive="@(_session.IsHumanTurn && !_thinking && !_session.IsOver && _reviewPly is null)"
                        ShowRoutes="_routes"
-                       LastMove="_session.LastMove"
+                       Flipped="@(_session.LocalSeat == 1)"
+                       Holes="_session.Holes"
+                       ConfirmMoves="_confirm"
+                       LastMove="ShownLastMove"
+                       Premove="_premove"
+                       OnPremove="move => _premove = move"
                        OnMove="OnMove"
                        OnPreview="text => _preview = text" />
         </div>
@@ -64,7 +72,10 @@
             <ol class="moves">
                 @for (int row = 0; row * 2 < _session.Moves.Count; row++)
                 {
-                    <li>
+                    int index = row;
+                    bool here = _reviewPly is { } ply && ply > 0 && (ply - 1) / 2 == index;
+
+                    <li class="@(here ? "here" : "")" @onclick="() => Review(Math.Min((index + 1) * 2, _session.Moves.Count))">
                         <span class="n">@(row + 1).</span>
                         <span>@Notation.Format(_session.Moves[row * 2])</span>
                         <span>@(row * 2 + 1 < _session.Moves.Count ? Notation.Format(_session.Moves[row * 2 + 1]) : "")</span>
@@ -76,11 +87,19 @@
                 }
             </ol>
 
+            <div class="actions review">
+                <button class="ghost" disabled="@(_session.Moves.Count == 0)"
+                        @onclick="() => Review((_reviewPly ?? _session.Moves.Count) - 1)">&#x25C0;</button>
+                <button class="ghost" disabled="@(_reviewPly is null)"
+                        @onclick="() => Review((_reviewPly ?? 0) + 1)">&#x25B6;</button>
+                <button class="ghost" disabled="@(_reviewPly is null)" @onclick="() => Review(null)">Live</button>
+            </div>
+
             <hr />
 
             <div class="actions">
                 <button class="ghost" disabled="@(!_session.CanUndo || _thinking)" @onclick="Undo">Undo</button>
-                <button class="ghost" @onclick="Restart">Restart</button>
+                <button class="ghost" @onclick="() => Restart(false)">Restart</button>
             </div>
         </aside>
     </main>
@@ -92,7 +111,11 @@
                 <h1>@WinnerLabel</h1>
                 <p>@_session.Moves.Count moves played</p>
                 <div class="actions">
-                    <button class="ghost" @onclick="Restart">Rematch</button>
+                    <button class="ghost" @onclick="() => Restart(false)">Rematch</button>
+                    @if (_session.Mode != WebMode.Hotseat)
+                    {
+                        <button class="ghost" @onclick="() => Restart(true)">Swap sides</button>
+                    }
                     <button class="ghost" @onclick="OpenSetup">New game</button>
                 </div>
             </div>
@@ -131,11 +154,41 @@
                     </div>
                 }
 
+                @if (_net.State == NetState.Idle)
+                {
+                    <div class="row">
+                        <span class="label">Board</span>
+                        @foreach (BoardLayout option in Layouts.All)
+                        {
+                            BoardLayout choice = option;
+                            <button class="seg @(_layout == choice ? "on" : "")"
+                                    @onclick="() => _layout = choice">@Layouts.Name(choice)</button>
+                        }
+                    </div>
+                    <p class="fine">@Layouts.Description(_layout)</p>
+                }
+
+                @if (_mode == WebMode.VersusBot)
+                {
+                    <div class="row">
+                        <span class="label">You play</span>
+                        <button class="seg @(_seat == 0 ? "on" : "")" @onclick="() => _seat = 0">First</button>
+                        <button class="seg @(_seat == 1 ? "on" : "")" @onclick="() => _seat = 1">Second</button>
+                    </div>
+                }
+
                 @if (_mode == WebMode.Online)
                 {
                     <div class="online">
                         @if (_net.State == NetState.Idle)
                         {
+                            @* Only the player who creates the game picks the sides; the one who
+                               opens the link takes whatever is left. *@
+                            <div class="row">
+                                <span class="label">You play</span>
+                                <button class="seg @(_seat == 0 ? "on" : "")" @onclick="() => _seat = 0">First</button>
+                                <button class="seg @(_seat == 1 ? "on" : "")" @onclick="() => _seat = 1">Second</button>
+                            </div>
                             <div class="row">
                                 <button class="ghost primary" @onclick="HostGame">Create a game</button>
                             </div>
@@ -195,7 +248,7 @@
 
                 <p class="fine">
                     Prefer it on your desktop?
-                    <a href="https://github.com/REPIRK/quoridor/releases/latest" target="_blank" rel="noopener">
+                    <a href="https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe">
                         Download the Windows app
                     </a>
                     — it adds clocks, engine against engine, game review and play over your
@@ -221,12 +274,33 @@
     private WebMode _mode = WebMode.VersusBot;
     private BotStrength _strength = BotStrength.Hard;
 
+    /// <summary>The seat this browser takes in the game being set up. Seat 0 moves first.</summary>
+    private int _seat;
+
+    private BoardLayout _layout = BoardLayout.Open;
+
     private bool _showSetup = true;
     private bool _thinking;
     private bool _light;
     private bool _routes;
+    private bool _confirm;
+    private bool _touch;
+    private bool _sound = true;
+    private bool _music;
     private string? _preview;
     private string _joinCode = string.Empty;
+
+    /// <summary>A move chosen during the opponent's turn, played the moment ours starts.</summary>
+    private Move? _premove;
+
+    /// <summary>Ply being looked at while stepping back; null means live.</summary>
+    private int? _reviewPly;
+
+    private GameState Shown => _reviewPly is { } ply ? _session.StateAfter(ply) : _session.State;
+
+    private Move? ShownLastMove => _reviewPly is { } ply
+        ? ply > 0 ? _session.Moves[ply - 1] : null
+        : _session.LastMove;
 
     protected override async Task OnInitializedAsync()
     {
@@ -245,14 +319,64 @@
         await _net.JoinAsync(invite);
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // A touch screen has no hover, so one stray tap would move a pawn. Confirmation
+        // is the right default there and the wrong one with a mouse.
+        try
+        {
+            bool coarse = await Js.InvokeAsync<bool>("eval", "matchMedia('(hover: none)').matches");
+            if (!coarse) return;
+
+            _touch = true;
+            _confirm = true;
+            StateHasChanged();
+        }
+        catch (Exception)
+        {
+            // Not worth a broken page if the check is unavailable.
+        }
+    }
+
+    // ================================================================= review ==
+
+    /// <summary>
+    /// Steps back and forth through the game. Null returns to the live position.
+    /// </summary>
+    private void Review(int? ply)
+    {
+        int played = _session.Moves.Count;
+
+        if (ply is null || ply >= played)
+        {
+            _reviewPly = null;
+            return;
+        }
+
+        _reviewPly = Math.Clamp(ply.Value, 0, played);
+        _preview = null;
+    }
+
     private string ShareLink => $"{Nav.BaseUri}?join={_net.Code}";
 
-    private string Title => _session.Mode switch
+    private string Title
     {
-        WebMode.Hotseat => "Two players, one screen",
-        WebMode.Online => _net.IsConnected ? "Online game" : "Online game · disconnected",
-        _ => $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine",
-    };
+        get
+        {
+            string name = _session.Mode switch
+            {
+                WebMode.Hotseat => "Two players, one screen",
+                WebMode.Online => _net.IsConnected ? "Online game" : "Online game · disconnected",
+                _ => $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine",
+            };
+
+            return _session.Layout == BoardLayout.Open
+                ? name
+                : $"{name} · {Layouts.Name(_session.Layout).ToLowerInvariant()}";
+        }
+    }
 
     private string Status
     {
@@ -279,8 +403,11 @@
             if (_session.Mode == WebMode.Online && !_net.IsConnected)
                 return _net.Trouble.Length > 0 ? _net.Trouble : "The connection is gone.";
 
-            return _session.State.WallsOf(_session.State.SideToMove) == 0
-                ? "No walls left — it is a straight race now."
+            if (_session.State.WallsOf(_session.State.SideToMove) == 0)
+                return "No walls left — it is a straight race now.";
+
+            return _touch
+                ? "Tap a square to step, or the gap between squares for a wall. Tap again to confirm."
                 : "Click a square to step, or hover a groove between squares to place a wall.";
         }
     }
@@ -292,12 +419,10 @@
             int winner = _session.Winner;
             if (winner < 0) return string.Empty;
 
-            return _session.Mode switch
-            {
-                WebMode.VersusBot => winner == 0 ? "You win" : "The engine wins",
-                WebMode.Online => winner == _session.LocalSeat ? "You win" : "Your opponent wins",
-                _ => $"{_session.PlayerName(winner)} wins",
-            };
+            if (_session.Mode == WebMode.Hotseat) return $"{_session.PlayerName(winner)} wins";
+            if (winner == _session.LocalSeat) return "You win";
+
+            return _session.Mode == WebMode.VersusBot ? "The engine wins" : "Your opponent wins";
         }
     }
 
@@ -340,26 +465,95 @@
         if (mode != WebMode.Online) ResetNet();
     }
 
-    private void StartGame()
+    private async Task StartGame()
     {
-        _session = new WebSession(_mode, _strength);
+        _session = new WebSession(_mode, _strength, _seat, _layout);
         _showSetup = false;
-        _preview = null;
+        ResetPlayState();
+
+        // Taking the second seat means the engine opens.
+        if (_session.IsBotTurn) await RunEngine();
     }
 
-    private void Restart()
+    /// <summary>
+    /// Begins again, optionally with the players changing places. Online this has to be
+    /// agreed, so the same instruction goes to the other browser and both act on it.
+    /// </summary>
+    private async Task Restart(bool swap)
     {
-        // Online, a restart has to be agreed: tell the other side and both begin again.
-        _session = new WebSession(_session.Mode, _session.Strength, _session.LocalSeat < 0 ? 0 : _session.LocalSeat);
-        _preview = null;
+        int seat = _session.LocalSeat < 0 ? -1 : swap ? _session.LocalSeat ^ 1 : _session.LocalSeat;
 
-        if (_session.Mode == WebMode.Online) _ = _net.SendAsync("restart");
+        if (_session.Mode == WebMode.Online)
+            await _net.SendAsync(swap ? "restart|swap" : "restart");
+
+        _seat = seat < 0 ? 0 : seat;
+        _session = new WebSession(_session.Mode, _session.Strength, _seat, _session.Layout);
+        ResetPlayState();
+
+        if (_session.IsBotTurn) await RunEngine();
     }
 
     private void Undo()
     {
         _session.Undo();
+        ResetPlayState();
+    }
+
+    // =================================================================== sound ==
+
+    private IJSObjectReference? _sfx;
+
+    /// <summary>
+    /// The sounds are synthesised in the browser, so the module is the whole of it —
+    /// there is nothing to download and nothing to wait for. Loaded on the first sound
+    /// because a page may never make one.
+    /// </summary>
+    private async Task Sfx(string kind)
+    {
+        if (!_sound) return;
+
+        try
+        {
+            _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+            await _sfx.InvokeVoidAsync("play", kind);
+        }
+        catch (Exception)
+        {
+            // Audio is a nicety; a browser that refuses it should not break the game.
+        }
+    }
+
+    /// <summary>The sound a move makes, and the one the end of the game makes.</summary>
+    private async Task SoundFor(Move move)
+    {
+        await Sfx(move.Kind == MoveKind.Pawn ? "move" : "wall");
+
+        if (!_session.IsOver) return;
+
+        bool ours = _session.Mode == WebMode.Hotseat || _session.Winner == _session.LocalSeat;
+        await Sfx(ours ? "win" : "lose");
+    }
+
+    private async Task ToggleMusic()
+    {
+        _music = !_music;
+
+        try
+        {
+            _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+            await _sfx.InvokeVoidAsync("music", _music);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>Anything that only made sense for the position we just left.</summary>
+    private void ResetPlayState()
+    {
         _preview = null;
+        _premove = null;
+        _reviewPly = null;
     }
 
     // =================================================================== link ==
@@ -378,26 +572,64 @@
         _net.Received += OnNetMessage;
     }
 
-    private void OnNetChanged() => InvokeAsync(() =>
+    private void OnNetChanged() => InvokeAsync(async () =>
     {
-        // Whoever created the game takes the first seat, which is also the first move.
+        // The player who created the game chose the sides; the one who opened the link
+        // starts on the assumption of the second seat and is told otherwise straight away.
         if (_net.IsConnected && (_session.Mode != WebMode.Online || _showSetup))
         {
-            int seat = _net.Code.Length > 0 ? 0 : 1;
-            _session = new WebSession(WebMode.Online, BotStrength.Normal, seat);
+            bool host = _net.Code.Length > 0;
+
+            // The player who opened the link takes the second seat and the standard board
+            // until told otherwise, which happens immediately.
+            if (!host)
+            {
+                _seat = 1;
+                _layout = BoardLayout.Open;
+            }
+
+            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _layout);
             _showSetup = false;
-            _preview = null;
+            ResetPlayState();
+
+            if (host) await _net.SendAsync($"seat|{_seat ^ 1}|{(int)_layout}");
         }
 
         StateHasChanged();
     });
 
-    private void OnNetMessage(string message) => InvokeAsync(() =>
+    private void OnNetMessage(string message) => InvokeAsync(async () =>
     {
-        if (message == "restart")
+        // "seat|<n>|<layout>" — the side and the board the other browser has set up.
+        // Sent once, on connecting, by whoever created the game.
+        if (message.StartsWith("seat|"))
         {
-            _session = new WebSession(WebMode.Online, BotStrength.Normal, _session.LocalSeat);
-            _preview = null;
+            string[] terms = message.Split('|');
+
+            if (terms.Length == 3 &&
+                int.TryParse(terms[1], out int mine) && mine is 0 or 1 &&
+                int.TryParse(terms[2], out int shape) && Enum.IsDefined(typeof(BoardLayout), shape))
+            {
+                _seat = mine;
+                _layout = (BoardLayout)shape;
+
+                if (mine != _session.LocalSeat || _layout != _session.Layout)
+                {
+                    _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _layout);
+                    ResetPlayState();
+                }
+            }
+
+            StateHasChanged();
+            return;
+        }
+
+        if (message is "restart" or "restart|swap")
+        {
+            _seat = message.EndsWith("swap") ? _session.LocalSeat ^ 1 : _session.LocalSeat;
+
+            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _session.Layout);
+            ResetPlayState();
             StateHasChanged();
             return;
         }
@@ -411,12 +643,14 @@
             parts[0] == "move" &&
             int.TryParse(parts[1], out int ply) &&
             ply == _session.Moves.Count &&
-            Notation.TryParse(parts[2], out Move move))
+            Notation.TryParse(parts[2], out Move move) &&
+            _session.Apply(move))
         {
-            _session.Apply(move);
+            await SoundFor(move);
         }
 
         StateHasChanged();
+        await TryPremoveAsync();
     });
 
     // =================================================================== play ==
@@ -429,6 +663,7 @@
         if (!_session.Apply(move)) return;
 
         _preview = null;
+        await SoundFor(move);
 
         if (_session.Mode == WebMode.Online)
         {
@@ -437,6 +672,25 @@
         }
 
         await RunEngine();
+    }
+
+    /// <summary>
+    /// Plays the move queued during the opponent's turn. Whether it would still be legal
+    /// could not be known when it was chosen, so it is checked now and quietly dropped
+    /// if their move ruined it.
+    /// </summary>
+    private async Task TryPremoveAsync()
+    {
+        if (_premove is not { } queued) return;
+        if (!_session.IsHumanTurn || _reviewPly is not null) return;
+
+        _premove = null;
+
+        if (_session.State.IsLegal(queued)) await OnMove(queued);
+
+        // This runs from a network callback or after the engine, not from a Blazor event,
+        // so nothing repaints on its own — whether the move was played or dropped.
+        StateHasChanged();
     }
 
     /// <summary>
@@ -454,15 +708,26 @@
 
             Move move = _session.Think();
             _session.Apply(move);
+            await SoundFor(move);
 
             _thinking = false;
             StateHasChanged();
             await Task.Delay(1);
         }
+
+        await TryPremoveAsync();
     }
 
     private async Task SelectAll(FocusEventArgs _) =>
         await Js.InvokeVoidAsync("document.execCommand", "selectAll", false, null);
 
-    public async ValueTask DisposeAsync() => await _net.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await _net.DisposeAsync();
+
+        if (_sfx is not null)
+        {
+            try { await _sfx.DisposeAsync(); } catch (Exception) { /* page is going away */ }
+        }
+    }
 }

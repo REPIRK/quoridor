@@ -46,10 +46,11 @@ public partial class MenuView : UserControl
         _demo.IsHitTestVisible = false;
         DemoHost.Children.Add(_demo);
 
-        LocalButton.Click += (_, _) => _host.StartGame(GameOptions.Hotseat(SelectedClock()));
-        BotButton.Click += (_, _) => _host.StartGame(
-            GameOptions.VersusBot(SelectedStrength(), SelectedClock(), MoveFirstOption.IsChecked == true));
-        SpectateButton.Click += (_, _) => _host.StartGame(GameOptions.Spectate(SelectedStrength()));
+        LocalButton.Click += (_, _) => _host.StartGame(GameOptions.Hotseat(SelectedClock(), SelectedLayout()));
+        BotButton.Click += (_, _) => _host.StartGame(GameOptions.VersusBot(
+            SelectedStrength(), SelectedClock(), MoveFirstOption.IsChecked == true, SelectedLayout()));
+        SpectateButton.Click += (_, _) => _host.StartGame(
+            GameOptions.Spectate(SelectedStrength(), SelectedLayout()));
 
         NetworkButton.Click += (_, _) => ShowNetwork(true);
         CloseNetworkButton.Click += (_, _) => ShowNetwork(false);
@@ -115,6 +116,13 @@ public partial class MenuView : UserControl
         if (ClockBlitzOption.IsChecked == true) return TimeControl.Blitz;
         if (ClockRapidOption.IsChecked == true) return TimeControl.Rapid;
         return TimeControl.None;
+    }
+
+    private BoardLayout SelectedLayout()
+    {
+        if (BoardPillarsOption.IsChecked == true) return BoardLayout.Pillars;
+        if (BoardDiamondOption.IsChecked == true) return BoardLayout.Diamond;
+        return BoardLayout.Open;
     }
 
     private void UpdateThemeButton() =>
@@ -290,6 +298,9 @@ public partial class MenuView : UserControl
     {
         NetPeer peer = FreshPeer();
 
+        // The host picks the sides for both; the other side is told on connecting.
+        int seat = HostSecondOption.IsChecked == true ? 1 : 0;
+
         NetworkStatus.Text = $"Waiting for the other player on port {NetPeer.DefaultPort}.";
 
         IReadOnlyList<string> addresses = NetPeer.LocalAddresses();
@@ -297,7 +308,7 @@ public partial class MenuView : UserControl
             ? "They should type:  " + string.Join("   or   ", addresses)
             : "No network address found — is this machine on a network?";
 
-        _ = peer.HostAsync(NetPeer.DefaultPort);
+        _ = peer.HostAsync(NetPeer.DefaultPort, seat, SelectedLayout());
     }
 
     private void StartJoining()
@@ -399,6 +410,27 @@ public partial class MenuView : UserControl
         (settings.ShowRoutes ? RoutesShownOption : RoutesHiddenOption).IsChecked = true;
         RoutesHiddenOption.Checked += (_, _) => Store(() => settings.ShowRoutes = false);
         RoutesShownOption.Checked += (_, _) => Store(() => settings.ShowRoutes = true);
+
+        (settings.Sound ? SoundOnOption : SoundOffOption).IsChecked = true;
+        SoundOffOption.Checked += (_, _) => Store(() => settings.Sound = false);
+        SoundOnOption.Checked += (_, _) => Store(() =>
+        {
+            settings.Sound = true;
+            Sfx.Play(Sound.Move);
+        });
+
+        (settings.Music ? MusicOnOption : MusicOffOption).IsChecked = true;
+        MusicOffOption.Checked += (_, _) => Store(() =>
+        {
+            settings.Music = false;
+            Sfx.Music(false);
+        });
+
+        MusicOnOption.Checked += (_, _) => Store(() =>
+        {
+            settings.Music = true;
+            Sfx.Music(true);
+        });
 
         // Picks the option matching the stored value, falling back to the middle one so
         // a hand-edited file cannot leave the group with nothing selected.

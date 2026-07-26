@@ -24,18 +24,15 @@ public sealed class WebSession
     private readonly List<Move> _moves = new();
     private readonly IQuoridorAgent? _bot;
 
-    public WebSession(WebMode mode, BotStrength strength, int localSeat = 0)
+    public WebSession(
+        WebMode mode, BotStrength strength, int localSeat = 0, BoardLayout layout = BoardLayout.Open)
     {
         Mode = mode;
         Strength = strength;
+        Layout = layout;
 
-        // Hotseat has no remote side, so both seats are played from this keyboard.
-        LocalSeat = mode switch
-        {
-            WebMode.Hotseat => -1,
-            WebMode.Online => localSeat,
-            _ => 0,
-        };
+        // Hotseat has no other side, so both seats are played from this keyboard.
+        LocalSeat = mode == WebMode.Hotseat ? -1 : localSeat;
 
         // WebAssembly runs the search on the only thread there is, so the budget is
         // also how long the page stops answering. Kept short on purpose.
@@ -43,12 +40,18 @@ public sealed class WebSession
             ? AgentFactory.Create(strength, TimeSpan.FromMilliseconds(600))
             : null;
 
-        State = GameState.CreateInitial();
+        State = GameState.CreateInitial(layout);
     }
 
     public WebMode Mode { get; }
 
     public BotStrength Strength { get; }
+
+    /// <summary>The shape of the board, which is fixed for the whole game.</summary>
+    public BoardLayout Layout { get; }
+
+    /// <summary>The squares out of play, for the board to draw.</summary>
+    public UInt128 Holes => Layouts.Holes(Layout);
 
     /// <summary>Which seat this browser plays, or -1 when it plays both.</summary>
     public int LocalSeat { get; }
@@ -59,13 +62,23 @@ public sealed class WebSession
 
     public Move? LastMove => _moves.Count > 0 ? _moves[^1] : null;
 
+    /// <summary>
+    /// The position as it stood after the first <paramref name="plies"/> moves, for
+    /// stepping back through a game that is still going on.
+    /// </summary>
+    public GameState StateAfter(int plies)
+    {
+        if (plies < 0) plies = 0;
+        return plies < _positions.Count ? _positions[plies] : State;
+    }
+
     public IQuoridorAgent? Bot => _bot;
 
     public int Winner => State.Winner;
 
     public bool IsOver => Winner >= 0;
 
-    public bool IsBotTurn => !IsOver && _bot is not null && State.SideToMove == 1;
+    public bool IsBotTurn => !IsOver && _bot is not null && State.SideToMove != LocalSeat;
 
     /// <summary>Whether the person at this keyboard may move right now.</summary>
     public bool IsHumanTurn =>
@@ -131,9 +144,8 @@ public sealed class WebSession
 
     public string PlayerName(int player)
     {
-        if (Mode == WebMode.Online) return player == LocalSeat ? "You" : "Opponent";
-        if (_bot is null) return $"Player {player + 1}";
+        if (Mode == WebMode.Hotseat) return $"Player {player + 1}";
 
-        return player == 0 ? "You" : _bot.Name;
+        return player == LocalSeat ? "You" : _bot?.Name ?? "Opponent";
     }
 }

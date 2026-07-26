@@ -5,5 +5,5 @@ publish-web/
 *.user
 .vs/
 
-# Local tool state, not project configuration.
-.claude/settings.local.json
+# Editor and assistant configuration — useful locally, noise in a public repository.
+.claude/

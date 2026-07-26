@@ -133,6 +133,12 @@
                             Content="Rematch"
                             Padding="22,11"
                             Margin="0,0,10,0" />
+                    <Button x:Name="SwapSidesButton"
+                            Style="{StaticResource Button.Ghost}"
+                            Content="Swap sides"
+                            Padding="22,11"
+                            Margin="0,0,10,0"
+                            Visibility="Collapsed" />
                     <Button x:Name="ResultMenuButton"
                             Style="{StaticResource Button.Ghost}"
                             Content="Main menu"

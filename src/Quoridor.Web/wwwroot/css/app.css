@@ -164,6 +164,7 @@ body {
     color: var(--muted);
     align-self: start;
     padding-top: 4px;
+    white-space: nowrap;
 }
 
 /* ================================================================== panel ==== */
@@ -201,9 +202,14 @@ body {
     color: var(--muted);
 }
 
-.moves li { display: grid; grid-template-columns: 34px 1fr 1fr; margin-bottom: 4px; }
+.moves li { display: grid; grid-template-columns: 34px 1fr 1fr; margin-bottom: 4px; cursor: pointer; }
+.moves li:hover { color: var(--text); }
+.moves li.here { color: var(--text); }
 .moves .n { text-align: right; padding-right: 10px; }
-.moves .empty { display: block; font-family: system-ui, sans-serif; }
+.moves .empty { display: block; font-family: system-ui, sans-serif; cursor: default; }
+
+.actions.review { margin: 8px 0 0; }
+.actions.review button { padding: 6px 12px; }
 
 /* ================================================================ buttons ==== */
 
@@ -320,6 +326,16 @@ input.code::placeholder { color: var(--muted); }
 .board .backdrop { fill: var(--board); stroke: var(--line); stroke-width: 1; }
 .board .cell { fill: var(--cell); opacity: 0.9; }
 
+/* A square out of play reads as a gap in the board rather than a darker square: no
+   fill at all, only a faint outline where the square would have been. */
+.board .cell.hole {
+    fill: none;
+    stroke: var(--line);
+    stroke-width: 1;
+    stroke-dasharray: 3 5;
+    opacity: 0.5;
+}
+
 .board .coord {
     fill: var(--muted);
     opacity: 0.75;
@@ -337,10 +353,27 @@ input.code::placeholder { color: var(--muted); }
 .board .wall.p0 { fill: var(--p0); }
 .board .wall.p1 { fill: var(--p1); }
 
-.board .wall-preview { opacity: 0.5; pointer-events: none; }
-.board .wall-preview.p0 { fill: var(--p0); }
-.board .wall-preview.p1 { fill: var(--p1); }
-.board .wall-preview.bad { fill: none; stroke: var(--p1); stroke-width: 1.2; opacity: 0.55; }
+/* Pointer, pending confirmation, and queued premove — same shapes, different weight. */
+.board .mark { pointer-events: none; }
+
+.board .mark.aim.square { opacity: 0.16; }
+.board .mark.aim.bar { opacity: 0.5; }
+.board .mark.aim.p0 { fill: var(--p0); }
+.board .mark.aim.p1 { fill: var(--p1); }
+
+.board .mark.chosen { opacity: 0.34; stroke-width: 2.5; }
+.board .mark.chosen.p0 { fill: var(--p0); stroke: var(--p0); }
+.board .mark.chosen.p1 { fill: var(--p1); stroke: var(--p1); }
+
+.board .mark.premove {
+    fill: none;
+    stroke: var(--muted);
+    stroke-width: 2.5;
+    stroke-dasharray: 5 4;
+    opacity: 0.9;
+}
+
+.board .mark.bad { fill: none; stroke: var(--p1); stroke-width: 1.5; opacity: 0.5; }
 
 .board .hint-dot { opacity: 0.42; pointer-events: none; }
 .board .hint-dot.p0 { fill: var(--p0); }
@@ -361,7 +394,38 @@ input.code::placeholder { color: var(--muted); }
 
 .board .hit { fill: transparent; cursor: pointer; }
 
-/* ============================================================== narrow ==== */
+/* ============================================================ transitions ==== */
+
+.board .pawn {
+    transition: cx 0.3s cubic-bezier(0.4, 0, 0.2, 1), cy 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.board .wall {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: wall-in 0.34s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes wall-in {
+    from { opacity: 0; transform: scale(0.5); }
+    to { opacity: 1; transform: none; }
+}
+
+.overlay { animation: fade-in 0.22s ease both; }
+.result, .setup { animation: rise 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .board .pawn, .board .wall, .overlay, .result, .setup { transition: none; animation: none; }
+}
+
+/* ================================================================ narrow ====
+
+   Below the wide layout the board comes first and everything else stacks under
+   it. On a phone there is no hover at all, which is why the confirm step exists
+   and turns itself on there. */
 
 @media (max-width: 1080px) {
     .layout { grid-template-columns: 1fr; gap: 18px; }
@@ -369,4 +433,43 @@ input.code::placeholder { color: var(--muted); }
     .player { flex: 1; }
     .player + .player { border-top: none; }
     .moves { height: 120px; }
+}
+
+@media (max-width: 640px) {
+    .bar {
+        grid-template-columns: 1fr;
+        justify-items: center;
+        gap: 10px;
+        padding: 14px 14px 6px;
+    }
+
+    .bar .actions { justify-self: center; justify-content: center; }
+    .brand { font-size: 21px; }
+
+    .layout { padding: 6px 14px 20px; gap: 14px; }
+    .board { max-width: 100%; }
+
+    /* Order: the board, then who is on move, then the rest. */
+    .board-wrap { order: 1; }
+    .players { order: 2; gap: 14px; }
+    .panel { order: 3; }
+
+    .player { padding: 10px 0; }
+    .name { font-size: 16px; }
+    .walls i { width: 4px; height: 13px; }
+
+    .moves { height: 96px; }
+    .panel hr { margin: 14px 0 12px; }
+    .status { font-size: 19px; }
+    .hint { min-height: 0; }
+
+    /* Comfortable to hit with a thumb. */
+    button.ghost { padding: 11px 16px; }
+    button.seg { padding: 8px 4px 9px; margin-right: 14px; }
+    input.code { width: 100%; margin: 0 0 8px; }
+
+    .result, .setup { padding: 24px 20px; }
+    .result h1, .setup h1 { font-size: 30px; }
+    .setup .row { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .setup .label { width: auto; margin-bottom: 4px; }
 }

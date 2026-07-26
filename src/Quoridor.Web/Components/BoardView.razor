@@ -16,11 +16,20 @@
        one part of the board that has to be emitted through the render tree directly. *@
     @Coordinates
 
+    @* Taking the second seat turns the board around so that seat is still the near
+       edge. Rotating the whole group means every coordinate below — including the hit
+       targets, which keep reporting the squares they actually are — stays untouched.
+       Only the labels sit outside it, since text upside down is no use to anyone. *@
+    <g transform="@(Flipped ? "rotate(180 364 364)" : "")">
+
     @for (int row = 0; row < Board.Size; row++)
     {
         for (int col = 0; col < Board.Size; col++)
         {
-            <rect class="cell" x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell" rx="3" />
+            bool hole = (Holes & Board.Bit(Board.Index(row, col))) != 0;
+
+            <rect class="cell @(hole ? "hole" : "")"
+                  x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell" rx="3" />
         }
     }
 
@@ -68,12 +77,22 @@
               height="@(kind == MoveKind.HorizontalWall ? Gap : WallLength)" />
     }
 
-    @if (_ghost is { } ghost)
+    @* What the pointer is aiming at, what is waiting to be confirmed, and what is
+       queued for when the turn arrives — the same three shapes, told apart by style. *@
+    @foreach ((Move mark, string style) in Marks())
     {
-        <rect class="wall-preview @(_ghostLegal ? (State.SideToMove == 0 ? "p0" : "p1") : "bad")" rx="2"
-              x="@WallX(ghost.Kind, ghost.Col)" y="@WallY(ghost.Kind, ghost.Row)"
-              width="@(ghost.IsHorizontal ? WallLength : Gap)"
-              height="@(ghost.IsHorizontal ? Gap : WallLength)" />
+        if (mark.Kind == MoveKind.Pawn)
+        {
+            <rect class="mark square @style" rx="3"
+                  x="@Origin(mark.Col)" y="@Origin(mark.Row)" width="@Cell" height="@Cell" />
+        }
+        else
+        {
+            <rect class="mark bar @style" rx="2"
+                  x="@WallX(mark.Kind, mark.Col)" y="@WallY(mark.Kind, mark.Row)"
+                  width="@(mark.IsHorizontal ? WallLength : Gap)"
+                  height="@(mark.IsHorizontal ? Gap : WallLength)" />
+        }
     }
 
     @for (int player = 0; player < 2; player++)
@@ -122,6 +141,8 @@
                   @onmouseover="() => HoverWall(MoveKind.VerticalWall, r, c)" @onclick="Commit" />
         }
     }
+
+    </g>
 </svg>
 
 @code {
@@ -132,9 +153,16 @@
     private const int Extent = Pad * 2 + Board.Size * Cell + (Board.Size - 1) * Gap;
     private const int WallLength = Cell * 2 + Gap;
 
-    private Move? _ghost;
-    private bool _ghostLegal;
-    private int _hoverCell = -1;
+    // What the pointer is over, recorded whether or not it is our turn. Dropping it
+    // when the turn passes is what made a resting cursor go dead: you would have to
+    // move off the square and back before the click would take.
+    private int _pointerCell = -1;
+    private Move? _pointerWall;
+
+    // Set when a move is waiting to be confirmed. On a phone there is no hover, so a
+    // first tap should choose and a second commit, rather than one stray tap moving.
+    private Move? _selected;
+
     private bool _needsRender = true;
 
     [Parameter, EditorRequired] public GameState State { get; set; }
@@ -143,21 +171,33 @@
 
     [Parameter] public bool ShowRoutes { get; set; }
 
+    /// <summary>Turn the board around, for the player who took the second seat.</summary>
+    [Parameter] public bool Flipped { get; set; }
+
+    /// <summary>Squares out of play, drawn as gaps rather than squares.</summary>
+    [Parameter] public UInt128 Holes { get; set; }
+
+    /// <summary>Require a second tap on the same target before the move is played.</summary>
+    [Parameter] public bool ConfirmMoves { get; set; }
+
     [Parameter] public Move? LastMove { get; set; }
 
     [Parameter] public EventCallback<Move> OnMove { get; set; }
+
+    /// <summary>A move queued for the moment the turn arrives, or null for none.</summary>
+    [Parameter] public Move? Premove { get; set; }
+
+    [Parameter] public EventCallback<Move?> OnPremove { get; set; }
 
     /// <summary>Reports what the wall under the cursor would cost, or null when there is none.</summary>
     [Parameter] public EventCallback<string?> OnPreview { get; set; }
 
     protected override void OnParametersSet()
     {
+        // The pointer is deliberately not cleared here. What it is over has not changed
+        // just because the position did; only what that means has.
         _needsRender = true;
-
-        if (Interactive) return;
-
-        _ghost = null;
-        _hoverCell = -1;
+        _selected = null;
     }
 
     // Mouse movement inside one target must not redraw three hundred elements.
@@ -176,8 +216,12 @@
 
         for (int i = 0; i < Quoridor.Core.Board.Size; i++)
         {
-            Label($"{Quoridor.Core.Board.Size - i}", 14, Centre(i) + 4);
-            Label($"{(char)('a' + i)}", Centre(i), Extent - Pad + 16);
+            // The labels are not rotated with the board, so they are renumbered instead.
+            int rank = Flipped ? i + 1 : Quoridor.Core.Board.Size - i;
+            int file = Flipped ? Quoridor.Core.Board.Size - 1 - i : i;
+
+            Label($"{rank}", 14, Centre(i) + 4);
+            Label($"{(char)('a' + file)}", Centre(i), Extent - Pad + 16);
         }
 
         void Label(string text, int x, int y)
@@ -193,17 +237,19 @@
 
     // =============================================================== interaction ==
 
+    /// <summary>The move the pointer is currently over, whoever's turn it is.</summary>
+    private Move? Pointed => _pointerWall ?? (_pointerCell >= 0 ? Move.ToCell(_pointerCell) : null);
+
+    /// <summary>Legal for the side to move right now. Meaningless during their turn.</summary>
+    private bool PointedIsLegal => Pointed is { } move && State.IsLegal(move);
+
     private void HoverCell(int row, int col)
     {
-        if (!Interactive) return;
-
         int cell = Board.Index(row, col);
-        bool legal = State.IsPawnMoveLegal(row, col);
+        if (_pointerCell == cell && _pointerWall is null) return;
 
-        if (_hoverCell == (legal ? cell : -1) && _ghost is null) return;
-
-        _hoverCell = legal ? cell : -1;
-        _ghost = null;
+        _pointerCell = cell;
+        _pointerWall = null;
         _needsRender = true;
 
         OnPreview.InvokeAsync(null);
@@ -211,25 +257,22 @@
 
     private void HoverWall(MoveKind kind, int row, int col)
     {
-        if (!Interactive) return;
-
         var candidate = new Move(kind, row, col);
-        if (_ghost == candidate) return;
+        if (_pointerWall == candidate) return;
 
-        _ghost = candidate;
-        _ghostLegal = State.IsWallLegal(kind, row, col);
-        _hoverCell = -1;
+        _pointerWall = candidate;
+        _pointerCell = -1;
         _needsRender = true;
 
-        OnPreview.InvokeAsync(Describe(candidate, _ghostLegal));
+        OnPreview.InvokeAsync(Interactive ? Describe(candidate, State.IsWallLegal(kind, row, col)) : null);
     }
 
     private void ClearHover()
     {
-        if (_ghost is null && _hoverCell < 0) return;
+        if (_pointerWall is null && _pointerCell < 0) return;
 
-        _ghost = null;
-        _hoverCell = -1;
+        _pointerWall = null;
+        _pointerCell = -1;
         _needsRender = true;
 
         OnPreview.InvokeAsync(null);
@@ -237,15 +280,32 @@
 
     private async Task Commit()
     {
-        if (!Interactive) return;
+        if (Pointed is not { } move) return;
 
-        if (_ghost is { } wall)
+        // Not our turn: remember it and play it the moment the turn arrives. Whether it
+        // will still be legal is unknowable now, so it is checked then and dropped if
+        // the opponent's move ruined it.
+        if (!Interactive)
         {
-            if (_ghostLegal) await OnMove.InvokeAsync(wall);
+            if (Premove is null || Premove != move) await OnPremove.InvokeAsync(move);
+            else await OnPremove.InvokeAsync(null);
+
             return;
         }
 
-        if (_hoverCell >= 0) await OnMove.InvokeAsync(Move.ToCell(_hoverCell));
+        if (!State.IsLegal(move)) return;
+
+        // With confirmation on, the first tap chooses and the second plays — a phone has
+        // no hover, so without it one stray tap would move.
+        if (ConfirmMoves && _selected != move)
+        {
+            _selected = move;
+            _needsRender = true;
+            return;
+        }
+
+        _selected = null;
+        await OnMove.InvokeAsync(move);
     }
 
     /// <summary>
@@ -281,6 +341,22 @@
     }
 
     // =================================================================== contents ==
+
+    private IEnumerable<(Move Move, string Style)> Marks()
+    {
+        string side = State.SideToMove == 0 ? "p0" : "p1";
+
+        if (Premove is { } queued) yield return (queued, "premove");
+
+        if (_selected is { } chosen)
+        {
+            yield return (chosen, $"chosen {side}");
+            yield break;
+        }
+
+        if (Interactive && Pointed is { } pointed)
+            yield return (pointed, PointedIsLegal ? $"aim {side}" : "bad");
+    }
 
     private List<int> Hints()
     {

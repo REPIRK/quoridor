@@ -43,6 +43,7 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Grid.Column="0"
@@ -77,6 +78,18 @@
                                      Style="{StaticResource Button.Segment}" Content="First" IsChecked="True" />
                         <RadioButton x:Name="MoveSecondOption" GroupName="Order"
                                      Style="{StaticResource Button.Segment}" Content="Second" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="3" Grid.Column="0"
+                               Style="{StaticResource Text.Section}"
+                               Text="Board" VerticalAlignment="Center" Margin="0,10,0,0" />
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                        <RadioButton x:Name="BoardOpenOption" GroupName="Board"
+                                     Style="{StaticResource Button.Segment}" Content="Classic" IsChecked="True" />
+                        <RadioButton x:Name="BoardPillarsOption" GroupName="Board"
+                                     Style="{StaticResource Button.Segment}" Content="Pillars" />
+                        <RadioButton x:Name="BoardDiamondOption" GroupName="Board"
+                                     Style="{StaticResource Button.Segment}" Content="Diamond" />
                     </StackPanel>
                 </Grid>
 
@@ -131,6 +144,15 @@
                                Text="One of you hosts and reads out an address; the other types it in. On the same network this needs nothing else — no account, no server, no internet." />
 
                     <Rectangle Style="{StaticResource Rule}" Margin="0,22,0,20" />
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                        <TextBlock Style="{StaticResource Text.Section}"
+                                   Text="Host moves" VerticalAlignment="Center" Margin="0,0,14,0" />
+                        <RadioButton x:Name="HostFirstOption" GroupName="HostOrder"
+                                     Style="{StaticResource Button.Segment}" Content="First" IsChecked="True" />
+                        <RadioButton x:Name="HostSecondOption" GroupName="HostOrder"
+                                     Style="{StaticResource Button.Segment}" Content="Second" />
+                    </StackPanel>
 
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="HostButton" Style="{StaticResource Button.Ghost}"
@@ -201,6 +223,8 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Text.Section}"
@@ -241,6 +265,24 @@
                                          Style="{StaticResource Button.Segment}" Content="On request" />
                             <RadioButton x:Name="RoutesShownOption" GroupName="SetRoutes"
                                          Style="{StaticResource Button.Segment}" Content="Always" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Sound" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
+                            <RadioButton x:Name="SoundOnOption" GroupName="SetSound"
+                                         Style="{StaticResource Button.Segment}" Content="On" />
+                            <RadioButton x:Name="SoundOffOption" GroupName="SetSound"
+                                         Style="{StaticResource Button.Segment}" Content="Off" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Music" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
+                            <RadioButton x:Name="MusicOnOption" GroupName="SetMusic"
+                                         Style="{StaticResource Button.Segment}" Content="On" />
+                            <RadioButton x:Name="MusicOffOption" GroupName="SetMusic"
+                                         Style="{StaticResource Button.Segment}" Content="Off" />
                         </StackPanel>
                     </Grid>
 

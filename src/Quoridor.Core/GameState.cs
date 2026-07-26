@@ -42,6 +42,14 @@ public struct GameState
     /// <summary>0 or 1 — whose turn it is.</summary>
     public byte SideToMove;
 
+    /// <summary>
+    /// Whether squares have been taken out of play. Constant for a whole game, and kept
+    /// here only because the engine's fast wall-legality test is unsound on such a board:
+    /// it decides from walls and borders alone, and a hole is neither. Sits in the struct's
+    /// existing padding, so it costs the search nothing.
+    /// </summary>
+    public bool HasHoles;
+
     public ulong Hash;
 
     /// <summary>Half-moves played since the start of the game.</summary>
@@ -66,6 +74,48 @@ public struct GameState
 
         s.Hash = Zobrist.Pawn[0, s._pawn0] ^ Zobrist.Pawn[1, s._pawn1]
                  ^ Zobrist.WallsLeft[0, s._walls0] ^ Zobrist.WallsLeft[1, s._walls1];
+
+        return s;
+    }
+
+    /// <summary>
+    /// The starting position on a board with squares taken out of play.
+    ///
+    /// A hole is sealed on all four sides, and each of its neighbours is sealed against
+    /// stepping into it — after which nothing else in the rules or the engine has to know
+    /// about holes at all, because they are already walls as far as the block masks are
+    /// concerned. The layout is not part of the hash: it never changes within a game, and
+    /// a transposition table is never shared between games.
+    /// </summary>
+    public static GameState CreateInitial(BoardLayout layout)
+    {
+        GameState s = CreateInitial();
+
+        UInt128 holes = Layouts.Holes(layout);
+        if (holes == 0) return s;
+
+        s.HasHoles = true;
+
+        for (int cell = 0; cell < Board.CellCount; cell++)
+        {
+            if ((holes & Board.Bit(cell)) == 0) continue;
+
+            int row = Board.RowOf(cell);
+            int col = Board.ColOf(cell);
+            UInt128 bit = Board.Bit(cell);
+
+            // Nothing leaves the hole…
+            s.BlockedNorth |= bit;
+            s.BlockedSouth |= bit;
+            s.BlockedWest |= bit;
+            s.BlockedEast |= bit;
+
+            // …and nothing steps into it.
+            if (row > 0) s.BlockedSouth |= Board.Bit(Board.Index(row - 1, col));
+            if (row < Board.Size - 1) s.BlockedNorth |= Board.Bit(Board.Index(row + 1, col));
+            if (col > 0) s.BlockedEast |= Board.Bit(Board.Index(row, col - 1));
+            if (col < Board.Size - 1) s.BlockedWest |= Board.Bit(Board.Index(row, col + 1));
+        }
 
         return s;
     }

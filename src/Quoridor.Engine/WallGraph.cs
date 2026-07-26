@@ -28,6 +28,11 @@ internal static class WallGraph
     /// </summary>
     public static bool CanDisconnect(in GameState state, MoveKind kind, int row, int col)
     {
+        // A square taken out of play is a boundary this argument cannot see: a chain can
+        // run from a border to a hole and cut the board without two of the wall's points
+        // touching anything. On those boards the shortcut is simply not taken.
+        if (state.HasHoles) return true;
+
         // A horizontal wall at slot (r,c) runs from grid point (r+1, c) through
         // (r+1, c+1) to (r+1, c+2); a vertical one from (r, c+1) through (r+1, c+1)
         // to (r+2, c+1).

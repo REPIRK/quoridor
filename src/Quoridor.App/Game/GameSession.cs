@@ -15,19 +15,22 @@ public sealed record GameOptions(
     GameMode Mode,
     BotStrength Strength,
     TimeControl Clock,
-    bool HumanMovesFirst = true)
+    bool HumanMovesFirst = true,
+    BoardLayout Layout = BoardLayout.Open)
 {
-    public static GameOptions Hotseat(TimeControl clock) => new(GameMode.Hotseat, BotStrength.Normal, clock);
+    public static GameOptions Hotseat(TimeControl clock, BoardLayout layout) =>
+        new(GameMode.Hotseat, BotStrength.Normal, clock, Layout: layout);
 
-    public static GameOptions VersusBot(BotStrength strength, TimeControl clock, bool humanMovesFirst) =>
-        new(GameMode.VersusBot, strength, clock, humanMovesFirst);
+    public static GameOptions VersusBot(
+        BotStrength strength, TimeControl clock, bool humanMovesFirst, BoardLayout layout) =>
+        new(GameMode.VersusBot, strength, clock, humanMovesFirst, layout);
 
-    public static GameOptions Spectate(BotStrength strength) =>
-        new(GameMode.Spectate, strength, TimeControl.None);
+    public static GameOptions Spectate(BotStrength strength, BoardLayout layout) =>
+        new(GameMode.Spectate, strength, TimeControl.None, Layout: layout);
 
-    /// <summary>The host of a network game takes the first seat, and so the first move.</summary>
-    public static GameOptions Online(bool isHost) =>
-        new(GameMode.Online, BotStrength.Normal, TimeControl.None, HumanMovesFirst: isHost);
+    /// <summary>A network game is set up by the host, who says which seat and board.</summary>
+    public static GameOptions Online(bool isHost, BoardLayout layout) =>
+        new(GameMode.Online, BotStrength.Normal, TimeControl.None, HumanMovesFirst: isHost, Layout: layout);
 
     /// <summary>
     /// Which seat the local player occupies. Player 0 always moves first by the rules,
@@ -48,6 +51,7 @@ public sealed record GameOptions(
                 _ => $"Versus {Strength.ToString().ToLowerInvariant()} bot",
             };
 
+            if (Layout != BoardLayout.Open) name += $" · {Layouts.Name(Layout).ToLowerInvariant()}";
             if (Mode == GameMode.VersusBot && !HumanMovesFirst) name += " · you move second";
             if (Clock.IsEnabled) name += $" · {Clock.Label}";
 
@@ -93,7 +97,7 @@ public sealed class GameSession
                 break;
         }
 
-        State = GameState.CreateInitial();
+        State = GameState.CreateInitial(options.Layout);
         ResetClocks();
     }
 
@@ -206,7 +210,7 @@ public sealed class GameSession
         _positions.Clear();
         _moves.Clear();
         _flagged = -1;
-        State = GameState.CreateInitial();
+        State = GameState.CreateInitial(Options.Layout);
         ResetClocks();
     }
 

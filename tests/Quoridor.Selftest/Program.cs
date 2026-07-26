@@ -24,6 +24,7 @@ internal static class Program
         Run("win detection", WinDetection);
         Run("hash is order independent", HashConsistency);
         Run("bot games terminate legally", BotPlayouts);
+        Run("boards with squares out of play", BlockedSquares);
         Run("wall-graph fast path never hides a block", WallGraphFastPath);
         Run("progress test never hides a change in distance", ProgressShortcut);
         Run("search engine respects its budget and outplays the heuristic", SearchAgentStrength);
@@ -236,6 +237,103 @@ internal static class Program
         }
 
         Check(finished == games, $"all {games} bot games reached a result ({finished} did)");
+    }
+
+    /// <summary>
+    /// The alternative boards. Three things have to hold, and the third is the one that
+    /// would be quiet if it broke: a hole must be sealed from both directions, both
+    /// players must still have a route from the start, and the engine's fast legality
+    /// path must not clear a wall that seals someone in — which it could, because its
+    /// reasoning knows about walls and borders but not about holes.
+    /// </summary>
+    private static void BlockedSquares()
+    {
+        foreach (BoardLayout layout in Layouts.All)
+        {
+            GameState start = GameState.CreateInitial(layout);
+            UInt128 holes = Layouts.Holes(layout);
+
+            Check(start.HasHoles == (holes != 0), $"{Layouts.Name(layout)}: the position knows whether it has holes");
+            Check(PathFinder.HasPath(start, 0) && PathFinder.HasPath(start, 1),
+                $"{Layouts.Name(layout)}: both players start with a route");
+
+            for (int cell = 0; cell < Board.CellCount; cell++)
+            {
+                if ((holes & Board.Bit(cell)) == 0) continue;
+
+                Check(cell != start.PawnOf(0) && cell != start.PawnOf(1),
+                    $"{Layouts.Name(layout)}: no hole under a starting pawn");
+
+                for (int direction = 0; direction < 4; direction++)
+                {
+                    Check(start.Blocked(cell, direction), $"{Layouts.Name(layout)}: nothing leaves a hole");
+
+                    int neighbour = cell + Board.Delta[direction];
+                    if (neighbour < 0 || neighbour >= Board.CellCount) continue;
+
+                    // Wrapping round a row would make this a different neighbour entirely.
+                    if ((direction == Board.West || direction == Board.East) &&
+                        Board.RowOf(neighbour) != Board.RowOf(cell))
+                    {
+                        continue;
+                    }
+
+                    int back = direction switch
+                    {
+                        Board.North => Board.South,
+                        Board.South => Board.North,
+                        Board.West => Board.East,
+                        _ => Board.West,
+                    };
+
+                    Check(start.Blocked(neighbour, back), $"{Layouts.Name(layout)}: nothing steps into a hole");
+                }
+            }
+
+            // Play the board out, auditing every geometrically legal wall as we go.
+            var agents = new IQuoridorAgent[]
+            {
+                new HeuristicAgent(BotStrength.Normal, seed: 4),
+                new SearchAgent(maxDepth: 4, moveTime: TimeSpan.FromMilliseconds(40), threads: 1, tableMegabytes: 4),
+            };
+
+            GameState state = start;
+
+            for (int ply = 0; ply < 300 && !state.IsGameOver; ply++)
+            {
+                foreach (MoveKind kind in new[] { MoveKind.HorizontalWall, MoveKind.VerticalWall })
+                {
+                    for (int row = 0; row < Board.SlotSize; row++)
+                    {
+                        for (int col = 0; col < Board.SlotSize; col++)
+                        {
+                            if (!state.IsSlotFree(kind, row, col)) continue;
+                            if (WallGraph.CanDisconnect(state, kind, row, col)) continue;
+
+                            GameState probe = state;
+                            probe.PlaceWallUnchecked(kind, row, col);
+
+                            if (PathFinder.HasPath(probe, 0) && PathFinder.HasPath(probe, 1)) continue;
+
+                            Check(false, $"{Layouts.Name(layout)}: fast path cleared a sealing wall {new Move(kind, row, col)}");
+                            return;
+                        }
+                    }
+                }
+
+                Move move = agents[state.SideToMove].ChooseMove(state);
+
+                if (!state.IsLegal(move))
+                {
+                    Check(false, $"{Layouts.Name(layout)} ply {ply}: illegal move {move}");
+                    return;
+                }
+
+                state.Apply(move);
+            }
+
+            Check(state.IsGameOver, $"{Layouts.Name(layout)}: the game reached a result");
+        }
     }
 
     /// <summary>
