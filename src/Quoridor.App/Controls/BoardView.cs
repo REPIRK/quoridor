@@ -1,0 +1,883 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Shapes;
+using Quoridor.App.Theme;
+using Quoridor.Core;
+
+namespace Quoridor.App.Controls;
+
+/// <summary>
+/// The board. Everything is drawn in a fixed 728x728 logical space inside a
+/// <see cref="Viewbox"/>, so the whole thing is resolution independent: the window
+/// can be any size and the geometry below never changes.
+///
+/// Hover works without a mode switch. The cursor position decides what you are
+/// pointing at — a square, or one of the grooves between squares — and the wall
+/// preview follows with the orientation that groove implies. Right-click, the
+/// wheel or R flips the orientation when you are over an intersection.
+///
+/// The board can also be turned around, so whoever is sitting in front of it always
+/// sees their own pawn at the near edge. That is a half-turn of the whole board, so
+/// every conversion between a rules coordinate and a screen coordinate goes through
+/// <see cref="ViewIndex"/> / <see cref="ViewSlot"/> — both of which are their own
+/// inverse, which is what lets hit-testing run the same mapping backwards.
+/// </summary>
+public sealed class BoardView : UserControl
+{
+    // --- geometry -----------------------------------------------------------
+    private const double Pad = 28;
+    private const double CellSize = 64;
+    private const double GapSize = 12;
+    private const double Pitch = CellSize + GapSize;
+    private const double WallLength = CellSize * 2 + GapSize;
+    private const double Extent = Pad * 2 + Board.Size * CellSize + (Board.Size - 1) * GapSize;
+    private const double PawnRadius = 20;
+    private const double HintRadius = 7;
+
+    /// <summary>How close the cursor must be to a groove centre to mean "wall".</summary>
+    private const double GrooveReach = 17;
+
+    // --- layers -------------------------------------------------------------
+    private readonly Canvas _root = new() { Width = Extent, Height = Extent, Background = Brushes.Transparent };
+    private readonly Canvas _coordinateLayer = new() { IsHitTestVisible = false };
+    private readonly Canvas _goalLayer = new() { IsHitTestVisible = false };
+    private readonly Canvas _hintLayer = new();
+    private readonly Canvas _routeLayer = new();
+    private readonly Canvas _wallLayer = new();
+    private readonly Canvas _pawnLayer = new();
+    private readonly Rectangle _highlight = new();
+    private readonly Rectangle _lastMoveMark = new();
+    private readonly Rectangle _ghost = new();
+    private readonly Ellipse[] _pawnShapes = new Ellipse[2];
+    private readonly DropShadowEffect[] _pawnGlow = new DropShadowEffect[2];
+
+    private GameState _state;
+    private bool _interactive;
+    private bool _busy;
+    private bool _flipped;
+    private bool _preferHorizontal = true;
+    private bool _showRoutes;
+    private int _hoverCell = -1;
+    private Move? _ghostMove;
+    private bool _ghostLegal;
+
+    public BoardView()
+    {
+        _state = GameState.CreateInitial();
+
+        BuildVisuals();
+
+        Content = new Viewbox
+        {
+            Stretch = Stretch.Uniform,
+            Child = _root,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        _root.MouseMove += OnMouseMove;
+        _root.MouseLeave += (_, _) => ClearHover();
+        _root.MouseLeftButtonDown += OnLeftClick;
+        _root.MouseRightButtonDown += (_, _) => ToggleWallOrientation();
+        _root.MouseWheel += (_, _) => ToggleWallOrientation();
+
+        // Palette.Changed is static, so an un-subscribed board would be kept alive by
+        // it for the lifetime of the app — one leak per game started.
+        Action<AppTheme> onThemeChanged = _ => RefreshThemeColours();
+        Palette.Changed += onThemeChanged;
+        Unloaded += (_, _) => Palette.Changed -= onThemeChanged;
+    }
+
+    /// <summary>
+    /// What the wall under the cursor would actually do, in steps added to each side's
+    /// route. Checking a wall's legality already walks both routes, so the number that
+    /// decides whether it is worth playing costs almost nothing to report.
+    /// </summary>
+    public readonly record struct WallPreview(bool Legal, bool WouldSeal, int CostToOpponent, int CostToMover);
+
+    /// <summary>Raised when the player commits to a move. The host validates and applies it.</summary>
+    public event EventHandler<Move>? MoveChosen;
+
+    /// <summary>Raised as the wall preview moves, and with null when it goes away.</summary>
+    public event EventHandler<WallPreview?>? WallPreviewChanged;
+
+    /// <summary>Whether the local player may interact right now.</summary>
+    public bool IsInteractive
+    {
+        get => _interactive;
+        set
+        {
+            if (_interactive == value) return;
+            _interactive = value;
+            if (!value) ClearHover();
+            RefreshOverlays();
+        }
+    }
+
+    /// <summary>
+    /// Turns the board around, so player 1 sits at the top and player 2 at the bottom.
+    /// Used when the local player takes the second seat: your own pawn belongs at the
+    /// near edge no matter which colour you were given.
+    /// </summary>
+    public bool Flipped
+    {
+        get => _flipped;
+        set
+        {
+            if (_flipped == value) return;
+
+            _flipped = value;
+            BuildCoordinates();
+            BuildGoalMarks();
+            Reset(_state);
+        }
+    }
+
+    /// <summary>
+    /// Draws both players' current shortest routes. Quoridor is a game about the length
+    /// of a route, and the route is the one thing a board does not show you.
+    /// </summary>
+    public bool ShowRoutes
+    {
+        get => _showRoutes;
+        set
+        {
+            if (_showRoutes == value) return;
+            _showRoutes = value;
+            RefreshRoutes();
+        }
+    }
+
+    // ============================================================== building ==
+
+    private void BuildVisuals()
+    {
+        var backdrop = new Rectangle
+        {
+            Width = Extent,
+            Height = Extent,
+            RadiusX = 6,
+            RadiusY = 6,
+            Fill = Palette.BrushOf(Palette.BoardSurface),
+            Stroke = Palette.BrushOf(Palette.Line),
+            StrokeThickness = 1,
+        };
+        Place(backdrop, 0, 0);
+        _root.Children.Add(backdrop);
+
+        _root.Children.Add(_coordinateLayer);
+        BuildCoordinates();
+
+        // The squares themselves are identical, so they are laid out in screen order and
+        // never need to know which way round the board is.
+        var cellLayer = new Canvas();
+        for (int row = 0; row < Board.Size; row++)
+        {
+            for (int col = 0; col < Board.Size; col++)
+            {
+                var cell = new Rectangle
+                {
+                    Width = CellSize,
+                    Height = CellSize,
+                    RadiusX = 3,
+                    RadiusY = 3,
+                    Fill = Palette.BrushOf(Palette.Cell),
+                    Opacity = 0.9,
+                };
+                Place(cell, Origin(col), Origin(row));
+                cellLayer.Children.Add(cell);
+            }
+        }
+
+        _root.Children.Add(cellLayer);
+
+        _root.Children.Add(_goalLayer);
+        BuildGoalMarks();
+
+        _highlight.Width = CellSize;
+        _highlight.Height = CellSize;
+        _highlight.RadiusX = 3;
+        _highlight.RadiusY = 3;
+        _highlight.Fill = Palette.BrushOf(Palette.Accent0);
+        _highlight.Opacity = 0;
+        _highlight.IsHitTestVisible = false;
+        Place(_highlight, Pad, Pad);
+        _root.Children.Add(_highlight);
+
+        _lastMoveMark.RadiusX = 3;
+        _lastMoveMark.RadiusY = 3;
+        _lastMoveMark.Fill = null;
+        _lastMoveMark.StrokeThickness = 1.5;
+        _lastMoveMark.Opacity = 0;
+        _lastMoveMark.IsHitTestVisible = false;
+        _root.Children.Add(_lastMoveMark);
+
+        _routeLayer.IsHitTestVisible = false;
+        _root.Children.Add(_routeLayer);
+
+        _hintLayer.IsHitTestVisible = false;
+        _root.Children.Add(_hintLayer);
+
+        _root.Children.Add(_wallLayer);
+
+        _ghost.RadiusX = 2;
+        _ghost.RadiusY = 2;
+        _ghost.Fill = Palette.BrushOf(Palette.Wall);
+        _ghost.StrokeThickness = 1.2;
+        _ghost.Opacity = 0;
+        _ghost.IsHitTestVisible = false;
+        _root.Children.Add(_ghost);
+
+        _pawnLayer.IsHitTestVisible = false;
+        for (int player = 0; player < 2; player++)
+        {
+            // Kept small: a wide neon halo is the least paper-like thing a board can do.
+            var glow = new DropShadowEffect
+            {
+                Color = Palette.ColorOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
+                BlurRadius = 18,
+                ShadowDepth = 0,
+                Opacity = 0.2,
+            };
+
+            var pawn = new Ellipse
+            {
+                Width = PawnRadius * 2,
+                Height = PawnRadius * 2,
+                Fill = Palette.BrushOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
+                Effect = glow,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = new ScaleTransform(1, 1),
+            };
+
+            _pawnGlow[player] = glow;
+            _pawnShapes[player] = pawn;
+            _pawnLayer.Children.Add(pawn);
+        }
+
+        _root.Children.Add(_pawnLayer);
+    }
+
+    /// <summary>
+    /// Each player's target row: a faint wash square by square so the grid keeps its
+    /// rhythm, plus a finish line ruled along the outer edge. The line is what the eye
+    /// actually reads; the wash only says which end of the board is whose.
+    /// </summary>
+    private void BuildGoalMarks()
+    {
+        _goalLayer.Children.Clear();
+
+        double contentWidth = Board.Size * CellSize + (Board.Size - 1) * GapSize;
+
+        for (int player = 0; player < 2; player++)
+        {
+            int viewRow = ViewIndex(Board.GoalRow(player));
+            string accent = player == 0 ? Palette.Accent0 : Palette.Accent1;
+
+            for (int col = 0; col < Board.Size; col++)
+            {
+                var wash = new Rectangle
+                {
+                    Width = CellSize,
+                    Height = CellSize,
+                    RadiusX = 3,
+                    RadiusY = 3,
+                    Fill = Palette.BrushOf(accent),
+                    Opacity = 0.09,
+                };
+
+                Place(wash, Origin(col), Origin(viewRow));
+                _goalLayer.Children.Add(wash);
+            }
+
+            var finish = new Rectangle
+            {
+                Width = contentWidth,
+                Height = 2.5,
+                Fill = Palette.BrushOf(accent),
+                Opacity = 0.7,
+            };
+
+            // Along the outer edge of whichever screen row the goal ended up on.
+            Place(finish, Pad, viewRow == 0 ? Origin(0) : Origin(viewRow) + CellSize - 2.5);
+            _goalLayer.Children.Add(finish);
+        }
+    }
+
+    private void RefreshThemeColours()
+    {
+        for (int player = 0; player < 2; player++)
+            _pawnGlow[player].Color = Palette.ColorOf(player == 0 ? Palette.Accent0 : Palette.Accent1);
+    }
+
+    /// <summary>
+    /// Files a-i and ranks 1-9 printed in the board's own margin, the way they are on a
+    /// physical board. They follow the board around when it is turned, so the labels
+    /// always name the square you are actually looking at.
+    /// </summary>
+    private void BuildCoordinates()
+    {
+        _coordinateLayer.Children.Clear();
+
+        for (int i = 0; i < Board.Size; i++)
+        {
+            int logical = ViewIndex(i);
+
+            _coordinateLayer.Children.Add(Label($"{Board.Size - logical}", 4, Centre(i) - 9));
+            _coordinateLayer.Children.Add(Label($"{(char)('a' + logical)}", Centre(i) - 10, Extent - Pad + 5));
+        }
+
+        static TextBlock Label(string text, double x, double y)
+        {
+            var label = new TextBlock
+            {
+                Text = text,
+                Width = 20,
+                TextAlignment = TextAlignment.Center,
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 12,
+                Foreground = Palette.BrushOf(Palette.Muted),
+                Opacity = 0.75,
+            };
+
+            Place(label, x, y);
+            return label;
+        }
+    }
+
+    // ============================================================== position ==
+
+    /// <summary>Snaps the board to a position with no animation (new game, undo, restart).</summary>
+    public void Reset(GameState state, Move? lastMove = null)
+    {
+        _state = state;
+        _busy = false;
+
+        _wallLayer.Children.Clear();
+
+        for (int slot = 0; slot < Board.SlotCount; slot++)
+        {
+            int row = slot / Board.SlotSize;
+            int col = slot % Board.SlotSize;
+            int owner = state.WallOwner(slot);
+
+            if ((state.HorizontalWalls & (1UL << slot)) != 0)
+                _wallLayer.Children.Add(CreateWall(MoveKind.HorizontalWall, row, col, owner));
+
+            if ((state.VerticalWalls & (1UL << slot)) != 0)
+                _wallLayer.Children.Add(CreateWall(MoveKind.VerticalWall, row, col, owner));
+        }
+
+        for (int player = 0; player < 2; player++) SnapPawn(player);
+
+        if (lastMove is { } move) MarkLastMove(move, state.SideToMove ^ 1);
+        else HideLastMove();
+
+        ClearHover();
+        RefreshOverlays();
+    }
+
+    /// <summary>
+    /// Applies a move with its animation. Completes once the motion has settled, so
+    /// the caller can chain the bot's reply without the two overlapping.
+    /// </summary>
+    public Task PlayAsync(Move move, GameState after)
+    {
+        _busy = true;
+        ClearHover();
+        ClearHints();
+
+        var done = new TaskCompletionSource();
+
+        int mover = after.SideToMove ^ 1;
+
+        if (move.Kind == MoveKind.Pawn)
+        {
+            AnimatePawn(mover, move.Cell, () => Finish());
+        }
+        else
+        {
+            Rectangle wall = CreateWall(move.Kind, move.Row, move.Col, mover);
+            _wallLayer.Children.Add(wall);
+            AnimateWallEntry(wall, move.IsHorizontal, () => Finish());
+        }
+
+        return done.Task;
+
+        void Finish()
+        {
+            _state = after;
+            _busy = false;
+            MarkLastMove(move, mover);
+            RefreshOverlays();
+            done.TrySetResult();
+        }
+    }
+
+    private void SnapPawn(int player)
+    {
+        Ellipse pawn = _pawnShapes[player];
+        int cell = _state.PawnOf(player);
+
+        pawn.BeginAnimation(Canvas.LeftProperty, null);
+        pawn.BeginAnimation(Canvas.TopProperty, null);
+
+        Place(pawn, CellCentreOf(Board.ColOf(cell)) - PawnRadius, CellCentreOf(Board.RowOf(cell)) - PawnRadius);
+    }
+
+    private void AnimatePawn(int player, int targetCell, Action completed)
+    {
+        Ellipse pawn = _pawnShapes[player];
+
+        double x = CellCentreOf(Board.ColOf(targetCell)) - PawnRadius;
+        double y = CellCentreOf(Board.RowOf(targetCell)) - PawnRadius;
+
+        var duration = TimeSpan.FromMilliseconds(300);
+        var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
+
+        var slideX = new DoubleAnimation(x, duration) { EasingFunction = ease };
+        var slideY = new DoubleAnimation(y, duration) { EasingFunction = ease };
+        slideY.Completed += (_, _) => completed();
+
+        pawn.BeginAnimation(Canvas.LeftProperty, slideX);
+        pawn.BeginAnimation(Canvas.TopProperty, slideY);
+
+        // A small stretch on departure and settle on arrival: the pawn reads as a
+        // physical piece being lifted rather than a sprite teleporting.
+        var pulse = new DoubleAnimationUsingKeyFrames { Duration = duration };
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromPercent(0)));
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.16, KeyTime.FromPercent(0.35),
+            new CubicEase { EasingMode = EasingMode.EaseOut }));
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromPercent(1),
+            new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.6 }));
+
+        var scale = (ScaleTransform)pawn.RenderTransform;
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
+    }
+
+    private Rectangle CreateWall(MoveKind kind, int row, int col, int owner)
+    {
+        bool horizontal = kind == MoveKind.HorizontalWall;
+
+        // Walls carry their owner's colour. The physical game uses neutral pieces, but
+        // on screen it is the difference between reading the position at a glance and
+        // having to reconstruct who built what.
+        var wall = new Rectangle
+        {
+            Width = horizontal ? WallLength : GapSize,
+            Height = horizontal ? GapSize : WallLength,
+            RadiusX = 2,
+            RadiusY = 2,
+            Fill = Palette.BrushOf(owner == 0 ? Palette.Accent0 : Palette.Accent1),
+            Stroke = Palette.BrushOf(Palette.Wall),
+            StrokeThickness = 0.75,
+            IsHitTestVisible = false,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            Effect = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 10,
+                ShadowDepth = 1.5,
+                Direction = 270,
+                Opacity = 0.22,
+            },
+        };
+
+        Place(wall, WallXOf(kind, col), WallYOf(kind, row));
+        return wall;
+    }
+
+    private static void AnimateWallEntry(Rectangle wall, bool horizontal, Action completed)
+    {
+        var scale = new ScaleTransform(horizontal ? 0.06 : 1, horizontal ? 1 : 0.06);
+        wall.RenderTransform = scale;
+        wall.Opacity = 0;
+
+        var duration = TimeSpan.FromMilliseconds(360);
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.35 };
+
+        var grow = new DoubleAnimation(1, duration) { EasingFunction = ease };
+        grow.Completed += (_, _) => completed();
+
+        // Walls snap in along their length — the direction they were slotted from.
+        scale.BeginAnimation(horizontal ? ScaleTransform.ScaleXProperty : ScaleTransform.ScaleYProperty, grow);
+        wall.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(170)));
+    }
+
+    // ================================================================= hover ==
+
+    private void OnMouseMove(object sender, MouseEventArgs e)
+    {
+        if (!_interactive || _busy) return;
+        UpdateHover(e.GetPosition(_root));
+    }
+
+    public void ToggleWallOrientation()
+    {
+        _preferHorizontal = !_preferHorizontal;
+        if (_interactive && !_busy && _root.IsMouseOver)
+            UpdateHover(Mouse.GetPosition(_root));
+    }
+
+    private void UpdateHover(Point point)
+    {
+        // Everything here is worked out in screen terms first and converted to rules
+        // coordinates at the end — the mapping is an involution, so the same helpers
+        // run in both directions.
+        int grooveCol = ClampSlot((int)Math.Round((point.X - Pad - CellSize - GapSize / 2) / Pitch));
+        int grooveRow = ClampSlot((int)Math.Round((point.Y - Pad - CellSize - GapSize / 2) / Pitch));
+
+        double distanceToVertical = Math.Abs(point.X - GrooveCentre(grooveCol));
+        double distanceToHorizontal = Math.Abs(point.Y - GrooveCentre(grooveRow));
+
+        bool nearVertical = distanceToVertical <= GrooveReach;
+        bool nearHorizontal = distanceToHorizontal <= GrooveReach;
+
+        if (nearVertical || nearHorizontal)
+        {
+            bool horizontal = nearVertical && nearHorizontal
+                ? _preferHorizontal
+                : nearHorizontal;
+
+            int viewRow = horizontal ? grooveRow : ClampSlot((int)Math.Round((point.Y - Pad - WallLength / 2) / Pitch));
+            int viewCol = horizontal ? ClampSlot((int)Math.Round((point.X - Pad - WallLength / 2) / Pitch)) : grooveCol;
+
+            ShowGhost(
+                horizontal ? MoveKind.HorizontalWall : MoveKind.VerticalWall,
+                ViewSlot(viewRow),
+                ViewSlot(viewCol));
+
+            HideHighlight();
+            return;
+        }
+
+        HideGhost();
+
+        int cellCol = ViewIndex(Math.Clamp((int)((point.X - Pad) / Pitch), 0, Board.Size - 1));
+        int cellRow = ViewIndex(Math.Clamp((int)((point.Y - Pad) / Pitch), 0, Board.Size - 1));
+
+        if (_state.IsPawnMoveLegal(cellRow, cellCol))
+        {
+            MoveHighlightTo(Board.Index(cellRow, cellCol));
+            Cursor = Cursors.Hand;
+        }
+        else
+        {
+            HideHighlight();
+            Cursor = Cursors.Arrow;
+        }
+    }
+
+    private void ShowGhost(MoveKind kind, int row, int col)
+    {
+        bool horizontal = kind == MoveKind.HorizontalWall;
+        bool legal = _state.IsWallLegal(kind, row, col);
+
+        var candidate = new Move(kind, row, col);
+        bool sameTarget = _ghostMove == candidate && _ghostLegal == legal;
+
+        _ghostMove = candidate;
+        _ghostLegal = legal;
+        Cursor = legal ? Cursors.Hand : Cursors.Arrow;
+
+        _ghost.Width = horizontal ? WallLength : GapSize;
+        _ghost.Height = horizontal ? GapSize : WallLength;
+
+        // A legal wall previews as the wall itself, half inked. An illegal one is drawn
+        // as an empty outline — it reads as "not a wall" without needing a warning colour
+        // that would clash with a player.
+        if (legal)
+        {
+            _ghost.Fill = Palette.BrushOf(_state.SideToMove == 0 ? Palette.Accent0 : Palette.Accent1);
+            _ghost.Stroke = null;
+        }
+        else
+        {
+            _ghost.Fill = null;
+            _ghost.Stroke = Palette.BrushOf(Palette.Danger);
+        }
+
+        _ghost.BeginAnimation(Canvas.LeftProperty, null);
+        _ghost.BeginAnimation(Canvas.TopProperty, null);
+        Place(_ghost, WallXOf(kind, col), WallYOf(kind, row));
+
+        if (sameTarget) return;
+
+        _ghost.BeginAnimation(OpacityProperty,
+            new DoubleAnimation(legal ? 0.5 : 0.3, TimeSpan.FromMilliseconds(110)));
+
+        WallPreviewChanged?.Invoke(this, MeasureWall(kind, row, col, legal));
+    }
+
+    /// <summary>Steps this wall would add to each side's shortest route.</summary>
+    private WallPreview MeasureWall(MoveKind kind, int row, int col, bool legal)
+    {
+        bool fits = _state.IsSlotFree(kind, row, col);
+
+        if (!legal) return new WallPreview(false, WouldSeal: fits, 0, 0);
+
+        int mover = _state.SideToMove;
+        int opponent = mover ^ 1;
+
+        GameState probe = _state;
+        probe.PlaceWallUnchecked(kind, row, col);
+
+        return new WallPreview(
+            true,
+            WouldSeal: false,
+            PathFinder.Distance(probe, opponent) - PathFinder.Distance(_state, opponent),
+            PathFinder.Distance(probe, mover) - PathFinder.Distance(_state, mover));
+    }
+
+    private void HideGhost()
+    {
+        if (_ghostMove is null) return;
+
+        _ghostMove = null;
+        _ghost.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(110)));
+        WallPreviewChanged?.Invoke(this, null);
+    }
+
+    private void MoveHighlightTo(int cell)
+    {
+        if (_hoverCell == cell) return;
+
+        double x = CellOriginOf(Board.ColOf(cell));
+        double y = CellOriginOf(Board.RowOf(cell));
+
+        _highlight.Fill = Palette.BrushOf(_state.SideToMove == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        if (_hoverCell < 0)
+        {
+            _highlight.BeginAnimation(Canvas.LeftProperty, null);
+            _highlight.BeginAnimation(Canvas.TopProperty, null);
+            Place(_highlight, x, y);
+            _highlight.BeginAnimation(OpacityProperty, new DoubleAnimation(0.16, TimeSpan.FromMilliseconds(130)));
+        }
+        else
+        {
+            // Gliding between squares rather than blinking keeps the eye anchored.
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var duration = TimeSpan.FromMilliseconds(170);
+            _highlight.BeginAnimation(Canvas.LeftProperty, new DoubleAnimation(x, duration) { EasingFunction = ease });
+            _highlight.BeginAnimation(Canvas.TopProperty, new DoubleAnimation(y, duration) { EasingFunction = ease });
+        }
+
+        _hoverCell = cell;
+    }
+
+    private void HideHighlight()
+    {
+        if (_hoverCell < 0) return;
+
+        _hoverCell = -1;
+        _highlight.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(130)));
+    }
+
+    private void ClearHover()
+    {
+        HideGhost();
+        HideHighlight();
+        Cursor = Cursors.Arrow;
+    }
+
+    private void OnLeftClick(object sender, MouseButtonEventArgs e)
+    {
+        if (!_interactive || _busy) return;
+
+        if (_ghostMove is { } wall)
+        {
+            if (_ghostLegal) MoveChosen?.Invoke(this, wall);
+            return;
+        }
+
+        if (_hoverCell >= 0)
+            MoveChosen?.Invoke(this, Move.ToCell(_hoverCell));
+    }
+
+    // ============================================================== overlays ==
+
+    private void RefreshOverlays()
+    {
+        for (int player = 0; player < 2; player++) SnapPawn(player);
+
+        ClearHints();
+
+        int active = _state.SideToMove;
+        bool live = !_state.IsGameOver;
+
+        for (int player = 0; player < 2; player++)
+            SetPulse(player, live && player == active);
+
+        RefreshRoutes();
+
+        if (!_interactive || !live) return;
+
+        Span<Move> buffer = stackalloc Move[8];
+        int count = _state.GeneratePawnMoves(buffer);
+
+        SolidColorBrush brush = Palette.BrushOf(active == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        for (int i = 0; i < count; i++)
+        {
+            int cell = buffer[i].Cell;
+
+            var dot = new Ellipse
+            {
+                Width = HintRadius * 2,
+                Height = HintRadius * 2,
+                Fill = brush,
+                Opacity = 0,
+            };
+
+            Place(dot, CellCentreOf(Board.ColOf(cell)) - HintRadius, CellCentreOf(Board.RowOf(cell)) - HintRadius);
+            _hintLayer.Children.Add(dot);
+
+            // Staggered so the options appear to unfold rather than pop in at once.
+            dot.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 0.42, TimeSpan.FromMilliseconds(200))
+            {
+                BeginTime = TimeSpan.FromMilliseconds(40 * i),
+            });
+        }
+    }
+
+    private void ClearHints() => _hintLayer.Children.Clear();
+
+    /// <summary>
+    /// Rings whatever just happened. The bot answers while you are looking elsewhere,
+    /// and without this you have to diff the board against your memory of it.
+    /// </summary>
+    private void MarkLastMove(Move move, int mover)
+    {
+        double x, y, width, height;
+
+        if (move.Kind == MoveKind.Pawn)
+        {
+            x = CellOriginOf(move.Col) - 2;
+            y = CellOriginOf(move.Row) - 2;
+            width = height = CellSize + 4;
+        }
+        else
+        {
+            bool horizontal = move.IsHorizontal;
+            x = WallXOf(move.Kind, move.Col) - 3;
+            y = WallYOf(move.Kind, move.Row) - 3;
+            width = (horizontal ? WallLength : GapSize) + 6;
+            height = (horizontal ? GapSize : WallLength) + 6;
+        }
+
+        _lastMoveMark.Width = width;
+        _lastMoveMark.Height = height;
+        _lastMoveMark.Stroke = Palette.BrushOf(mover == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        _lastMoveMark.BeginAnimation(Canvas.LeftProperty, null);
+        _lastMoveMark.BeginAnimation(Canvas.TopProperty, null);
+        Place(_lastMoveMark, x, y);
+
+        _lastMoveMark.BeginAnimation(OpacityProperty, new DoubleAnimation(0.6, TimeSpan.FromMilliseconds(220)));
+    }
+
+    private void HideLastMove() =>
+        _lastMoveMark.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(150)));
+
+    private void RefreshRoutes()
+    {
+        _routeLayer.Children.Clear();
+        if (!_showRoutes || _state.IsGameOver) return;
+
+        Span<byte> distances = stackalloc byte[Board.CellCount];
+        var cells = new List<int>(Board.CellCount);
+
+        for (int player = 0; player < 2; player++)
+        {
+            cells.Clear();
+            PathFinder.FillDistancesToGoal(_state, player, distances);
+            PathFinder.TraceShortestPath(_state, player, distances, cells);
+
+            if (cells.Count < 2) continue;
+
+            var points = new PointCollection(cells.Count);
+            foreach (int cell in cells)
+                points.Add(new Point(CellCentreOf(Board.ColOf(cell)), CellCentreOf(Board.RowOf(cell))));
+
+            _routeLayer.Children.Add(new Polyline
+            {
+                Points = points,
+                Stroke = Palette.BrushOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
+                StrokeThickness = 2,
+                StrokeDashArray = new DoubleCollection { 1.4, 2.2 },
+                StrokeDashCap = PenLineCap.Round,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                StrokeLineJoin = PenLineJoin.Round,
+                Opacity = 0.6,
+            });
+        }
+    }
+
+    private void SetPulse(int player, bool active)
+    {
+        DropShadowEffect glow = _pawnGlow[player];
+
+        if (!active)
+        {
+            glow.BeginAnimation(DropShadowEffect.OpacityProperty, null);
+            glow.Opacity = 0;
+            _pawnShapes[player].BeginAnimation(OpacityProperty, null);
+            _pawnShapes[player].Opacity = 0.72;
+            return;
+        }
+
+        _pawnShapes[player].BeginAnimation(OpacityProperty, null);
+        _pawnShapes[player].Opacity = 1;
+
+        glow.BeginAnimation(DropShadowEffect.OpacityProperty, new DoubleAnimation(0.12, 0.44, TimeSpan.FromMilliseconds(1600))
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+        });
+    }
+
+    // ============================================================== geometry ==
+
+    private static void Place(UIElement element, double x, double y)
+    {
+        Canvas.SetLeft(element, x);
+        Canvas.SetTop(element, y);
+    }
+
+    private static int ClampSlot(int value) => Math.Clamp(value, 0, Board.SlotSize - 1);
+
+    /// <summary>Rules row or column to the screen one, and back. Its own inverse.</summary>
+    private int ViewIndex(int index) => _flipped ? Board.Size - 1 - index : index;
+
+    /// <summary>Rules wall slot row or column to the screen one, and back.</summary>
+    private int ViewSlot(int index) => _flipped ? Board.SlotSize - 1 - index : index;
+
+    // --- screen space (already-converted indices) ---
+    private static double Origin(int viewIndex) => Pad + viewIndex * Pitch;
+
+    private static double Centre(int viewIndex) => Pad + viewIndex * Pitch + CellSize / 2;
+
+    /// <summary>Centre of the groove that follows screen row/column <paramref name="viewIndex"/>.</summary>
+    private static double GrooveCentre(int viewIndex) => Pad + viewIndex * Pitch + CellSize + GapSize / 2;
+
+    // --- rules space (converted here) ---
+    private double CellOriginOf(int index) => Origin(ViewIndex(index));
+
+    private double CellCentreOf(int index) => Centre(ViewIndex(index));
+
+    private double WallXOf(MoveKind kind, int col) => kind == MoveKind.HorizontalWall
+        ? Origin(ViewSlot(col))
+        : Origin(ViewSlot(col)) + CellSize;
+
+    private double WallYOf(MoveKind kind, int row) => kind == MoveKind.HorizontalWall
+        ? Origin(ViewSlot(row)) + CellSize
+        : Origin(ViewSlot(row));
+}

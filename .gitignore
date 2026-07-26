@@ -1,0 +1,9 @@
+bin/
+obj/
+publish/
+publish-web/
+*.user
+.vs/
+
+# Local tool state, not project configuration.
+.claude/settings.local.json

@@ -1,0 +1,246 @@
+<UserControl x:Class="Quoridor.App.Views.MenuView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+
+    <Grid>
+
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+
+            <StackPanel Width="480">
+
+                <!-- Letters are generated in code so each one can arrive on its own beat. -->
+                <StackPanel x:Name="TitleHost" Orientation="Horizontal" Margin="0,0,0,12" />
+
+                <TextBlock x:Name="Tagline"
+                           Style="{StaticResource Text.Subtitle}"
+                           Text="Cross the board first. Ten walls to make the other route longer." />
+
+                <Rectangle x:Name="Divider"
+                           Height="1"
+                           HorizontalAlignment="Left"
+                           Width="0"
+                           Fill="{DynamicResource Brush.Line}"
+                           Margin="0,30,0,16" />
+
+                <StackPanel x:Name="MenuItems">
+                    <Button x:Name="LocalButton" Style="{StaticResource Button.Menu}" Content="Local match" />
+                    <Button x:Name="BotButton" Style="{StaticResource Button.Menu}" Content="Play the bot" />
+                    <Button x:Name="SpectateButton" Style="{StaticResource Button.Menu}" Content="Watch two engines" />
+                    <Button x:Name="RulesButton" Style="{StaticResource Button.Menu}" Content="How to play" />
+                    <Button x:Name="QuitButton" Style="{StaticResource Button.Menu}" Content="Quit" />
+                </StackPanel>
+
+                <Grid x:Name="OptionsGrid" Margin="52,26,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0"
+                               Style="{StaticResource Text.Section}"
+                               Text="Bot strength" VerticalAlignment="Center" />
+                    <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
+                        <RadioButton x:Name="EasyOption" GroupName="Strength"
+                                     Style="{StaticResource Button.Segment}" Content="Easy" />
+                        <RadioButton x:Name="NormalOption" GroupName="Strength"
+                                     Style="{StaticResource Button.Segment}" Content="Normal" />
+                        <RadioButton x:Name="HardOption" GroupName="Strength"
+                                     Style="{StaticResource Button.Segment}" Content="Hard" IsChecked="True" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0"
+                               Style="{StaticResource Text.Section}"
+                               Text="Clock" VerticalAlignment="Center" Margin="0,10,0,0" />
+                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                        <RadioButton x:Name="ClockOffOption" GroupName="Clock"
+                                     Style="{StaticResource Button.Segment}" Content="Off" IsChecked="True" />
+                        <RadioButton x:Name="ClockBlitzOption" GroupName="Clock"
+                                     Style="{StaticResource Button.Segment}" Content="5+3" />
+                        <RadioButton x:Name="ClockRapidOption" GroupName="Clock"
+                                     Style="{StaticResource Button.Segment}" Content="3+2" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="2" Grid.Column="0"
+                               Style="{StaticResource Text.Section}"
+                               Text="You move" VerticalAlignment="Center" Margin="0,10,0,0" />
+                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
+                        <RadioButton x:Name="MoveFirstOption" GroupName="Order"
+                                     Style="{StaticResource Button.Segment}" Content="First" IsChecked="True" />
+                        <RadioButton x:Name="MoveSecondOption" GroupName="Order"
+                                     Style="{StaticResource Button.Segment}" Content="Second" />
+                    </StackPanel>
+                </Grid>
+
+            </StackPanel>
+
+            <!-- A real game plays itself here; the board is added in code. -->
+            <Grid x:Name="DemoHost"
+                  Width="368" Height="368"
+                  Margin="64,0,0,0"
+                  VerticalAlignment="Center"
+                  IsHitTestVisible="False" />
+
+        </StackPanel>
+
+        <Grid VerticalAlignment="Bottom" Margin="30,0,30,24">
+            <TextBlock Style="{StaticResource Text.Mono}"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Center"
+                       Opacity="0.7"
+                       Text="Ctrl+T  theme      F11  fullscreen" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="SettingsButton"
+                        Style="{StaticResource Button.Ghost}"
+                        Content="Settings"
+                        Margin="0,0,8,0" />
+                <Button x:Name="ThemeButton"
+                        Style="{StaticResource Button.Ghost}"
+                        Content="Light theme" />
+            </StackPanel>
+        </Grid>
+
+        <!-- =============================================== settings overlay ==== -->
+        <Grid x:Name="SettingsOverlay"
+              Background="{DynamicResource Brush.Overlay}"
+              Visibility="Collapsed"
+              Opacity="0">
+            <Border x:Name="SettingsCard"
+                    Style="{StaticResource Card}"
+                    MaxWidth="560"
+                    Padding="36,32"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="SettingsScale" ScaleX="0.96" ScaleY="0.96" />
+                </Border.RenderTransform>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Text.Display}" FontSize="30" Text="Settings" />
+
+                    <Grid Margin="0,26,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Theme" VerticalAlignment="Center" />
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
+                            <RadioButton x:Name="ThemeDarkOption" GroupName="SetTheme"
+                                         Style="{StaticResource Button.Segment}" Content="Dark" />
+                            <RadioButton x:Name="ThemeLightOption" GroupName="SetTheme"
+                                         Style="{StaticResource Button.Segment}" Content="Light" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Engine thinks for" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
+                            <RadioButton x:Name="EngineFastOption" GroupName="SetEngine"
+                                         Style="{StaticResource Button.Segment}" Content="0.4 s" />
+                            <RadioButton x:Name="EngineNormalOption" GroupName="SetEngine"
+                                         Style="{StaticResource Button.Segment}" Content="1.2 s" />
+                            <RadioButton x:Name="EngineDeepOption" GroupName="SetEngine"
+                                         Style="{StaticResource Button.Segment}" Content="3 s" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Watched games" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
+                            <RadioButton x:Name="PaceBriskOption" GroupName="SetPace"
+                                         Style="{StaticResource Button.Segment}" Content="Brisk" />
+                            <RadioButton x:Name="PaceSteadyOption" GroupName="SetPace"
+                                         Style="{StaticResource Button.Segment}" Content="Steady" />
+                            <RadioButton x:Name="PaceCalmOption" GroupName="SetPace"
+                                         Style="{StaticResource Button.Segment}" Content="Calm" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Routes" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
+                            <RadioButton x:Name="RoutesHiddenOption" GroupName="SetRoutes"
+                                         Style="{StaticResource Button.Segment}" Content="On request" />
+                            <RadioButton x:Name="RoutesShownOption" GroupName="SetRoutes"
+                                         Style="{StaticResource Button.Segment}" Content="Always" />
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,24,0,0" TextWrapping="Wrap"
+                               Text="Kept in your roaming profile, so the game opens the way you left it." />
+
+                    <Button x:Name="CloseSettingsButton"
+                            Style="{StaticResource Button.Ghost}"
+                            Content="Done"
+                            HorizontalAlignment="Right"
+                            Margin="0,26,0,0" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ================================================== rules overlay ==== -->
+        <Grid x:Name="RulesOverlay"
+              Background="{DynamicResource Brush.Overlay}"
+              Visibility="Collapsed"
+              Opacity="0">
+            <Border x:Name="RulesCard"
+                    Style="{StaticResource Card}"
+                    MaxWidth="640"
+                    Padding="36,32"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="RulesScale" ScaleX="0.96" ScaleY="0.96" />
+                </Border.RenderTransform>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Text.Display}" FontSize="30" Text="How to play" />
+
+                    <TextBlock Style="{StaticResource Text.Body}" Margin="0,18,0,0"
+                               Text="On your turn you either step your pawn one square, or place one of your ten walls. Never both." />
+                    <TextBlock Style="{StaticResource Text.Body}" Margin="0,10,0,0"
+                               Text="A wall is two squares long and sits in the groove between squares. It blocks movement from both sides." />
+                    <TextBlock Style="{StaticResource Text.Body}" Margin="0,10,0,0"
+                               Text="A wall may never leave a player with no route at all — the board always stays solvable for both." />
+                    <TextBlock Style="{StaticResource Text.Body}" Margin="0,10,0,0"
+                               Text="Meet the other pawn face to face and you may hop straight over it. If a wall stands right behind it, step diagonally around instead." />
+                    <TextBlock Style="{StaticResource Text.Body}" Margin="0,10,0,0"
+                               Text="First pawn to reach the far row wins." />
+
+                    <Rectangle Height="1" Fill="{DynamicResource Brush.Line}" Margin="0,24,0,20" />
+
+                    <TextBlock Style="{StaticResource Text.Section}" Text="Controls" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
+                               Text="Click a highlighted square         move your pawn" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
+                               Text="Hover a groove, then click         place a wall" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
+                               Text="Right-click / wheel / R            flip the wall" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
+                               Text="Ctrl+Z  undo      F2  restart      Esc  menu" />
+
+                    <Button x:Name="CloseRulesButton"
+                            Style="{StaticResource Button.Ghost}"
+                            Content="Got it"
+                            HorizontalAlignment="Right"
+                            Margin="0,26,0,0" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+    </Grid>
+</UserControl>

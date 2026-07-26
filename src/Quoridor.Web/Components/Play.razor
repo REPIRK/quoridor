@@ -1,0 +1,266 @@
+@using Quoridor.Engine
+
+<div class="app" data-theme="@(_light ? "light" : "dark")">
+
+    <header class="bar">
+        <div class="brand">Quoridor</div>
+        <div class="mode">@Title</div>
+        <div class="actions">
+            <button class="ghost" @onclick="() => _showSetup = true">New game</button>
+            <button class="ghost @(_routes ? "on" : "")" @onclick="() => _routes = !_routes">Routes</button>
+            <button class="ghost" @onclick="() => _light = !_light">@(_light ? "Dark" : "Light")</button>
+        </div>
+    </header>
+
+    <main class="layout">
+
+        <aside class="players">
+            @for (int seat = 1; seat >= 0; seat--)
+            {
+                int player = seat;
+                bool onMove = !_session.IsOver && _session.State.SideToMove == player;
+
+                <div class="player @(onMove ? "on-move" : "")">
+                    <span class="turn @(player == 0 ? "p0" : "p1")"></span>
+                    <div class="who">
+                        <div class="name">@_session.PlayerName(player)</div>
+                        <div class="walls @(player == 0 ? "p0" : "p1")">
+                            @for (int i = 0; i < Board.WallsPerPlayer; i++)
+                            {
+                                <i class="@(i < _session.State.WallsOf(player) ? "" : "spent")"></i>
+                            }
+                            <span class="count">@_session.State.WallsOf(player)</span>
+                        </div>
+                    </div>
+                    <div class="steps">@Steps(player)</div>
+                </div>
+            }
+        </aside>
+
+        <div class="board-wrap">
+            <BoardView State="_session.State"
+                       Interactive="@(_session.IsHumanTurn && !_thinking && !_session.IsOver)"
+                       ShowRoutes="_routes"
+                       LastMove="_session.LastMove"
+                       OnMove="OnMove"
+                       OnPreview="text => _preview = text" />
+        </div>
+
+        <aside class="panel">
+            <h2>Status</h2>
+            <p class="status">@Status@(_thinking ? "…" : "")</p>
+            <p class="hint">@(_preview ?? Hint)</p>
+            @if (EngineLine is { } engine)
+            {
+                <p class="engine">@engine</p>
+            }
+
+            <hr />
+
+            <h2>Moves</h2>
+            <ol class="moves">
+                @for (int row = 0; row * 2 < _session.Moves.Count; row++)
+                {
+                    <li>
+                        <span class="n">@(row + 1).</span>
+                        <span>@Notation.Format(_session.Moves[row * 2])</span>
+                        <span>@(row * 2 + 1 < _session.Moves.Count ? Notation.Format(_session.Moves[row * 2 + 1]) : "")</span>
+                    </li>
+                }
+                @if (_session.Moves.Count == 0)
+                {
+                    <li class="empty">Nothing played yet.</li>
+                }
+            </ol>
+
+            <hr />
+
+            <div class="actions">
+                <button class="ghost" disabled="@(!_session.CanUndo || _thinking)" @onclick="Undo">Undo</button>
+                <button class="ghost" @onclick="Restart">Restart</button>
+            </div>
+        </aside>
+    </main>
+
+    @if (_session.IsOver)
+    {
+        <div class="overlay">
+            <div class="result">
+                <h1>@WinnerLabel</h1>
+                <p>@_session.Moves.Count moves played</p>
+                <div class="actions">
+                    <button class="ghost" @onclick="Restart">Rematch</button>
+                    <button class="ghost" @onclick="() => _showSetup = true">New game</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_showSetup)
+    {
+        <div class="overlay">
+            <div class="setup">
+                <h1>Quoridor</h1>
+                <p class="lead">
+                    Cross the board first. Ten walls each to make the other route longer.
+                </p>
+
+                <div class="row">
+                    <span class="label">Opponent</span>
+                    <button class="seg @(_mode == WebMode.VersusBot ? "on" : "")"
+                            @onclick="() => _mode = WebMode.VersusBot">The engine</button>
+                    <button class="seg @(_mode == WebMode.Hotseat ? "on" : "")"
+                            @onclick="() => _mode = WebMode.Hotseat">A friend, here</button>
+                </div>
+
+                @if (_mode == WebMode.VersusBot)
+                {
+                    <div class="row">
+                        <span class="label">Strength</span>
+                        @foreach (BotStrength option in new[] { BotStrength.Easy, BotStrength.Normal, BotStrength.Hard })
+                        {
+                            BotStrength choice = option;
+                            <button class="seg @(_strength == choice ? "on" : "")"
+                                    @onclick="() => _strength = choice">@choice</button>
+                        }
+                    </div>
+                }
+
+                <p class="fine">
+                    Click a square to step, or hover the groove between two squares to place a wall.
+                    Hard runs a real alpha-beta search — in a browser it gets one thread, so it thinks
+                    a little less deeply than the desktop build.
+                </p>
+
+                <div class="actions">
+                    <button class="ghost primary" @onclick="StartGame">Play</button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    // The full engine is the default; the two heuristic bots are the handicap.
+    private WebSession _session = new(WebMode.VersusBot, BotStrength.Hard);
+
+    private WebMode _mode = WebMode.VersusBot;
+    private BotStrength _strength = BotStrength.Hard;
+
+    private bool _showSetup = true;
+    private bool _thinking;
+    private bool _light;
+    private bool _routes;
+    private string? _preview;
+
+    private string Title => _session.Mode == WebMode.Hotseat
+        ? "Two players, one screen"
+        : $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine";
+
+    private string Status
+    {
+        get
+        {
+            if (_session.IsOver) return WinnerLabel;
+            if (_thinking) return "Thinking";
+
+            return _session.Mode == WebMode.VersusBot && _session.IsHumanTurn
+                ? "Your move"
+                : $"{_session.PlayerName(_session.State.SideToMove)} to move";
+        }
+    }
+
+    private string Hint => _session.IsOver
+        ? "Rematch to play again."
+        : _session.State.WallsOf(_session.State.SideToMove) == 0
+            ? "No walls left — it is a straight race now."
+            : "Click a square to step, or hover a groove between squares to place a wall.";
+
+    private string WinnerLabel
+    {
+        get
+        {
+            int winner = _session.Winner;
+            if (winner < 0) return string.Empty;
+
+            return _session.Mode == WebMode.VersusBot
+                ? winner == 0 ? "You win" : "The engine wins"
+                : $"{_session.PlayerName(winner)} wins";
+        }
+    }
+
+    private string? EngineLine
+    {
+        get
+        {
+            if (_session.Bot is not SearchAgent engine || engine.LastResult.Depth == 0) return null;
+
+            SearchResult result = engine.LastResult;
+            string verdict = result.IsForced
+                ? result.Score > 0 ? "engine has a forced win" : "engine is lost"
+                : result.Score > 250 ? "engine ahead"
+                : result.Score < -250 ? "you ahead"
+                : "level";
+
+            return $"depth {result.Depth} · {result.Nodes:N0} nodes · {verdict}";
+        }
+    }
+
+    private string Steps(int player)
+    {
+        (int first, int second) = _session.Distances();
+        int distance = player == 0 ? first : second;
+
+        return distance < 0 ? "no route" : distance == 0 ? "home" : $"{distance} to go";
+    }
+
+    private void StartGame()
+    {
+        _session = new WebSession(_mode, _strength);
+        _showSetup = false;
+        _preview = null;
+    }
+
+    private void Restart()
+    {
+        _session = new WebSession(_session.Mode, _session.Strength);
+        _preview = null;
+    }
+
+    private void Undo()
+    {
+        _session.Undo();
+        _preview = null;
+    }
+
+    private async Task OnMove(Move move)
+    {
+        if (_thinking || !_session.IsHumanTurn) return;
+        if (!_session.Apply(move)) return;
+
+        _preview = null;
+        await RunEngine();
+    }
+
+    /// <summary>
+    /// WebAssembly has one thread, and the search is on it. Showing "Thinking" and then
+    /// yielding lets the browser paint that before the page goes quiet for half a second
+    /// — without the yield the label would only appear after the search had finished.
+    /// </summary>
+    private async Task RunEngine()
+    {
+        while (_session.IsBotTurn)
+        {
+            _thinking = true;
+            StateHasChanged();
+            await Task.Delay(40);
+
+            Move move = _session.Think();
+            _session.Apply(move);
+
+            _thinking = false;
+            StateHasChanged();
+            await Task.Delay(1);
+        }
+    }
+}

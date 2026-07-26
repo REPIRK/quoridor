@@ -1,0 +1,60 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; a half-uploaded site is worse than an old one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      # Ahead-of-time compilation. Interpreted WebAssembly costs the engine four or
+      # five plies, which is the difference between a sparring partner and a pushover.
+      # This step is why the job takes minutes rather than seconds.
+      - name: Install the WebAssembly toolchain
+        run: dotnet workload install wasm-tools
+
+      - name: Publish
+        run: dotnet publish src/Quoridor.Web -c Release -o published
+
+      # GitHub Pages serves a project site from /<repository>/, so the base href the
+      # app was built with has to be rewritten to match.
+      - name: Point the app at its subdirectory
+        run: |
+          sed -i 's|<base href="/" />|<base href="/${{ github.event.repository.name }}/" />|g' published/wwwroot/index.html
+          touch published/wwwroot/.nojekyll
+          cp published/wwwroot/index.html published/wwwroot/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: published/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

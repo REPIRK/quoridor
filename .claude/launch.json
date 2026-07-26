@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "src/Quoridor.Web/Quoridor.Web.csproj",
+        "-c",
+        "Release",
+        "--urls",
+        "http://localhost:5199"
+      ],
+      "port": 5199
+    }
+  ]
+}

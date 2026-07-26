@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Quoridor.Web</RootNamespace>
+    <AssemblyName>Quoridor.Web</AssemblyName>
+
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Ahead-of-time compilation requires trimming, so the game's own assemblies are
+         rooted below: the trimmer works on the framework, and nothing it cannot see
+         through can reach the engine. -->
+    <PublishTrimmed>true</PublishTrimmed>
+
+    <!-- Only takes effect on publish. Interpreted WebAssembly runs the search about a
+         hundred times slower than the desktop build, which costs the engine four or
+         five plies; ahead-of-time compilation is the difference between a sparring
+         partner and a pushover. Needs the wasm-tools workload, which the CI installs. -->
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <WasmStripILAfterAOT>true</WasmStripILAfterAOT>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="9.0.17" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.17" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Quoridor.Core\Quoridor.Core.csproj" />
+    <ProjectReference Include="..\Quoridor.Engine\Quoridor.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Quoridor.Core" />
+    <TrimmerRootAssembly Include="Quoridor.Engine" />
+  </ItemGroup>
+
+</Project>

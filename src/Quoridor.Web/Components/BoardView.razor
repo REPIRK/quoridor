@@ -1,0 +1,367 @@
+@*
+    The board, in the same fixed 728x728 space the desktop app draws in — so the
+    geometry constants below are the same numbers, and the SVG viewBox does the
+    scaling that a Viewbox does there.
+
+    Hover works without a mode switch, as on the desktop: every groove between two
+    squares is its own target, so which way the wall lies follows from where the
+    cursor is rather than from a toggle.
+*@
+
+<svg class="board" viewBox="0 0 728 728" preserveAspectRatio="xMidYMid meet" @onmouseleave="ClearHover">
+
+    <rect class="backdrop" x="0" y="0" width="728" height="728" rx="6" />
+
+    @* Razor claims <text> for its own block syntax, so the coordinate labels are the
+       one part of the board that has to be emitted through the render tree directly. *@
+    @Coordinates
+
+    @for (int row = 0; row < Board.Size; row++)
+    {
+        for (int col = 0; col < Board.Size; col++)
+        {
+            <rect class="cell" x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell" rx="3" />
+        }
+    }
+
+    @* Each player's target row: a wash across the squares and a finish line on the edge. *@
+    @for (int player = 0; player < 2; player++)
+    {
+        int goal = Board.GoalRow(player);
+        string accent = player == 0 ? "p0" : "p1";
+
+        for (int col = 0; col < Board.Size; col++)
+        {
+            <rect class="goal @accent" x="@Origin(col)" y="@Origin(goal)" width="@Cell" height="@Cell" rx="3" />
+        }
+
+        <rect class="finish @accent" x="@Pad" y="@(goal == 0 ? Origin(0) : Origin(goal) + Cell - 3)"
+              width="@(Board.Size * Cell + (Board.Size - 1) * Gap)" height="3" />
+    }
+
+    @if (LastMove is { } last)
+    {
+        <rect class="last @(LastMoverClass)" rx="3"
+              x="@(LastX(last) - 3)" y="@(LastY(last) - 3)"
+              width="@(LastWidth(last) + 6)" height="@(LastHeight(last) + 6)" />
+    }
+
+    @if (ShowRoutes)
+    {
+        @foreach ((string accent, string points) in Routes())
+        {
+            <polyline class="route @accent" points="@points" />
+        }
+    }
+
+    @foreach (int cell in Hints())
+    {
+        <circle class="hint @(State.SideToMove == 0 ? "p0" : "p1")"
+                cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="7" />
+    }
+
+    @foreach ((MoveKind kind, int row, int col, int owner) in PlacedWalls())
+    {
+        <rect class="wall @(owner == 0 ? "p0" : "p1")" rx="2"
+              x="@WallX(kind, col)" y="@WallY(kind, row)"
+              width="@(kind == MoveKind.HorizontalWall ? WallLength : Gap)"
+              height="@(kind == MoveKind.HorizontalWall ? Gap : WallLength)" />
+    }
+
+    @if (_ghost is { } ghost)
+    {
+        <rect class="ghost @(_ghostLegal ? (State.SideToMove == 0 ? "p0" : "p1") : "bad")" rx="2"
+              x="@WallX(ghost.Kind, ghost.Col)" y="@WallY(ghost.Kind, ghost.Row)"
+              width="@(ghost.IsHorizontal ? WallLength : Gap)"
+              height="@(ghost.IsHorizontal ? Gap : WallLength)" />
+    }
+
+    @for (int player = 0; player < 2; player++)
+    {
+        int cell = State.PawnOf(player);
+        bool active = !State.IsGameOver && State.SideToMove == player;
+
+        <circle class="pawn @(player == 0 ? "p0" : "p1") @(active ? "active" : "")"
+                cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="20" />
+    }
+
+    @* Hit targets last so they sit above everything they select. Squares first,
+       grooves after, so a groove wins the few pixels where they overlap. *@
+    @for (int row = 0; row < Board.Size; row++)
+    {
+        for (int col = 0; col < Board.Size; col++)
+        {
+            int r = row;
+            int c = col;
+
+            <rect class="hit" x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell"
+                  @onmouseover="() => HoverCell(r, c)" @onclick="Commit" />
+        }
+    }
+
+    @for (int row = 0; row < Board.SlotSize; row++)
+    {
+        for (int col = 0; col < Board.Size; col++)
+        {
+            int r = row;
+            int c = Math.Min(col, Board.SlotSize - 1);
+
+            <rect class="hit" x="@Origin(col)" y="@(Origin(row) + Cell - 4)" width="@Cell" height="@(Gap + 8)"
+                  @onmouseover="() => HoverWall(MoveKind.HorizontalWall, r, c)" @onclick="Commit" />
+        }
+    }
+
+    @for (int row = 0; row < Board.Size; row++)
+    {
+        for (int col = 0; col < Board.SlotSize; col++)
+        {
+            int r = Math.Min(row, Board.SlotSize - 1);
+            int c = col;
+
+            <rect class="hit" x="@(Origin(col) + Cell - 4)" y="@Origin(row)" width="@(Gap + 8)" height="@Cell"
+                  @onmouseover="() => HoverWall(MoveKind.VerticalWall, r, c)" @onclick="Commit" />
+        }
+    }
+</svg>
+
+@code {
+    private const int Pad = 28;
+    private const int Cell = 64;
+    private const int Gap = 12;
+    private const int Pitch = Cell + Gap;
+    private const int Extent = Pad * 2 + Board.Size * Cell + (Board.Size - 1) * Gap;
+    private const int WallLength = Cell * 2 + Gap;
+
+    private Move? _ghost;
+    private bool _ghostLegal;
+    private int _hoverCell = -1;
+    private bool _needsRender = true;
+
+    [Parameter, EditorRequired] public GameState State { get; set; }
+
+    [Parameter] public bool Interactive { get; set; }
+
+    [Parameter] public bool ShowRoutes { get; set; }
+
+    [Parameter] public Move? LastMove { get; set; }
+
+    [Parameter] public EventCallback<Move> OnMove { get; set; }
+
+    /// <summary>Reports what the wall under the cursor would cost, or null when there is none.</summary>
+    [Parameter] public EventCallback<string?> OnPreview { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        _needsRender = true;
+
+        if (Interactive) return;
+
+        _ghost = null;
+        _hoverCell = -1;
+    }
+
+    // Mouse movement inside one target must not redraw three hundred elements.
+    protected override bool ShouldRender()
+    {
+        bool render = _needsRender;
+        _needsRender = false;
+        return render;
+    }
+
+    private string LastMoverClass => State.SideToMove == 0 ? "p1" : "p0";
+
+    private RenderFragment Coordinates => builder =>
+    {
+        int sequence = 0;
+
+        for (int i = 0; i < Quoridor.Core.Board.Size; i++)
+        {
+            Label($"{Quoridor.Core.Board.Size - i}", 14, Centre(i) + 4);
+            Label($"{(char)('a' + i)}", Centre(i), Extent - Pad + 16);
+        }
+
+        void Label(string text, int x, int y)
+        {
+            builder.OpenElement(sequence++, "text");
+            builder.AddAttribute(sequence++, "class", "coord");
+            builder.AddAttribute(sequence++, "x", x);
+            builder.AddAttribute(sequence++, "y", y);
+            builder.AddContent(sequence++, text);
+            builder.CloseElement();
+        }
+    };
+
+    // =============================================================== interaction ==
+
+    private void HoverCell(int row, int col)
+    {
+        if (!Interactive) return;
+
+        int cell = Board.Index(row, col);
+        bool legal = State.IsPawnMoveLegal(row, col);
+
+        if (_hoverCell == (legal ? cell : -1) && _ghost is null) return;
+
+        _hoverCell = legal ? cell : -1;
+        _ghost = null;
+        _needsRender = true;
+
+        OnPreview.InvokeAsync(null);
+    }
+
+    private void HoverWall(MoveKind kind, int row, int col)
+    {
+        if (!Interactive) return;
+
+        var candidate = new Move(kind, row, col);
+        if (_ghost == candidate) return;
+
+        _ghost = candidate;
+        _ghostLegal = State.IsWallLegal(kind, row, col);
+        _hoverCell = -1;
+        _needsRender = true;
+
+        OnPreview.InvokeAsync(Describe(candidate, _ghostLegal));
+    }
+
+    private void ClearHover()
+    {
+        if (_ghost is null && _hoverCell < 0) return;
+
+        _ghost = null;
+        _hoverCell = -1;
+        _needsRender = true;
+
+        OnPreview.InvokeAsync(null);
+    }
+
+    private async Task Commit()
+    {
+        if (!Interactive) return;
+
+        if (_ghost is { } wall)
+        {
+            if (_ghostLegal) await OnMove.InvokeAsync(wall);
+            return;
+        }
+
+        if (_hoverCell >= 0) await OnMove.InvokeAsync(Move.ToCell(_hoverCell));
+    }
+
+    /// <summary>
+    /// What the wall would actually do. Checking legality already walks both routes,
+    /// so the number that decides whether it is worth playing is nearly free.
+    /// </summary>
+    private string Describe(Move wall, bool legal)
+    {
+        if (!legal)
+        {
+            return State.IsSlotFree(wall.Kind, wall.Row, wall.Col)
+                ? "That would leave a player with no route at all — not allowed."
+                : "No room for a wall there.";
+        }
+
+        int mover = State.SideToMove;
+        int opponent = mover ^ 1;
+
+        GameState placed = State;
+        placed.PlaceWallUnchecked(wall.Kind, wall.Row, wall.Col);
+
+        int them = PathFinder.Distance(placed, opponent) - PathFinder.Distance(State, opponent);
+        int us = PathFinder.Distance(placed, mover) - PathFinder.Distance(State, mover);
+
+        string cost = them switch
+        {
+            0 => "Costs them nothing",
+            1 => "Costs them 1 step",
+            _ => $"Costs them {them} steps",
+        };
+
+        return us == 0 ? $"{cost}, and nothing to you." : $"{cost}, and {us} to you.";
+    }
+
+    // =================================================================== contents ==
+
+    private List<int> Hints()
+    {
+        var cells = new List<int>(8);
+        if (!Interactive || State.IsGameOver) return cells;
+
+        Span<Move> buffer = stackalloc Move[8];
+        int count = State.GeneratePawnMoves(buffer);
+        for (int i = 0; i < count; i++) cells.Add(buffer[i].Cell);
+
+        return cells;
+    }
+
+    private IEnumerable<(MoveKind Kind, int Row, int Col, int Owner)> PlacedWalls()
+    {
+        for (int slot = 0; slot < Board.SlotCount; slot++)
+        {
+            int row = slot / Board.SlotSize;
+            int col = slot % Board.SlotSize;
+            int owner = State.WallOwner(slot);
+
+            if ((State.HorizontalWalls & (1UL << slot)) != 0)
+                yield return (MoveKind.HorizontalWall, row, col, owner);
+
+            if ((State.VerticalWalls & (1UL << slot)) != 0)
+                yield return (MoveKind.VerticalWall, row, col, owner);
+        }
+    }
+
+    private List<(string Accent, string Points)> Routes()
+    {
+        var routes = new List<(string, string)>(2);
+        if (State.IsGameOver) return routes;
+
+        Span<byte> distances = stackalloc byte[Board.CellCount];
+
+        for (int player = 0; player < 2; player++)
+        {
+            var cells = new List<int>(Board.CellCount);
+
+            PathFinder.FillDistancesToGoal(State, player, distances);
+            PathFinder.TraceShortestPath(State, player, distances, cells);
+
+            if (cells.Count < 2) continue;
+
+            routes.Add((player == 0 ? "p0" : "p1",
+                string.Join(' ', cells.Select(c => $"{Centre(Board.ColOf(c))},{Centre(Board.RowOf(c))}"))));
+        }
+
+        return routes;
+    }
+
+    // =================================================================== geometry ==
+
+    private static int Origin(int index) => Pad + index * Pitch;
+
+    private static int Centre(int index) => Pad + index * Pitch + Cell / 2;
+
+    private static int WallX(MoveKind kind, int col) =>
+        kind == MoveKind.HorizontalWall ? Origin(col) : Origin(col) + Cell;
+
+    private static int WallY(MoveKind kind, int row) =>
+        kind == MoveKind.HorizontalWall ? Origin(row) + Cell : Origin(row);
+
+    private static int LastX(Move move) =>
+        move.Kind == MoveKind.Pawn ? Origin(move.Col) : WallX(move.Kind, move.Col);
+
+    private static int LastY(Move move) =>
+        move.Kind == MoveKind.Pawn ? Origin(move.Row) : WallY(move.Kind, move.Row);
+
+    private static int LastWidth(Move move) => move.Kind switch
+    {
+        MoveKind.Pawn => Cell,
+        MoveKind.HorizontalWall => WallLength,
+        _ => Gap,
+    };
+
+    private static int LastHeight(Move move) => move.Kind switch
+    {
+        MoveKind.Pawn => Cell,
+        MoveKind.HorizontalWall => Gap,
+        _ => WallLength,
+    };
+}

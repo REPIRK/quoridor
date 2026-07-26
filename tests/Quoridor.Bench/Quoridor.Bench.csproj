@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Quoridor.Bench</AssemblyName>
+    <RootNamespace>Quoridor.Bench</RootNamespace>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Quoridor.Core\Quoridor.Core.csproj" />
+    <ProjectReference Include="..\..\src\Quoridor.Engine\Quoridor.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

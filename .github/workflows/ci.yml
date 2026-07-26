@@ -1,0 +1,42 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    # The desktop app is WPF, so the full solution only builds on Windows.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build
+        run: dotnet build Quoridor.sln -c Release --nologo
+
+      - name: Rules and engine checks
+        run: dotnet run --project tests/Quoridor.Selftest -c Release --no-build
+
+  linux:
+    # Everything except the WPF app is portable; this is the part that has to keep
+    # working for the browser build to keep working.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Rules and engine checks
+        run: dotnet run --project tests/Quoridor.Selftest -c Release
+
+      - name: Browser build
+        run: dotnet build src/Quoridor.Web -c Release
