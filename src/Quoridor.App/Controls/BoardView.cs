@@ -509,21 +509,28 @@ public sealed class BoardView : UserControl
                 continue;
             }
 
-            // A free move: a ring with a mark in it, so the two never read alike.
-            var ring = new Ellipse
+            // A free move: a turn coming round again, drawn as three quarters of a
+            // circle with an arrowhead on the end. It says "go again" without a word.
+            var arc = new Path
             {
-                Width = 22,
-                Height = 22,
+                Data = Geometry.Parse("M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36"),
                 Stroke = ink,
-                StrokeThickness = 2,
-                Opacity = 0.42,
+                StrokeThickness = 2.1,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+                Opacity = 0.5,
+                RenderTransform = new TranslateTransform(x, y),
             };
-            Place(ring, x - 11, y - 11);
-            _pickupLayer.Children.Add(ring);
+            _pickupLayer.Children.Add(arc);
 
-            var pip = new Ellipse { Width = 8, Height = 8, Fill = ink, Opacity = 0.34 };
-            Place(pip, x - 4, y - 4);
-            _pickupLayer.Children.Add(pip);
+            var head = new Path
+            {
+                Data = Geometry.Parse("M -2.83 -9.90 L -4.10 -4.10 L -8.63 -8.63 Z"),
+                Fill = ink,
+                Opacity = 0.5,
+                RenderTransform = new TranslateTransform(x, y),
+            };
+            _pickupLayer.Children.Add(head);
         }
     }
 

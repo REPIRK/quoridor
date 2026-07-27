@@ -575,6 +575,14 @@
             if (_session.Mode == WebMode.Online && !_net.IsConnected)
                 return _net.Trouble.Length > 0 ? _net.Trouble : "The connection is gone.";
 
+            // Without saying so, a turn that does not pass just looks like the game
+            // ignored the other player.
+            if (_session.LastMoveWentAgain)
+                return "Free move — the turn does not pass. Go again.";
+
+            if (_session.LastMoveTookAWall)
+                return "A spare wall picked up — one more than you started with.";
+
             if (_session.State.WallsOf(_session.State.SideToMove) == 0)
                 return "No walls left — it is a straight race now.";
 
@@ -687,7 +695,16 @@
     {
         try
         {
-            return _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+            if (_sfx is not null) return _sfx;
+
+            _sfx = await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+
+            // Builds the audio graph while the browser is idle. Left to the first move,
+            // it costs that move a fifth of a second and the pawn lurches instead of
+            // sliding.
+            await _sfx.InvokeVoidAsync("warm");
+
+            return _sfx;
         }
         catch (Exception)
         {
@@ -712,7 +729,12 @@
     /// <summary>The sound a move makes, and the one the end of the game makes.</summary>
     private async Task SoundFor(Move move)
     {
-        await Sfx(move.Kind == MoveKind.Pawn ? "move" : "wall");
+        // A pickup is the one thing on the board worth its own sound; without it the
+        // most interesting move in the game sounds exactly like every other step.
+        if (_session.LastMoveWentAgain || _session.LastMoveTookAWall)
+            await Sfx(_session.LastMoveWentAgain ? "again" : "collect");
+        else
+            await Sfx(move.Kind == MoveKind.Pawn ? "move" : "wall");
 
         if (!_session.IsOver) return;
 

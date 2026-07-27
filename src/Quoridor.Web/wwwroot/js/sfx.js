@@ -16,25 +16,46 @@ let musicStop = null;
 let effectsVolume = 0.7;
 let musicVolume = 0.5;
 
+/// Builds the graph without starting it. Constructing an AudioContext costs the main
+/// thread a couple of hundred milliseconds — enough to swallow a whole move — so this
+/// is kept apart from playing, and `warm` gets it done while nothing is happening.
+function ensure() {
+    if (audio !== null) return audio;
+
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+
+    audio = new Ctor();
+
+    master = audio.createGain();
+    master.gain.value = effectsVolume;
+    master.connect(audio.destination);
+
+    // The music has its own bus so the two sliders are genuinely independent.
+    musicBus = audio.createGain();
+    musicBus.gain.value = musicVolume;
+    musicBus.connect(audio.destination);
+
+    return audio;
+}
+
 function context() {
-    if (audio === null) {
-        const Ctor = window.AudioContext || window.webkitAudioContext;
-        if (!Ctor) return null;
+    if (ensure() === null) return null;
 
-        audio = new Ctor();
-
-        master = audio.createGain();
-        master.gain.value = effectsVolume;
-        master.connect(audio.destination);
-
-        // The music has its own bus so the two sliders are genuinely independent.
-        musicBus = audio.createGain();
-        musicBus.gain.value = musicVolume;
-        musicBus.connect(audio.destination);
-    }
-
+    // Only ever asked for once the player has done something, which is the condition
+    // browsers place on starting audio at all.
     if (audio.state === 'suspended') audio.resume();
     return audio;
+}
+
+/// Pays the cost of building the context up front, when the browser is idle and the
+/// player is still looking at the setup screen. Without this the bill arrives on the
+/// first move instead, and that move visibly stalls.
+export function warm() {
+    const build = () => { try { ensure(); } catch (error) { /* no audio here, then */ } };
+
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(build, { timeout: 2000 });
+    else setTimeout(build, 400);
 }
 
 /// A plain tone with a soft attack and an exponential tail — the shape of every blip here.
@@ -98,6 +119,19 @@ export function play(kind) {
         case 'wall':
             knock(now, { cutoff: 1100, gain: 0.55, length: 0.14 });
             tone(now, { type: 'triangle', from: 180, to: 120, gain: 0.38, length: 0.16 });
+            break;
+
+        case 'collect':
+            // Picking a spare wall up: the wall's own knock, answered by a bright note.
+            knock(now, { cutoff: 1400, gain: 0.4, length: 0.1 });
+            tone(now + 0.03, { from: 660, to: 990, gain: 0.4, length: 0.16 });
+            break;
+
+        case 'again':
+            // A free move: three notes going up, so a turn that repeats sounds like one.
+            tone(now, { from: 587, gain: 0.4, length: 0.11 });
+            tone(now + 0.07, { from: 784, gain: 0.4, length: 0.11 });
+            tone(now + 0.14, { from: 1047, gain: 0.45, length: 0.26 });
             break;
 
         case 'win':

@@ -9,6 +9,12 @@ public enum Sound
     Wall,
     Win,
     Lose,
+
+    /// <summary>A spare wall picked up off the board.</summary>
+    Collect,
+
+    /// <summary>A free move picked up: the turn comes round again.</summary>
+    Again,
 }
 
 /// <summary>
@@ -148,6 +154,8 @@ public static class Sfx
             Write("wall", Normalise(Wall(), 0.9));
             Write("win", Normalise(Win(), 0.85));
             Write("lose", Normalise(Lose(), 0.8));
+            Write("collect", Normalise(Collect(), 0.85));
+            Write("again", Normalise(Again(), 0.85));
             Write("music", Normalise(Ambient(), 0.5));
 
             _ready = true;
@@ -172,6 +180,27 @@ public static class Sfx
         // A wall: something wooden landing. Dull noise for the impact, a low body under it.
         Knock(buffer, 0, 0.14, 0.42);
         Tone(buffer, 0, 0.17, 180, 120, 0.26, triangle: true);
+        return buffer;
+    }
+
+    private static float[] Collect()
+    {
+        var buffer = new float[(int)(Rate * 0.30)];
+
+        // A spare wall: the wall's own knock, answered by a bright note going up.
+        Knock(buffer, 0, 0.10, 0.34);
+        Tone(buffer, 0.03, 0.17, 660, 990, 0.30);
+        return buffer;
+    }
+
+    private static float[] Again()
+    {
+        var buffer = new float[(int)(Rate * 0.45)];
+
+        // A free move: three notes climbing, so a turn that repeats sounds like one.
+        Tone(buffer, 0.00, 0.12, 587, 587, 0.26);
+        Tone(buffer, 0.07, 0.12, 784, 784, 0.26);
+        Tone(buffer, 0.14, 0.28, 1047, 1047, 0.28);
         return buffer;
     }
 

@@ -89,15 +89,25 @@
         int cx = Centre(Board.ColOf(cell));
         int cy = Centre(Board.RowOf(cell));
 
-        if (isWall)
-        {
-            <rect class="pickup wall" x="@(cx - 13)" y="@(cy - 4)" width="26" height="8" rx="2" />
-        }
-        else
-        {
-            <circle class="pickup skip" cx="@cx" cy="@cy" r="11" />
-            <circle class="pickup skip dot" cx="@cx" cy="@cy" r="4" />
-        }
+        @* Positioned by the outer group so the inner one is free to be scaled about its
+           own origin — everything inside is drawn around (0,0). *@
+        <g transform="translate(@cx @cy)">
+            @if (isWall)
+            {
+                <g class="pickup wall">
+                    <rect x="-13" y="-4" width="26" height="8" rx="2" />
+                </g>
+            }
+            else
+            {
+                @* A turn coming round again: three quarters of a circle with an arrowhead
+                   at the end of it. It says "go again" without a word on it. *@
+                <g class="pickup skip">
+                    <path class="arc" d="M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36" />
+                    <path class="head" d="M -2.83 -9.90 L -4.10 -4.10 L -8.63 -8.63 Z" />
+                </g>
+            }
+        </g>
     }
 
     @* What the pointer is aiming at, what is waiting to be confirmed, and what is

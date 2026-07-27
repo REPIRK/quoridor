@@ -435,13 +435,17 @@
                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Text.Body}"
                                    Text="A spare wall. Step on it and one more wall joins your supply, on top of whatever you started with. The turn passes as usual." />
 
-                        <Grid Grid.Row="1" Grid.Column="0" Margin="0,12,0,0"
-                              HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <Ellipse Width="22" Height="22"
-                                     Stroke="{DynamicResource Brush.Text}" StrokeThickness="2" Opacity="0.55" />
-                            <Ellipse Width="8" Height="8"
-                                     Fill="{DynamicResource Brush.Text}" Opacity="0.45" />
-                        </Grid>
+                        <Canvas Grid.Row="1" Grid.Column="0" Margin="0,12,0,0"
+                                Width="24" Height="24"
+                                HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Path Data="M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36"
+                                  Stroke="{DynamicResource Brush.Text}" StrokeThickness="2.1"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Opacity="0.62" Canvas.Left="12" Canvas.Top="12" />
+                            <Path Data="M -2.83 -9.90 L -4.10 -4.10 L -8.63 -8.63 Z"
+                                  Fill="{DynamicResource Brush.Text}"
+                                  Opacity="0.62" Canvas.Left="12" Canvas.Top="12" />
+                        </Canvas>
                         <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Text.Body}" Margin="0,12,0,0"
                                    Text="A free move. Step on it and the turn does not pass — you move again at once, and your opponent misses theirs. Reaching your goal row with one still wins there and then." />
                     </Grid>

@@ -358,9 +358,17 @@ input.code::placeholder { color: var(--muted); }
 
 /* The board's own pickup styles are scoped under .board, so the copies drawn here
    need their own — same ink, a little more of it since they are small and alone. */
-.guide .pickup { fill: none; stroke: var(--text); stroke-width: 2; opacity: 0.55; }
-.guide .pickup.wall { fill: var(--text); stroke: none; opacity: 0.45; }
-.guide .pickup.skip.dot { fill: var(--text); stroke: none; opacity: 0.45; }
+.guide .pickup.wall { fill: var(--text); stroke: none; opacity: 0.5; }
+
+.guide .pickup.skip .arc {
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2.1;
+    stroke-linecap: round;
+    opacity: 0.62;
+}
+
+.guide .pickup.skip .head { fill: var(--text); stroke: none; opacity: 0.62; }
 .guide b { font-weight: 600; }
 .guide em { font-style: italic; }
 .guide .fine { margin: 0; }
@@ -458,17 +466,36 @@ input.slider::-moz-range-thumb {
 .board .cell { fill: var(--cell); opacity: 0.9; }
 
 /* Something lying on a square waiting to be stepped on. Drawn in the neutral ink
-   rather than either player's colour, because it belongs to whoever gets there. */
+   rather than either player's colour, because it belongs to whoever gets there, and
+   breathing slowly so it reads as a thing to collect rather than part of the board. */
 .board .pickup {
-    fill: none;
-    stroke: var(--text);
-    stroke-width: 2;
-    opacity: 0.42;
     pointer-events: none;
+
+    /* Everything inside is drawn around (0,0) and placed by the group above, so the
+       scale has a sensible centre without needing the bounding box. */
+    transform-origin: 0 0;
+    animation: pickup-breathe 2.8s ease-in-out infinite;
 }
 
-.board .pickup.wall { fill: var(--text); stroke: none; opacity: 0.34; }
-.board .pickup.skip.dot { fill: var(--text); stroke: none; opacity: 0.34; }
+.board .pickup.wall rect { fill: var(--text); stroke: none; opacity: 0.38; }
+
+.board .pickup.skip .arc {
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2.1;
+    stroke-linecap: round;
+    opacity: 0.5;
+}
+
+.board .pickup.skip .head { fill: var(--text); stroke: none; opacity: 0.5; }
+
+/* The wall's own timing is offset so a board full of pickups does not pulse in unison. */
+.board .pickup.wall { animation-delay: -1.4s; }
+
+@keyframes pickup-breathe {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.07); opacity: 0.82; }
+}
 
 /* A square out of play reads as a gap in the board rather than a darker square: no
    fill at all, only a faint outline where the square would have been. */
@@ -562,7 +589,8 @@ input.slider::-moz-range-thumb {
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-    .board .pawn, .board .wall, .overlay, .result, .setup { transition: none; animation: none; }
+    .board .pawn, .board .wall, .board .pickup,
+    .overlay, .result, .setup { transition: none; animation: none; }
 }
 
 /* ================================================================ narrow ====

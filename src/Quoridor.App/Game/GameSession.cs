@@ -164,11 +164,18 @@ public sealed class GameSession
         _ => false,
     };
 
+    /// <summary>Whether the move just played kept the turn, having found a free move.</summary>
+    public bool LastMoveWentAgain { get; private set; }
+
+    /// <summary>Whether the move just played picked a spare wall up off the board.</summary>
+    public bool LastMoveTookAWall { get; private set; }
+
     public bool Apply(Move move)
     {
         if (IsOver || !State.IsLegal(move)) return false;
 
         int mover = State.SideToMove;
+        int wallsBefore = State.WallsOf(mover);
 
         _positions.Add(State);
         _moves.Add(move);
@@ -176,6 +183,10 @@ public sealed class GameSession
         GameState next = State;
         next.Apply(move);
         State = next;
+
+        // Placing a wall spends one, so a supply that went up can only mean a pickup.
+        LastMoveWentAgain = !IsOver && State.SideToMove == mover;
+        LastMoveTookAWall = State.WallsOf(mover) > wallsBefore;
 
         if (HasClock) _remaining[mover] += Options.Clock.Increment;
 

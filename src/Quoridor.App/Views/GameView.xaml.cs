@@ -161,7 +161,12 @@ public partial class GameView : UserControl
     {
         if (!_session.Apply(move)) return;
 
-        Sfx.Play(move.Kind == MoveKind.Pawn ? Sound.Move : Sound.Wall);
+        // A pickup is the one thing on the board worth its own sound; without it the
+        // most interesting move in the game sounds exactly like every other step.
+        Sfx.Play(_session.LastMoveWentAgain ? Sound.Again
+            : _session.LastMoveTookAWall ? Sound.Collect
+            : move.Kind == MoveKind.Pawn ? Sound.Move
+            : Sound.Wall);
 
         _busy = true;
         UpdateUi();
@@ -628,6 +633,16 @@ public partial class GameView : UserControl
 
         int side = state.SideToMove;
 
+        // Without saying so, a turn that does not pass just looks like the game ignored
+        // the other player.
+        string advice = _session.LastMoveWentAgain
+            ? "Free move — the turn does not pass. Go again."
+            : _session.LastMoveTookAWall
+                ? "A spare wall picked up — one more than you started with."
+                : state.WallsOf(side) == 0
+                    ? "No walls left — it is a straight race now."
+                    : "Click a square to step, or hover a groove between squares to place a wall.";
+
         if (_peer is not null)
         {
             if (!_peer.IsConnected)
@@ -638,9 +653,7 @@ public partial class GameView : UserControl
             }
 
             StatusText.Text = _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
-            HintText.Text = state.WallsOf(side) == 0
-                ? "No walls left — it is a straight race now."
-                : "Click a square to step, or hover a groove between squares to place a wall.";
+            HintText.Text = advice;
             return;
         }
 
@@ -655,9 +668,7 @@ public partial class GameView : UserControl
             ? "Your move"
             : $"{_session.PlayerName(side)} to move";
 
-        HintText.Text = state.WallsOf(side) == 0
-            ? "No walls left — it is a straight race now."
-            : "Click a square to step, or hover a groove between squares to place a wall.";
+        HintText.Text = advice;
     }
 
     /// <summary>
