@@ -140,13 +140,19 @@ body {
 
 .player {
     display: grid;
-    grid-template-columns: 3px 1fr auto;
+    grid-template-columns: 3px minmax(0, 1fr) auto;
     gap: 14px;
     align-items: center;
     padding: 14px 0;
     opacity: 0.55;
     transition: opacity 0.2s;
+
+    /* A grid item will not shrink below its content unless told it may. Twenty walls
+       in the row below would otherwise widen the whole page rather than wrap. */
+    min-width: 0;
 }
+
+.player .who { min-width: 0; }
 
 .player + .player { border-top: 1px solid var(--line); }
 
@@ -161,7 +167,9 @@ body {
 
 .name { font-family: Georgia, "Times New Roman", serif; font-size: 18px; }
 
-.walls { display: flex; align-items: center; gap: 4px; margin-top: 10px; }
+/* Wraps rather than widening its column: a game can start with twenty walls, and
+   pickups can push a player past that. */
+.walls { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
 
 .walls i { width: 3px; height: 15px; display: block; }
 .walls.p0 i { background: var(--p0); }
@@ -566,6 +574,10 @@ input.slider::-moz-range-thumb {
 .board .wall.p0 { fill: var(--p0); }
 .board .wall.p1 { fill: var(--p1); }
 
+/* The lit edge. Drawn in the board's own highlight rather than either player's
+   colour, because it is light falling on the piece, not part of the piece. */
+.board .wall-lip { fill: var(--wall-edge); opacity: 0.3; pointer-events: none; }
+
 /* Pointer, pending confirmation, and queued premove — same shapes, different weight. */
 .board .mark { pointer-events: none; }
 
@@ -653,15 +665,21 @@ input.slider::-moz-range-thumb {
     will-change: transform;
 }
 
-.board .wall {
+/* The lip arrives with the wall it sits on, or it would blink into place while the
+   wall was still growing.
+
+   Kept shorter than the pause the engine waits out before it starts thinking: an
+   animation still running when the only thread is taken freezes where it stands, and
+   a wall frozen at the start of this one is a wall you cannot see. */
+.board .wall,
+.board .wall-lip {
     transform-box: fill-box;
     transform-origin: center;
-    animation: wall-in 0.34s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+    animation: wall-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
 }
 
 @keyframes wall-in {
     from { opacity: 0; transform: scale(0.5); }
-    to { opacity: 1; transform: none; }
 }
 
 .overlay { animation: fade-in 0.22s ease both; }
@@ -671,7 +689,7 @@ input.slider::-moz-range-thumb {
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-    .board .pawn-holder, .board .wall, .board .hint-dot,
+    .board .pawn-holder, .board .wall, .board .wall-lip, .board .hint-dot,
     .overlay, .result, .setup { transition: none; animation: none; }
 }
 

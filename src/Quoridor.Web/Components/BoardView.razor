@@ -85,10 +85,19 @@
 
     @foreach ((MoveKind kind, int row, int col, int owner) in PlacedWalls())
     {
+        bool flat = kind == MoveKind.HorizontalWall;
+
         <rect class="wall @(owner == 0 ? "p0" : "p1")" rx="2"
               x="@WallX(kind, col)" y="@WallY(kind, row)"
-              width="@(kind == MoveKind.HorizontalWall ? WallLength : Gap)"
-              height="@(kind == MoveKind.HorizontalWall ? Gap : WallLength)" />
+              width="@(flat ? WallLength : Gap)"
+              height="@(flat ? Gap : WallLength)" />
+
+        @* A lit edge along the top, or the left of an upright one. A wall is a piece
+           standing on the board, and a flat rectangle of colour does not say so. *@
+        <rect class="wall-lip" rx="1"
+              x="@(WallX(kind, col) + 1)" y="@(WallY(kind, row) + 1)"
+              width="@(flat ? WallLength - 2 : 2)"
+              height="@(flat ? 2 : WallLength - 2)" />
     }
 
     @* Whatever is still lying on the board to be picked up. A spare wall is drawn as
