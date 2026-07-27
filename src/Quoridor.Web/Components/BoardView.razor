@@ -12,6 +12,15 @@
    never changes — the view simply looks at less of it. *@
 <svg class="board" viewBox="@ViewBox" preserveAspectRatio="xMidYMid meet" @onmouseleave="ClearHover">
 
+    @* A board is a physical thing; a flat rectangle of one colour is not. The sheen is
+       one gradient painted once — no animation, nothing per frame. *@
+    <defs>
+        <linearGradient id="board-sheen" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--board-top)" />
+            <stop offset="100%" stop-color="var(--board-bottom)" />
+        </linearGradient>
+    </defs>
+
     <rect class="backdrop" x="@ViewX" y="@ViewY" width="@ViewSize" height="@ViewSize" rx="6" />
 
     @* Razor claims <text> for its own block syntax, so the coordinate labels are the
@@ -141,9 +150,15 @@
            but starting a different-sized game is not a move, and sliding across the
            whole board for it would be nonsense. A new key means a new element, which
            simply appears where it belongs. *@
-        <g @key="(player, From)" class="pawn-holder"
+        <g @key="(player, From)"
+           class="pawn-holder @(player == 0 ? "p0" : "p1") @(active ? "active" : "")"
            transform="translate(@Centre(Board.ColOf(cell)) @Centre(Board.RowOf(cell)))">
-            <circle class="pawn @(player == 0 ? "p0" : "p1") @(active ? "active" : "")" r="20" />
+
+            @* Whose turn it is should be legible from the board, not only from the
+               panel beside it. A ring is a clearer answer than a difference in
+               opacity you have to compare two pieces to notice. *@
+            <circle class="ring" r="26" />
+            <circle class="disc" r="20" />
         </g>
     }
 

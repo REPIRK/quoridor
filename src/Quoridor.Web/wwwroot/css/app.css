@@ -10,7 +10,13 @@
     --bg: #171714;
     --surface: #1f1e1b;
     --board: #1c1b18;
+
+    /* The two ends of the board's gradient, a shade either side of --board. */
+    --board-top: #211f1b;
+    --board-bottom: #191815;
+
     --cell: #262420;
+    --cell-edge: #2f2c27;
     --line: #35322c;
     --text: #ede7da;
     --muted: #8b8375;
@@ -26,7 +32,12 @@
     --bg: #e8e3d8;
     --surface: #f4f1e9;
     --board: #dcd5c6;
+
+    --board-top: #e2dccd;
+    --board-bottom: #d5cebe;
+
     --cell: #ede8dd;
+    --cell-edge: #ded7c8;
     --line: #c9c0ad;
     --text: #1c1a17;
     --muted: #6b6357;
@@ -208,9 +219,25 @@ body {
     color: var(--muted);
 }
 
-.moves li { display: grid; grid-template-columns: 34px 1fr 1fr; margin-bottom: 4px; cursor: pointer; }
-.moves li:hover { color: var(--text); }
-.moves li.here { color: var(--text); }
+.moves li {
+    display: grid;
+    grid-template-columns: 34px 1fr 1fr;
+    margin-bottom: 2px;
+    padding: 2px 6px 2px 0;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+
+/* A row you can click should look like one before you click it. */
+.moves li:hover { color: var(--text); background: var(--cell); }
+
+.moves li.here {
+    color: var(--text);
+    background: var(--cell);
+    box-shadow: inset 2px 0 0 var(--p0);
+}
+
 .moves .n { text-align: right; padding-right: 10px; }
 .moves .empty { display: block; font-family: system-ui, sans-serif; cursor: default; }
 
@@ -231,10 +258,22 @@ button.ghost {
     transition: background 0.15s, opacity 0.15s;
 }
 
-button.ghost:hover:not(:disabled) { background: var(--surface); }
+button.ghost:hover:not(:disabled) { background: var(--surface); border-color: var(--muted); }
+button.ghost:active:not(:disabled) { transform: translateY(1px); }
 button.ghost:disabled { opacity: 0.35; cursor: default; }
 button.ghost.on { color: var(--p0); border-color: var(--p0); }
 button.ghost.primary { padding: 10px 26px; }
+
+/* One focus ring for everything that takes focus. Without it a keyboard is left
+   guessing, and the browser's default ring does not belong on this page. */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+.moves li:focus-visible {
+    outline: 2px solid var(--p0);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
 
 button.seg {
     font: inherit;
@@ -471,7 +510,12 @@ input.slider::-moz-range-thumb {
    thing called a hint and a thing called a ghost, and an unscoped `.ghost` with
    pointer-events: none once made every button on the page unclickable. */
 
-.board .backdrop { fill: var(--board); stroke: var(--line); stroke-width: 1; }
+/* A shallow top-to-bottom gradient rather than one flat tone: enough for the board to
+   sit on the page as an object, not so much that it becomes a texture. */
+.board .backdrop { fill: url(#board-sheen); stroke: var(--line); stroke-width: 1; }
+
+/* The squares get a hairline of their own so the grid has edges rather than only gaps. */
+.board .cell { stroke: var(--cell-edge); stroke-width: 0.75; }
 .board .cell { fill: var(--cell); opacity: 0.9; }
 
 /* Something lying on a square waiting to be stepped on. Drawn in the neutral ink
@@ -544,22 +588,52 @@ input.slider::-moz-range-thumb {
 
 .board .mark.bad { fill: none; stroke: var(--p1); stroke-width: 1.5; opacity: 0.5; }
 
-.board .hint-dot { opacity: 0.42; pointer-events: none; }
+/* Where you may go. Arriving with a short fade rather than appearing, which reads as
+   the board answering the turn rather than the page redrawing. One-shot only. */
+.board .hint-dot {
+    opacity: 0.5;
+    pointer-events: none;
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: hint-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
+}
+
 .board .hint-dot.p0 { fill: var(--p0); }
 .board .hint-dot.p1 { fill: var(--p1); }
 
-.board .last { fill: none; stroke-width: 1.5; opacity: 0.6; pointer-events: none; }
-.board .last.p0 { stroke: var(--p0); }
-.board .last.p1 { stroke: var(--p1); }
+@keyframes hint-in {
+    from { opacity: 0; transform: scale(0.4); }
+    to { opacity: 0.5; transform: none; }
+}
+
+/* The last move, which is the one thing you need after looking away. An outline alone
+   was too quiet against the board; a wash inside it carries at a glance. */
+.board .last { stroke-width: 1.5; opacity: 0.75; pointer-events: none; fill-opacity: 0.1; }
+.board .last.p0 { stroke: var(--p0); fill: var(--p0); }
+.board .last.p1 { stroke: var(--p1); fill: var(--p1); }
 
 .board .route { fill: none; stroke-width: 2; stroke-dasharray: 1.4 2.2; stroke-linecap: round; opacity: 0.6; pointer-events: none; }
 .board .route.p0 { stroke: var(--p0); }
 .board .route.p1 { stroke: var(--p1); }
 
-.board .pawn { opacity: 0.72; }
-.board .pawn.active { opacity: 1; }
-.board .pawn.p0 { fill: var(--p0); }
-.board .pawn.p1 { fill: var(--p1); }
+/* The piece itself, and the ring that says it is on move. The ring is drawn for both
+   and revealed for one, so nothing is added or removed as the turn changes. */
+.board .pawn-holder .disc { opacity: 0.66; }
+.board .pawn-holder.active .disc { opacity: 1; }
+
+.board .pawn-holder.p0 .disc { fill: var(--p0); }
+.board .pawn-holder.p1 .disc { fill: var(--p1); }
+
+.board .pawn-holder .ring {
+    fill: none;
+    stroke-width: 1.5;
+    opacity: 0;
+    transition: opacity 0.22s ease;
+}
+
+.board .pawn-holder.active .ring { opacity: 0.55; }
+.board .pawn-holder.p0 .ring { stroke: var(--p0); }
+.board .pawn-holder.p1 .ring { stroke: var(--p1); }
 
 /* `fill: none` rather than a transparent fill: a transparent fill is still a fill,
    and the browser paints all hundred and thirty of these on every frame for nothing.
@@ -595,7 +669,7 @@ input.slider::-moz-range-thumb {
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-    .board .pawn-holder, .board .wall,
+    .board .pawn-holder, .board .wall, .board .hint-dot, .board .pawn-holder .ring,
     .overlay, .result, .setup { transition: none; animation: none; }
 }
 

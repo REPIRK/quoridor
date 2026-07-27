@@ -232,7 +232,9 @@ public sealed class BoardView : UserControl
         _backdrop.Height = Extent;
         _backdrop.RadiusX = 6;
         _backdrop.RadiusY = 6;
-        _backdrop.Fill = Palette.BrushOf(Palette.BoardSurface);
+        // A shallow top-to-bottom gradient rather than one flat tone, so the board sits
+        // on the page as an object. Built from the board colour so it follows the theme.
+        _backdrop.Fill = BoardSheen();
         _backdrop.Stroke = Palette.BrushOf(Palette.Line);
         _backdrop.StrokeThickness = 1;
         Place(_backdrop, 0, 0);
@@ -385,10 +387,31 @@ public sealed class BoardView : UserControl
         }
     }
 
+    /// <summary>
+    /// The board's surface: its own colour, lifted a little at the top and dropped a
+    /// little at the bottom. Small enough to read as light rather than as a pattern.
+    /// </summary>
+    private static LinearGradientBrush BoardSheen()
+    {
+        Color the = ((SolidColorBrush)Palette.BrushOf(Palette.BoardSurface)).Color;
+
+        static Color Shift(Color colour, int by)
+        {
+            static byte Clamp(int v) => (byte)Math.Clamp(v, 0, 255);
+            return Color.FromRgb(Clamp(colour.R + by), Clamp(colour.G + by), Clamp(colour.B + by));
+        }
+
+        return new LinearGradientBrush(Shift(the, 5), Shift(the, -4), 90);
+    }
+
     private void RefreshThemeColours()
     {
         for (int player = 0; player < 2; player++)
             _pawnGlow[player].Color = Palette.ColorOf(player == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        // The gradient is mixed from the board colour, so it has to be mixed again when
+        // that colour changes. The rest of the board rides DynamicResource and does not.
+        _backdrop.Fill = BoardSheen();
     }
 
     /// <summary>
@@ -979,13 +1002,19 @@ public sealed class BoardView : UserControl
 
         _lastMoveMark.Width = width;
         _lastMoveMark.Height = height;
-        _lastMoveMark.Stroke = Palette.BrushOf(mover == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        // Outline plus a wash inside it. The outline alone was quiet enough to miss,
+        // and the last move is exactly what you look for after glancing away.
+        Brush ink = Palette.BrushOf(mover == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        _lastMoveMark.Stroke = ink;
+        _lastMoveMark.Fill = new SolidColorBrush(((SolidColorBrush)ink).Color) { Opacity = 0.13 };
 
         _lastMoveMark.BeginAnimation(Canvas.LeftProperty, null);
         _lastMoveMark.BeginAnimation(Canvas.TopProperty, null);
         Place(_lastMoveMark, x, y);
 
-        _lastMoveMark.BeginAnimation(OpacityProperty, new DoubleAnimation(0.6, TimeSpan.FromMilliseconds(220)));
+        _lastMoveMark.BeginAnimation(OpacityProperty, new DoubleAnimation(0.75, TimeSpan.FromMilliseconds(220)));
     }
 
     private void HideLastMove() =>
