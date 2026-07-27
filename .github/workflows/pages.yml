@@ -44,6 +44,12 @@ jobs:
       - name: Point the app at its subdirectory
         run: |
           sed -i 's|<base href="/" />|<base href="/${{ github.event.repository.name }}/" />|g' published/wwwroot/index.html
+
+          # Blazor fingerprints its own files, but the stylesheet is referenced by hand
+          # and browsers hold on to it. Stamping the commit onto the link means a deploy
+          # is picked up at once instead of whenever the cache happens to expire.
+          sed -i 's|href="css/app.css"|href="css/app.css?v=${{ github.sha }}"|g' published/wwwroot/index.html
+
           touch published/wwwroot/.nojekyll
           cp published/wwwroot/index.html published/wwwroot/404.html
 
