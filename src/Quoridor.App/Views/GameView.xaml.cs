@@ -507,6 +507,18 @@ public partial class GameView : UserControl
             Sfx.Play(Sound.Move);
         };
 
+        TrackPick.SelectedIndex = Math.Clamp(settings.MusicTrack, 0, 2);
+        TrackPick.SelectionChanged += (_, _) =>
+        {
+            settings.MusicTrack = TrackPick.SelectedIndex;
+
+            // Changing the piece is only audible if it is playing.
+            if (!settings.Music && settings.MusicVolume <= 0) return;
+
+            settings.Music = true;
+            Sfx.Music(true);
+        };
+
         MusicDial.ValueChanged += (_, e) =>
         {
             int level = (int)Math.Round(e.NewValue);

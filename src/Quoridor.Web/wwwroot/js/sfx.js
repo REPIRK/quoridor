@@ -151,9 +151,35 @@ export function play(kind) {
     }
 }
 
-/// A slow pentatonic drift over a quiet pad. Deliberately sparse: it is meant to be
-/// something you stop noticing, not a tune you end up listening to instead of thinking.
-export function music(on) {
+/// Three pieces, all built the same way — a quiet pad with notes drifting over it —
+/// but pitched, filtered and paced differently enough to be a real choice. All are
+/// deliberately sparse: something you stop noticing, not a tune you listen to instead
+/// of thinking about the game.
+const TRACKS = [
+    {
+        // Ink: the original. A minor, mid-register, unhurried.
+        drones: [110, 110.4, 164.8],
+        scale: [440, 493.88, 587.33, 659.25, 880],
+        cutoff: 420, sweep: 0.05, depth: 140,
+        gap: [2600, 3800],
+    },
+    {
+        // Slate: lower and darker, with long gaps. For thinking in.
+        drones: [82.4, 82.7, 123.5],
+        scale: [329.63, 392, 440, 493.88, 659.25],
+        cutoff: 300, sweep: 0.035, depth: 110,
+        gap: [4200, 5200],
+    },
+    {
+        // Glass: brighter and closer together. The one with some movement in it.
+        drones: [146.8, 147.3, 220],
+        scale: [587.33, 659.25, 783.99, 880, 1174.66],
+        cutoff: 760, sweep: 0.08, depth: 220,
+        gap: [1800, 2600],
+    },
+];
+
+export function music(on, track = 0) {
     if (!on) {
         if (musicStop) musicStop();
         musicStop = null;
@@ -162,29 +188,31 @@ export function music(on) {
 
     if (musicStop || !context()) return;
 
+    const piece = TRACKS[Math.max(0, Math.min(TRACKS.length - 1, track | 0))];
+
     musicGain = audio.createGain();
     musicGain.gain.value = 0.0001;
     musicGain.gain.exponentialRampToValueAtTime(0.9, audio.currentTime + 3);
     musicGain.connect(musicBus);
 
-    // The pad: two slightly detuned saws kept dark by a lowpass that breathes.
+    // The pad: detuned saws kept dark by a lowpass that breathes.
     const pad = audio.createGain();
     pad.gain.value = 0.16;
 
     const filter = audio.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 420;
+    filter.frequency.value = piece.cutoff;
     filter.Q.value = 0.8;
 
     const sweep = audio.createOscillator();
     const sweepDepth = audio.createGain();
-    sweep.frequency.value = 0.05;
-    sweepDepth.gain.value = 140;
+    sweep.frequency.value = piece.sweep;
+    sweepDepth.gain.value = piece.depth;
     sweep.connect(sweepDepth);
     sweepDepth.connect(filter.frequency);
     sweep.start();
 
-    const drones = [110, 110.4, 164.8].map(hz => {
+    const drones = piece.drones.map(hz => {
         const osc = audio.createOscillator();
         osc.type = 'sawtooth';
         osc.frequency.value = hz;
@@ -197,7 +225,7 @@ export function music(on) {
     filter.connect(musicGain);
 
     // A note every few seconds, from a scale that cannot land on a sour interval.
-    const scale = [440, 493.88, 587.33, 659.25, 880];
+    const scale = piece.scale;
     let alive = true;
 
     const next = () => {
@@ -219,7 +247,7 @@ export function music(on) {
         osc.start(at);
         osc.stop(at + 3.6);
 
-        setTimeout(next, 2600 + Math.random() * 3800);
+        setTimeout(next, piece.gap[0] + Math.random() * piece.gap[1]);
     };
 
     setTimeout(next, 1500);

@@ -336,8 +336,17 @@ input.code {
     width: 240px;
 }
 
-input.code.wide { width: 100%; margin-right: 0; }
+input.code.wide { flex: 1; width: auto; margin-right: 8px; }
 input.code::placeholder { color: var(--muted); }
+
+button.ghost.copy { padding: 7px 13px; font-size: 12.5px; white-space: nowrap; }
+
+.setup .fine .mono {
+    font-family: ui-monospace, Consolas, monospace;
+    color: var(--text);
+    margin-right: 6px;
+    word-break: break-all;
+}
 
 .setup .actions { margin-top: 26px; }
 

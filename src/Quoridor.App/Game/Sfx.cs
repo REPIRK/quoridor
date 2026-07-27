@@ -38,6 +38,7 @@ public static class Sfx
     private static readonly object Gate = new();
 
     private static MediaPlayer? _music;
+    private static int _playing = -1;
     private static bool _ready;
 
     /// <summary>
@@ -93,10 +94,20 @@ public static class Sfx
 
             Prepare();
 
+            int track = Math.Clamp(Settings.Current.MusicTrack, 0, Tracks.Length - 1);
+
+            // Changing pieces means a different file, so the player is rebuilt.
+            if (_music is not null && _playing != track)
+            {
+                _music.Stop();
+                _music = null;
+            }
+
             if (_music is null)
             {
+                _playing = track;
                 _music = new MediaPlayer();
-                _music.Open(new Uri(PathOf("music")));
+                _music.Open(new Uri(PathOf($"music{track}")));
 
                 // The loop fades in and out at its own edges, so the pause while it is
                 // rewound and started again passes unnoticed.
@@ -156,7 +167,9 @@ public static class Sfx
             Write("lose", Normalise(Lose(), 0.8));
             Write("collect", Normalise(Collect(), 0.85));
             Write("again", Normalise(Again(), 0.85));
-            Write("music", Normalise(Ambient(), 0.5));
+
+            for (int track = 0; track < Tracks.Length; track++)
+                Write($"music{track}", Normalise(Ambient(track), 0.5));
 
             _ready = true;
         }
@@ -224,19 +237,33 @@ public static class Sfx
     }
 
     /// <summary>
+    /// The three pieces, as sets of partials. All are chords that sit still enough to be
+    /// ignored, which is the point of them; they differ in register and in how much of
+    /// the sound is up where you notice it.
+    /// </summary>
+    private static readonly (double[] Partials, double[] Weights)[] Tracks =
+    {
+        // Ink: A minor ninth, mid-register.
+        (new[] { 110.0, 165, 220, 330, 440 }, new[] { 0.34, 0.24, 0.18, 0.10, 0.06 }),
+
+        // Slate: the same shape an octave down, with the top voices pulled back.
+        (new[] { 55.0, 82.5, 110, 165, 220 }, new[] { 0.40, 0.26, 0.18, 0.09, 0.04 }),
+
+        // Glass: higher and more open, with the fifth and the ninth carrying it.
+        (new[] { 147.0, 220, 294, 440, 588 }, new[] { 0.24, 0.26, 0.20, 0.16, 0.10 }),
+    };
+
+    /// <summary>
     /// Twelve seconds of pad. Every partial completes a whole number of cycles in that
     /// time and the whole thing fades at both ends, so the loop has no seam to hear.
     /// </summary>
-    private static float[] Ambient()
+    private static float[] Ambient(int track)
     {
         const double Length = 12.0;
 
         var buffer = new float[(int)(Rate * Length)];
 
-        // A minor ninth chord, spread wide and kept quiet: harmonically still enough to
-        // ignore, which is the point of it.
-        double[] partials = { 110, 165, 220, 330, 440 };
-        double[] weights = { 0.34, 0.24, 0.18, 0.10, 0.06 };
+        (double[] partials, double[] weights) = Tracks[Math.Clamp(track, 0, Tracks.Length - 1)];
 
         for (int p = 0; p < partials.Length; p++)
         {

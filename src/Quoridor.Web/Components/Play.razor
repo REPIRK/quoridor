@@ -140,6 +140,15 @@
                     <span class="reading">@_musicVolume%</span>
                 </div>
 
+                <div class="row">
+                    <span class="label">Track</span>
+                    <select class="pick" value="@_track" @onchange="PickTrack">
+                        <option value="0">Ink — calm, mid-register</option>
+                        <option value="1">Slate — low and sparse</option>
+                        <option value="2">Glass — bright, more movement</option>
+                    </select>
+                </div>
+
                 <p class="fine">This game: @_session.Setup.Describe().</p>
 
                 @if (_session.Setup.Pickups > 0)
@@ -313,7 +322,14 @@
                             </p>
                             @if (!string.IsNullOrEmpty(_net.Code))
                             {
-                                <input class="code wide" readonly value="@ShareLink" @onfocus="SelectAll" />
+                                <div class="row">
+                                    <input class="code wide" readonly value="@ShareLink" @onfocus="SelectAll" />
+                                    <button class="ghost copy" @onclick="() => Copy(ShareLink)">@CopyLabel</button>
+                                </div>
+                                <p class="fine">
+                                    Or read out the code: <span class="mono">@_net.Code</span>
+                                    <button class="ghost copy" @onclick="() => Copy(_net.Code)">@CopyLabel</button>
+                                </p>
                             }
                         }
                         else if (_net.State == NetState.Joining)
@@ -401,6 +417,7 @@
     private bool _music;
     private int _soundVolume = 70;
     private int _musicVolume = 50;
+    private int _track;
     private string? _preview;
     private string _joinCode = string.Empty;
 
@@ -429,13 +446,15 @@
     /// whatever the knobs say, with a fresh seed so the same numbers still give a
     /// different scatter each time.
     /// </summary>
-    private GameSetup BuildSetup()
+    private GameSetup BuildSetup() => BuildSetup(_flavour);
+
+    private GameSetup BuildSetup(GameFlavour flavour)
     {
         int seed = Environment.TickCount;
 
-        if (_flavour == GameFlavour.Standard) return GameSetup.Standard;
+        if (flavour == GameFlavour.Standard) return GameSetup.Standard;
 
-        if (_flavour == GameFlavour.Custom)
+        if (flavour == GameFlavour.Custom)
         {
             return new GameSetup
             {
@@ -501,8 +520,8 @@
         // is the right default there and the wrong one with a mouse.
         try
         {
-            bool coarse = await Js.InvokeAsync<bool>("eval", "matchMedia('(hover: none)').matches");
-            if (!coarse) return;
+            if (await LoadPage() is not { } page) return;
+            if (!await page.InvokeAsync<bool>("isCoarsePointer")) return;
 
             _touch = true;
             _confirm = true;
@@ -650,7 +669,7 @@
         // A rolled game rolls the order of play too.
         if (_flavour == GameFlavour.Random) _seat = Random.Shared.Next(2);
 
-        _session = new WebSession(_mode, _strength, _seat, BuildSetup());
+        _session = new WebSession(_mode, _strength, _seat, BuildSetup(), _flavour);
         _showSetup = false;
         ResetPlayState();
 
@@ -664,13 +683,25 @@
     /// </summary>
     private async Task Restart(bool swap)
     {
-        int seat = _session.LocalSeat < 0 ? -1 : swap ? _session.LocalSeat ^ 1 : _session.LocalSeat;
+        bool rolled = _session.Flavour == GameFlavour.Random;
 
+        // A rolled game rolls again — playing the same random board twice is not what
+        // "random" was asked for. Standard and Custom are settings, so they stand.
+        GameSetup setup = rolled ? BuildSetup(GameFlavour.Random) : _session.Setup;
+
+        int seat = _session.LocalSeat < 0 ? 0 : swap ? _session.LocalSeat ^ 1 : _session.LocalSeat;
+
+        // Random re-rolls who starts as well — but not online, where the seats belong to
+        // both players and swapping sides is the only agreed way to change them.
+        if (rolled && _session.Mode != WebMode.Online) seat = Random.Shared.Next(2);
+
+        // Online the whole thing is a joint decision, so the other browser is told which
+        // board to build and whether the sides changed.
         if (_session.Mode == WebMode.Online)
-            await _net.SendAsync(swap ? "restart|swap" : "restart");
+            await _net.SendAsync($"restart|{(swap ? "swap" : "keep")}|{setup.Encode()}");
 
-        _seat = seat < 0 ? 0 : seat;
-        _session = new WebSession(_session.Mode, _session.Strength, _seat, _session.Setup);
+        _seat = seat;
+        _session = new WebSession(_session.Mode, _session.Strength, _seat, setup, _session.Flavour);
         ResetPlayState();
 
         if (_session.IsBotTurn) await RunEngine();
@@ -745,13 +776,36 @@
     private async Task ToggleMusic()
     {
         _music = !_music;
+        await StartMusic();
+    }
 
+    /// <summary>Switches pieces. Playing already means stopping and starting again.</summary>
+    private async Task PickTrack(ChangeEventArgs e)
+    {
+        _track = Math.Clamp(Number(e, 0), 0, 2);
+
+        if (!_music) return;
+
+        try
+        {
+            if (await LoadSfx() is { } module) await module.InvokeVoidAsync("music", false);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        await StartMusic();
+    }
+
+    private async Task StartMusic()
+    {
         try
         {
             if (await LoadSfx() is not { } module) return;
 
             await module.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
-            await module.InvokeVoidAsync("music", _music);
+            await module.InvokeVoidAsync("music", _music, _track);
         }
         catch (Exception)
         {
@@ -827,7 +881,10 @@
             GameSetup setup = host ? BuildSetup() : GameSetup.Standard;
             if (!host) _seat = 1;
 
-            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, setup);
+            // The host's flavour travels with the game, so a rematch on a rolled board
+            // rolls again for both of them.
+            _session = new WebSession(
+                WebMode.Online, BotStrength.Normal, _seat, setup, host ? _flavour : GameFlavour.Standard);
             _showSetup = false;
             ResetPlayState();
 
@@ -854,7 +911,11 @@
 
                 if (mine != _session.LocalSeat || setup != _session.Setup)
                 {
-                    _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, setup);
+                    // A board that is not the plain one was rolled or set by the host;
+                    // either way this side follows whatever they send on a rematch.
+                    _session = new WebSession(
+                        WebMode.Online, BotStrength.Normal, _seat, setup, GameFlavour.Standard);
+
                     ResetPlayState();
                 }
             }
@@ -863,11 +924,23 @@
             return;
         }
 
-        if (message is "restart" or "restart|swap")
+        // "restart|<swap|keep>|<board>" — begin again, on the board the other side rolled
+        // and with the sides they say. Older builds sent "restart" and "restart|swap",
+        // which still mean the same thing on the board already in play.
+        if (message.StartsWith("restart"))
         {
-            _seat = message.EndsWith("swap") ? _session.LocalSeat ^ 1 : _session.LocalSeat;
+            string[] terms = message.Split('|');
+            bool swap = terms.Length > 1 && terms[1] == "swap";
 
-            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _session.Setup);
+            GameSetup setup = terms.Length == 7 && GameSetup.TryDecode(terms.AsSpan(2), out GameSetup sent)
+                ? sent
+                : _session.Setup;
+
+            _seat = swap ? _session.LocalSeat ^ 1 : _session.LocalSeat;
+
+            _session = new WebSession(
+                WebMode.Online, BotStrength.Normal, _seat, setup, _session.Flavour);
+
             ResetPlayState();
             StateHasChanged();
             return;
@@ -913,8 +986,20 @@
             return;
         }
 
+        // Let the move finish moving before the engine takes the thread away. The search
+        // runs on the only thread this build has, so anything still animating when it
+        // starts simply stops dead and snaps into place when it ends. Playing a person
+        // has always looked right for exactly this reason: nothing blocks in between.
+        await Task.Delay(MoveAnimationMs);
+
         await RunEngine();
     }
+
+    /// <summary>
+    /// How long the board takes to show a move, matching the pawn's transition in the
+    /// stylesheet. The engine waits this out before it starts thinking.
+    /// </summary>
+    private const int MoveAnimationMs = 330;
 
     /// <summary>
     /// Plays the move queued during the opponent's turn. Whether it would still be legal
@@ -962,7 +1047,10 @@
 
                 _thinking = false;
                 StateHasChanged();
-                await Task.Delay(1);
+
+                // Same reason as after a human move: if the engine is about to think
+                // again — it found a free move — its pawn has to arrive first.
+                await Task.Delay(MoveAnimationMs);
             }
         }
         finally
@@ -977,13 +1065,62 @@
     private async Task SelectAll(FocusEventArgs _) =>
         await Js.InvokeVoidAsync("document.execCommand", "selectAll", false, null);
 
+    /// <summary>Shown on the copy buttons; says so for a moment after one is pressed.</summary>
+    private string CopyLabel => _copied ? "Copied" : "Copy";
+
+    private bool _copied;
+
+    private IJSObjectReference? _page;
+
+    private async Task<IJSObjectReference?> LoadPage()
+    {
+        try
+        {
+            return _page ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/page.js");
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Puts the invite on the clipboard, and says so on the button for a moment. The
+    /// work is in the module: the clipboard API has to be called as a method on the
+    /// object that owns it, which an interop path by name cannot do.
+    /// </summary>
+    private async Task Copy(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        try
+        {
+            if (await LoadPage() is not { } page) return;
+            if (!await page.InvokeAsync<bool>("copy", text)) return;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        _copied = true;
+        StateHasChanged();
+
+        await Task.Delay(1400);
+
+        _copied = false;
+        StateHasChanged();
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _net.DisposeAsync();
 
-        if (_sfx is not null)
+        foreach (IJSObjectReference? module in new[] { _sfx, _page })
         {
-            try { await _sfx.DisposeAsync(); } catch (Exception) { /* page is going away */ }
+            if (module is null) continue;
+
+            try { await module.DisposeAsync(); } catch (Exception) { /* page is going away */ }
         }
     }
 }

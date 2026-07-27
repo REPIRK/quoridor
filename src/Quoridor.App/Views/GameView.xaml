@@ -135,6 +135,7 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Text.Section}"
@@ -167,6 +168,16 @@
                         <TextBlock x:Name="MusicReading" Grid.Row="3" Grid.Column="2"
                                    Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
                                    VerticalAlignment="Center" TextAlignment="Right" />
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Track" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <ComboBox x:Name="TrackPick" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2"
+                                  Style="{StaticResource Pick}" Margin="0,14,0,0"
+                                  MinWidth="0" SelectedIndex="0">
+                            <ComboBoxItem Content="Ink — calm, mid-register" />
+                            <ComboBoxItem Content="Slate — low and sparse" />
+                            <ComboBoxItem Content="Glass — bright, more movement" />
+                        </ComboBox>
                     </Grid>
 
                     <TextBlock x:Name="SettingsNote" Style="{StaticResource Text.Subtitle}"

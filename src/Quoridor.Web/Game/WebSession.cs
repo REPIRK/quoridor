@@ -24,11 +24,17 @@ public sealed class WebSession
     private readonly List<Move> _moves = new();
     private readonly IQuoridorAgent? _bot;
 
-    public WebSession(WebMode mode, BotStrength strength, int localSeat = 0, GameSetup? setup = null)
+    public WebSession(
+        WebMode mode,
+        BotStrength strength,
+        int localSeat = 0,
+        GameSetup? setup = null,
+        GameFlavour flavour = GameFlavour.Standard)
     {
         Mode = mode;
         Strength = strength;
         Setup = setup ?? GameSetup.Standard;
+        Flavour = flavour;
 
         // Hotseat has no other side, so both seats are played from this keyboard.
         LocalSeat = mode == WebMode.Hotseat ? -1 : localSeat;
@@ -51,6 +57,13 @@ public sealed class WebSession
 
     /// <summary>The board this game is played on, fixed once it has begun.</summary>
     public GameSetup Setup { get; }
+
+    /// <summary>
+    /// How the board was arrived at. Carried by the game rather than read off the setup
+    /// screen, which may have been changed since — a rematch has to know whether it is
+    /// repeating settings or rolling again.
+    /// </summary>
+    public GameFlavour Flavour { get; }
 
     /// <summary>The squares out of play, for the board to draw.</summary>
     public UInt128 Holes { get; }

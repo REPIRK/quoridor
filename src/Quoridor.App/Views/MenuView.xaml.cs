@@ -521,6 +521,20 @@ public partial class MenuView : UserControl
             Sfx.RefreshVolumes();
         });
 
+        TrackPick.SelectedIndex = Math.Clamp(settings.MusicTrack, 0, 2);
+        TrackPick.SelectionChanged += (_, _) => Store(() =>
+        {
+            settings.MusicTrack = TrackPick.SelectedIndex;
+
+            // Changing the piece is only audible if it is playing; start it if the
+            // volume says it should be.
+            if (settings.Music || settings.MusicVolume > 0)
+            {
+                settings.Music = true;
+                Sfx.Music(true);
+            }
+        });
+
         // Picks the option matching the stored value, falling back to the middle one so
         // a hand-edited file cannot leave the group with nothing selected.
         static void Choose(int stored, params (RadioButton Option, int Value)[] choices)

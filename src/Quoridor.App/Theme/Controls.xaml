@@ -232,9 +232,14 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
                     <Grid>
+                        <!-- The foreground has to be handed down explicitly: a stock
+                             ToggleButton carries the system's own text colour, and the
+                             presenter inside it inherits that rather than the page's —
+                             which is black text on a dark card. -->
                         <ToggleButton x:Name="Face"
                                       Focusable="False"
                                       ClickMode="Press"
+                                      Foreground="{TemplateBinding Foreground}"
                                       IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
                             <ToggleButton.Template>
                                 <ControlTemplate TargetType="ToggleButton">
@@ -252,6 +257,7 @@
 
                                             <ContentPresenter Grid.Column="0"
                                                               Content="{TemplateBinding Content}"
+                                                              TextElement.Foreground="{TemplateBinding Foreground}"
                                                               VerticalAlignment="Center" />
 
                                             <Path Grid.Column="1"

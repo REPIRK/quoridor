@@ -44,6 +44,9 @@ public sealed class Settings
 
     public int MusicVolume { get; set; } = 55;
 
+    /// <summary>Which of the three pieces plays: 0 Ink, 1 Slate, 2 Glass.</summary>
+    public int MusicTrack { get; set; }
+
     public static Settings Current { get; } = Load();
 
     // Derived from the two above, so they are written out only to be ignored on the way
