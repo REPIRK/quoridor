@@ -3,6 +3,10 @@
 
 :root,
 [data-theme="dark"] {
+    /* Tells the browser to draw its own widgets — dropdown popups above all — in the
+       matching theme. Without it a dark page gets a white option list. */
+    color-scheme: dark;
+
     --bg: #171714;
     --surface: #1f1e1b;
     --board: #1c1b18;
@@ -17,6 +21,8 @@
 }
 
 [data-theme="light"] {
+    color-scheme: light;
+
     --bg: #e8e3d8;
     --surface: #f4f1e9;
     --board: #dcd5c6;
@@ -255,7 +261,23 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
     align-items: center;
     justify-content: center;
     padding: 24px;
+
+    /* A tall card on a short screen has to scroll on its own, and the scroll must
+       stop here: without this, reaching the end of the card hands the gesture to the
+       game behind it, which then scrolls under a dialog that is covering it. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
+
+/* The card is the thing that scrolls, so it must not be stretched to the full height
+   of the overlay by the flex centring. */
+.overlay > * { flex: 0 0 auto; max-height: none; }
+
+/* And the page behind it does not scroll at all while it is up. Scroll chaining is
+   only half the problem: a touch that starts outside the card would otherwise drag
+   the game around underneath the dialog covering it. */
+body:has(.overlay) { overflow: hidden; }
 
 .result, .setup {
     background: var(--surface);
@@ -317,6 +339,30 @@ input.code::placeholder { color: var(--muted); }
 
 .setup .actions { margin-top: 26px; }
 
+/* What the pickups do, with the marks drawn at the size they appear on the board. */
+.guide { margin: 20px 0 0; }
+
+.guide .line {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text);
+}
+
+.guide .glyph { width: 40px; height: 28px; flex: 0 0 40px; margin-top: 2px; }
+
+/* The board's own pickup styles are scoped under .board, so the copies drawn here
+   need their own — same ink, a little more of it since they are small and alone. */
+.guide .pickup { fill: none; stroke: var(--text); stroke-width: 2; opacity: 0.55; }
+.guide .pickup.wall { fill: var(--text); stroke: none; opacity: 0.45; }
+.guide .pickup.skip.dot { fill: var(--text); stroke: none; opacity: 0.45; }
+.guide b { font-weight: 600; }
+.guide em { font-style: italic; }
+.guide .fine { margin: 0; }
+
 /* A dropdown rather than a row of segments: it shows what is chosen and nothing else
    until you ask, which is what keeps the setup screen readable as it grows. */
 select.pick {
@@ -343,9 +389,12 @@ select.pick {
 select.pick:hover { border-color: var(--p1); }
 select.pick:focus-visible { outline: 1px solid var(--p1); outline-offset: 1px; }
 
-/* Options are drawn by the operating system, which will not follow the page's
-   variables — so they get explicit colours or a dark theme shows black on black. */
-select.pick option { background: var(--panel); color: var(--text); }
+/* The option list is drawn by the browser, not by this stylesheet — `color-scheme`
+   above is what makes it follow the theme. These are a belt-and-braces fallback for
+   engines that do style options, and they must name variables that exist: an unknown
+   one drops the declaration and leaves the text the page's colour on the system's
+   background, which in a dark theme is exactly the unreadable case. */
+select.pick option { background: var(--surface); color: var(--text); }
 
 .settings .row { align-items: center; gap: 10px; }
 .settings .reading {

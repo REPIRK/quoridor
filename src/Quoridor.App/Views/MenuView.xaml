@@ -414,6 +414,43 @@
 
                     <Rectangle Height="1" Fill="{DynamicResource Brush.Line}" Margin="0,24,0,20" />
 
+                    <!-- What the two things lying on the board do. Drawn at the size they
+                         appear at, because a bar and a ring explain nothing on their own. -->
+                    <TextBlock Style="{StaticResource Text.Section}" Text="Pickups" />
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="44" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Rectangle Grid.Row="0" Grid.Column="0"
+                                   Width="26" Height="8" RadiusX="2" RadiusY="2"
+                                   Fill="{DynamicResource Brush.Text}" Opacity="0.45"
+                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Text.Body}"
+                                   Text="A spare wall. Step on it and one more wall joins your supply, on top of whatever you started with. The turn passes as usual." />
+
+                        <Grid Grid.Row="1" Grid.Column="0" Margin="0,12,0,0"
+                              HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Ellipse Width="22" Height="22"
+                                     Stroke="{DynamicResource Brush.Text}" StrokeThickness="2" Opacity="0.55" />
+                            <Ellipse Width="8" Height="8"
+                                     Fill="{DynamicResource Brush.Text}" Opacity="0.45" />
+                        </Grid>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Text.Body}" Margin="0,12,0,0"
+                                   Text="A free move. Step on it and the turn does not pass — you move again at once, and your opponent misses theirs. Reaching your goal row with one still wins there and then." />
+                    </Grid>
+
+                    <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,12,0,0" TextWrapping="Wrap"
+                               Text="They lie in symmetric pairs, so the same chances sit on your opponent's half as on yours. Whoever gets there first takes it." />
+
+                    <Rectangle Height="1" Fill="{DynamicResource Brush.Line}" Margin="0,24,0,20" />
+
                     <TextBlock Style="{StaticResource Text.Section}" Text="Controls" />
                     <TextBlock Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
                                Text="Click a highlighted square         move your pawn" />

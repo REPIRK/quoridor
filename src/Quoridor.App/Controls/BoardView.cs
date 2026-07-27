@@ -152,7 +152,7 @@ public sealed class BoardView : UserControl
             _flipped = value;
             BuildCoordinates();
             BuildGoalMarks();
-            ApplyHoles();
+            RefreshCells();
             Reset(_state);
         }
     }
@@ -169,22 +169,37 @@ public sealed class BoardView : UserControl
             if (_holes == value) return;
 
             _holes = value;
-            ApplyHoles();
+            RefreshCells();
         }
     }
 
-    private void ApplyHoles()
+    /// <summary>
+    /// Styles every square: a plain one, a hole, or one of the ring outside a smaller
+    /// game — which is hidden outright, because the frame leaves a clean margin around
+    /// the playable square and the ring's squares begin half a cell inside it.
+    /// </summary>
+    private void RefreshCells()
     {
+        int from = Math.Max(0, _framedFrom);
+        int last = Board.Size - 1 - from;
+
         for (int row = 0; row < Board.Size; row++)
         {
             for (int col = 0; col < Board.Size; col++)
             {
-                bool hole = (_holes & Board.Bit(Board.Index(row, col))) != 0;
-
                 // The squares were laid out in screen order, so a model cell has to be
                 // mapped through the same turn the rest of the board uses.
                 Rectangle square = _cells[Board.Index(ViewIndex(row), ViewIndex(col))];
 
+                if (row < from || row > last || col < from || col > last)
+                {
+                    square.Visibility = Visibility.Collapsed;
+                    continue;
+                }
+
+                bool hole = (_holes & Board.Bit(Board.Index(row, col))) != 0;
+
+                square.Visibility = Visibility.Visible;
                 square.Fill = hole ? null : Palette.BrushOf(Palette.Cell);
                 square.Stroke = hole ? Palette.BrushOf(Palette.Line) : null;
                 square.StrokeThickness = hole ? 1 : 0;
@@ -329,14 +344,18 @@ public sealed class BoardView : UserControl
     {
         _goalLayer.Children.Clear();
 
-        double contentWidth = Board.Size * CellSize + (Board.Size - 1) * GapSize;
+        int from = _state.GoalRow(0);
+        int last = _state.GoalRow(1);
+        int span = last - from + 1;
+
+        double contentWidth = span * CellSize + (span - 1) * GapSize;
 
         for (int player = 0; player < 2; player++)
         {
-            int viewRow = ViewIndex(Board.GoalRow(player));
+            int viewRow = ViewIndex(_state.GoalRow(player));
             string accent = player == 0 ? Palette.Accent0 : Palette.Accent1;
 
-            for (int col = 0; col < Board.Size; col++)
+            for (int col = from; col <= last; col++)
             {
                 var wash = new Rectangle
                 {
@@ -361,7 +380,7 @@ public sealed class BoardView : UserControl
             };
 
             // Along the outer edge of whichever screen row the goal ended up on.
-            Place(finish, Pad, viewRow == 0 ? Origin(0) : Origin(viewRow) + CellSize - 2.5);
+            Place(finish, Origin(from), viewRow == from ? Origin(from) : Origin(viewRow) + CellSize - 2.5);
             _goalLayer.Children.Add(finish);
         }
     }
@@ -389,12 +408,14 @@ public sealed class BoardView : UserControl
         double left = from * Pitch + 4;
         double bottom = (Board.Size - 1 - from) * Pitch + CellSize + Pad + 5;
 
+        // Counted from the game's own corner: a 7x7 board runs a1 to g7, which is also
+        // what the move list calls those squares.
         for (int i = from; i <= last; i++)
         {
             int logical = ViewIndex(i);
 
-            _coordinateLayer.Children.Add(Label($"{Board.Size - logical}", left, Centre(i) - 9));
-            _coordinateLayer.Children.Add(Label($"{(char)('a' + logical)}", Centre(i) - 10, bottom));
+            _coordinateLayer.Children.Add(Label($"{last - logical + 1}", left, Centre(i) - 9));
+            _coordinateLayer.Children.Add(Label($"{(char)('a' + logical - from)}", Centre(i) - 10, bottom));
         }
 
         static TextBlock Label(string text, double x, double y)
@@ -444,6 +465,8 @@ public sealed class BoardView : UserControl
         Place(_backdrop, offset, offset);
 
         BuildCoordinates();
+        BuildGoalMarks();
+        RefreshCells();
     }
 
     /// <summary>Whatever is still lying on the board waiting to be stepped on.</summary>
@@ -712,8 +735,13 @@ public sealed class BoardView : UserControl
 
         HideGhost();
 
-        int cellCol = ViewIndex(Math.Clamp((int)((point.X - Pad) / Pitch), 0, Board.Size - 1));
-        int cellRow = ViewIndex(Math.Clamp((int)((point.Y - Pad) / Pitch), 0, Board.Size - 1));
+        // Clamped to the game rather than the grid, so the margin around a smaller board
+        // cannot land the cursor on a square that is not in play.
+        int first = Math.Max(0, _framedFrom);
+        int final = Board.Size - 1 - first;
+
+        int cellCol = ViewIndex(Math.Clamp((int)((point.X - Pad) / Pitch), first, final));
+        int cellRow = ViewIndex(Math.Clamp((int)((point.Y - Pad) / Pitch), first, final));
 
         if (_state.IsPawnMoveLegal(cellRow, cellCol))
         {

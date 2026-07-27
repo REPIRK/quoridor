@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Quoridor.App.Game;
 
@@ -39,14 +40,18 @@ public sealed class Settings
     public bool Music { get; set; }
 
     /// <summary>Loudness of the effects and of the music, each 0 to 100.</summary>
-    public int SoundVolume { get; set; } = 45;
+    public int SoundVolume { get; set; } = 75;
 
-    public int MusicVolume { get; set; } = 30;
+    public int MusicVolume { get; set; } = 55;
 
     public static Settings Current { get; } = Load();
 
+    // Derived from the two above, so they are written out only to be ignored on the way
+    // back in. Kept out of the file to save anyone reading it the confusion.
+    [JsonIgnore]
     public TimeSpan EngineMoveTime => TimeSpan.FromMilliseconds(EngineMoveTimeMs);
 
+    [JsonIgnore]
     public TimeSpan WatchPace => TimeSpan.FromMilliseconds(WatchPaceMs);
 
     public void Save()

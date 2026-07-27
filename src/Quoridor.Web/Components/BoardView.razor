@@ -24,9 +24,12 @@
        Only the labels sit outside it, since text upside down is no use to anyone. *@
     <g transform="@(Flipped ? "rotate(180 364 364)" : "")">
 
-    @for (int row = 0; row < Board.Size; row++)
+    @* Only the squares in the game are drawn. On a smaller board the ring around it
+       would otherwise poke into view, since the frame is a clean margin around the
+       playable square and the ring's squares start half a cell outside it. *@
+    @for (int row = From; row <= Last; row++)
     {
-        for (int col = 0; col < Board.Size; col++)
+        for (int col = From; col <= Last; col++)
         {
             bool hole = (Holes & Board.Bit(Board.Index(row, col))) != 0;
 
@@ -38,16 +41,16 @@
     @* Each player's target row: a wash across the squares and a finish line on the edge. *@
     @for (int player = 0; player < 2; player++)
     {
-        int goal = Board.GoalRow(player);
+        int goal = State.GoalRow(player);
         string accent = player == 0 ? "p0" : "p1";
 
-        for (int col = 0; col < Board.Size; col++)
+        for (int col = From; col <= Last; col++)
         {
             <rect class="goal @accent" x="@Origin(col)" y="@Origin(goal)" width="@Cell" height="@Cell" rx="3" />
         }
 
-        <rect class="finish @accent" x="@Pad" y="@(goal == 0 ? Origin(0) : Origin(goal) + Cell - 3)"
-              width="@(Board.Size * Cell + (Board.Size - 1) * Gap)" height="3" />
+        <rect class="finish @accent" x="@(Origin(From))" y="@(goal == From ? Origin(goal) : Origin(goal) + Cell - 3)"
+              width="@(Span * Cell + (Span - 1) * Gap)" height="3" />
     }
 
     @if (LastMove is { } last)
@@ -120,15 +123,22 @@
         int cell = State.PawnOf(player);
         bool active = !State.IsGameOver && State.SideToMove == player;
 
-        <circle class="pawn @(player == 0 ? "p0" : "p1") @(active ? "active" : "")"
+        @* Keyed on the board as well as the player: a pawn slides to where it moved,
+           but starting a different-sized game is not a move, and sliding across the
+           whole board for it would be nonsense. A new key means a new element, which
+           simply appears where it belongs. *@
+        <circle @key="(player, From)"
+                class="pawn @(player == 0 ? "p0" : "p1") @(active ? "active" : "")"
                 cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="20" />
     }
 
     @* Hit targets last so they sit above everything they select. Squares first,
-       grooves after, so a groove wins the few pixels where they overlap. *@
-    @for (int row = 0; row < Board.Size; row++)
+       grooves after, so a groove wins the few pixels where they overlap. Like the
+       squares, they stop at the edge of the game: a groove outside it would offer a
+       wall nobody could ever be stopped by. *@
+    @for (int row = From; row <= Last; row++)
     {
-        for (int col = 0; col < Board.Size; col++)
+        for (int col = From; col <= Last; col++)
         {
             int r = row;
             int c = col;
@@ -138,23 +148,23 @@
         }
     }
 
-    @for (int row = 0; row < Board.SlotSize; row++)
+    @for (int row = From; row < Last; row++)
     {
-        for (int col = 0; col < Board.Size; col++)
+        for (int col = From; col <= Last; col++)
         {
             int r = row;
-            int c = Math.Min(col, Board.SlotSize - 1);
+            int c = Math.Min(col, Last - 1);
 
             <rect class="hit" x="@Origin(col)" y="@(Origin(row) + Cell - 4)" width="@Cell" height="@(Gap + 8)"
                   @onmouseover="() => HoverWall(MoveKind.HorizontalWall, r, c)" @onclick="Commit" />
         }
     }
 
-    @for (int row = 0; row < Board.Size; row++)
+    @for (int row = From; row <= Last; row++)
     {
-        for (int col = 0; col < Board.SlotSize; col++)
+        for (int col = From; col < Last; col++)
         {
-            int r = Math.Min(row, Board.SlotSize - 1);
+            int r = Math.Min(row, Last - 1);
             int c = col;
 
             <rect class="hit" x="@(Origin(col) + Cell - 4)" y="@Origin(row)" width="@(Gap + 8)" height="@Cell"
@@ -176,7 +186,10 @@
     /// <summary>First row and column in the game — non-zero only on a smaller board.</summary>
     private int From => State.GoalRow(0);
 
-    private int Span => State.GoalRow(1) - State.GoalRow(0) + 1;
+    /// <summary>Last row and column in the game.</summary>
+    private int Last => State.GoalRow(1);
+
+    private int Span => Last - From + 1;
 
     private int ViewX => From * Pitch;
 
@@ -247,18 +260,16 @@
     {
         int sequence = 0;
 
-        // Only the squares in the game are labelled, and the labels sit against the
-        // edges of what is actually shown rather than the edges of the whole grid.
-        int last = From + Span - 1;
-
-        for (int i = From; i <= last; i++)
+        // Only the squares in the game are labelled, against the edges of what is shown
+        // rather than of the whole grid, and counted from the game's own corner — a 7x7
+        // board runs a1 to g7, which is also what the move list calls those squares.
+        for (int i = From; i <= Last; i++)
         {
             // The labels are not rotated with the board, so they are renumbered instead.
-            int rank = Flipped ? i + 1 : Quoridor.Core.Board.Size - i;
-            int file = Flipped ? Quoridor.Core.Board.Size - 1 - i : i;
+            int row = Flipped ? Quoridor.Core.Board.Size - 1 - i : i;
 
-            Label($"{rank}", ViewX + 14, Centre(i) + 4);
-            Label($"{(char)('a' + file)}", Centre(i), ViewY + ViewSize - Pad + 16);
+            Label($"{Last - row + 1}", ViewX + 14, Centre(i) + 4);
+            Label($"{(char)('a' + row - From)}", Centre(i), ViewY + ViewSize - Pad + 16);
         }
 
         void Label(string text, int x, int y)

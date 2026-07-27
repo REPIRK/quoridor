@@ -140,11 +140,15 @@ public static class Sfx
 
             Directory.CreateDirectory(Folder);
 
-            Write("move", Move());
-            Write("wall", Wall());
-            Write("win", Win());
-            Write("lose", Lose());
-            Write("music", Ambient());
+            // Normalised rather than left at whatever the synthesis happened to produce.
+            // Adding voices together lands anywhere between a third and a tenth of full
+            // scale, and a file that quiet leaves the volume control with nothing to work
+            // with. The music is deliberately lower: it plays under everything else.
+            Write("move", Normalise(Move(), 0.85));
+            Write("wall", Normalise(Wall(), 0.9));
+            Write("win", Normalise(Win(), 0.85));
+            Write("lose", Normalise(Lose(), 0.8));
+            Write("music", Normalise(Ambient(), 0.5));
 
             _ready = true;
         }
@@ -229,6 +233,20 @@ public static class Sfx
         }
 
         return buffer;
+    }
+
+    /// <summary>Scales a buffer so its loudest sample lands on <paramref name="peak"/>.</summary>
+    private static float[] Normalise(float[] samples, double peak)
+    {
+        float loudest = 0;
+        foreach (float sample in samples) loudest = Math.Max(loudest, Math.Abs(sample));
+
+        if (loudest <= 0.0001f) return samples;
+
+        double scale = peak / loudest;
+        for (int i = 0; i < samples.Length; i++) samples[i] = (float)(samples[i] * scale);
+
+        return samples;
     }
 
     // ================================================================ shaping ==

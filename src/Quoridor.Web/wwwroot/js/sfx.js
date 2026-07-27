@@ -13,8 +13,8 @@ let musicStop = null;
 
 // Remembered across a context that does not exist yet, so the sliders work before the
 // first sound has been made.
-let effectsVolume = 0.5;
-let musicVolume = 0.3;
+let effectsVolume = 0.7;
+let musicVolume = 0.5;
 
 function context() {
     if (audio === null) {
@@ -38,7 +38,7 @@ function context() {
 }
 
 /// A plain tone with a soft attack and an exponential tail — the shape of every blip here.
-function tone(at, { type = 'sine', from, to = from, gain = 0.14, attack = 0.006, length = 0.12 }) {
+function tone(at, { type = 'sine', from, to = from, gain = 0.5, attack = 0.006, length = 0.12 }) {
     const osc = audio.createOscillator();
     const env = audio.createGain();
 
@@ -58,7 +58,7 @@ function tone(at, { type = 'sine', from, to = from, gain = 0.14, attack = 0.006,
 }
 
 /// A short burst of filtered noise: what gives the wall its wooden edge.
-function knock(at, { cutoff = 900, gain = 0.2, length = 0.13 }) {
+function knock(at, { cutoff = 900, gain = 0.6, length = 0.13 }) {
     const frames = Math.ceil(audio.sampleRate * length);
     const buffer = audio.createBuffer(1, frames, audio.sampleRate);
     const data = buffer.getChannelData(0);
@@ -92,27 +92,27 @@ export function play(kind) {
 
     switch (kind) {
         case 'move':
-            tone(now, { from: 520, to: 660, gain: 0.10, length: 0.09 });
+            tone(now, { from: 520, to: 660, gain: 0.42, length: 0.09 });
             break;
 
         case 'wall':
-            knock(now, { cutoff: 1100, gain: 0.22, length: 0.14 });
-            tone(now, { type: 'triangle', from: 180, to: 120, gain: 0.11, length: 0.16 });
+            knock(now, { cutoff: 1100, gain: 0.55, length: 0.14 });
+            tone(now, { type: 'triangle', from: 180, to: 120, gain: 0.38, length: 0.16 });
             break;
 
         case 'win':
-            tone(now, { from: 523, gain: 0.12, length: 0.18 });
-            tone(now + 0.12, { from: 659, gain: 0.12, length: 0.18 });
-            tone(now + 0.24, { from: 784, gain: 0.13, length: 0.42 });
+            tone(now, { from: 523, gain: 0.45, length: 0.18 });
+            tone(now + 0.12, { from: 659, gain: 0.45, length: 0.18 });
+            tone(now + 0.24, { from: 784, gain: 0.5, length: 0.42 });
             break;
 
         case 'lose':
-            tone(now, { type: 'triangle', from: 392, gain: 0.11, length: 0.22 });
-            tone(now + 0.16, { type: 'triangle', from: 294, gain: 0.11, length: 0.5 });
+            tone(now, { type: 'triangle', from: 392, gain: 0.42, length: 0.22 });
+            tone(now + 0.16, { type: 'triangle', from: 294, gain: 0.42, length: 0.5 });
             break;
 
         case 'illegal':
-            tone(now, { type: 'square', from: 150, to: 120, gain: 0.05, length: 0.08 });
+            tone(now, { type: 'square', from: 150, to: 120, gain: 0.2, length: 0.08 });
             break;
     }
 }
@@ -130,12 +130,12 @@ export function music(on) {
 
     musicGain = audio.createGain();
     musicGain.gain.value = 0.0001;
-    musicGain.gain.exponentialRampToValueAtTime(0.5, audio.currentTime + 3);
+    musicGain.gain.exponentialRampToValueAtTime(0.9, audio.currentTime + 3);
     musicGain.connect(musicBus);
 
     // The pad: two slightly detuned saws kept dark by a lowpass that breathes.
     const pad = audio.createGain();
-    pad.gain.value = 0.035;
+    pad.gain.value = 0.16;
 
     const filter = audio.createBiquadFilter();
     filter.type = 'lowpass';
@@ -177,7 +177,7 @@ export function music(on) {
         osc.frequency.value = scale[Math.floor(Math.random() * scale.length)];
 
         env.gain.setValueAtTime(0.0001, at);
-        env.gain.exponentialRampToValueAtTime(0.05, at + 0.6);
+        env.gain.exponentialRampToValueAtTime(0.2, at + 0.6);
         env.gain.exponentialRampToValueAtTime(0.0001, at + 3.4);
 
         osc.connect(env);

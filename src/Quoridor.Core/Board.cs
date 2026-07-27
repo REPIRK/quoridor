@@ -104,8 +104,8 @@ public static class Board
     /// <summary>The goal row bitboard the given player must reach.</summary>
     public static UInt128 GoalMask(int player) => player == 0 ? TopRow : BottomRow;
 
-    /// <summary>The goal row index the given player must reach.</summary>
-    public static int GoalRow(int player) => player == 0 ? 0 : Size - 1;
+    // No static goal row: which rows the players are aiming for is a property of the
+    // game, not of the grid, and a smaller board moves them inward. Ask the position.
 
     /// <summary>Index of the lowest set bit. Undefined for zero.</summary>
     public static int LowestBit(UInt128 board)

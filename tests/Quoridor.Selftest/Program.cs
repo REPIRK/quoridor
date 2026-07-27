@@ -166,6 +166,27 @@ internal static class Program
 
         Check(!Notation.TryParse("z9", out _), "rejects an out-of-range file");
         Check(!Notation.TryParse("e4x", out _), "rejects an unknown orientation");
+
+        // A smaller game names its squares from its own corner, not the grid's, so a
+        // 7x7 board runs a1 to g7 — which is what its margin prints too.
+        GameState small = GameState.CreateInitial(7, 7);
+        int origin = small.GoalRow(0);
+
+        Check(Notation.Format(Move.Pawn(small.GoalRow(1), 4), small) == "d1",
+            "the 7x7 board's near centre is d1");
+        Check(Notation.Format(Move.Pawn(origin, origin), small) == "a7",
+            "the 7x7 board's far corner is a7");
+
+        foreach (string text in new[] { "a1", "d4", "g7", "a1h", "f6v" })
+        {
+            Check(Notation.TryParse(text, out Move parsed, origin), $"parses {text} on a 7x7 board");
+            Check(Notation.Format(parsed, small) == text, $"{text} survives a round trip on a 7x7 board");
+        }
+
+        // The squares a 7x7 board names must be squares it actually has.
+        Check(Notation.TryParse("a1", out Move corner, origin) &&
+              Board.RowOf(corner.Cell) == small.GoalRow(1) && Board.ColOf(corner.Cell) == origin,
+            "a1 on a 7x7 board is its own bottom-left, not the grid's");
     }
 
     private static void WinDetection()

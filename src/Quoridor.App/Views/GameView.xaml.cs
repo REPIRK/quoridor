@@ -133,7 +133,7 @@ public partial class GameView : UserControl
 
             if (_peer is not null)
             {
-                await _peer.SendAsync($"move|{ply}|{Notation.Format(move)}");
+                await _peer.SendAsync($"move|{ply}|{Notation.Format(move, _session.State)}");
                 return;
             }
 
@@ -230,7 +230,7 @@ public partial class GameView : UserControl
                 parts[0] != "move" ||
                 !int.TryParse(parts[1], out int ply) ||
                 ply != _session.Moves.Count ||
-                !Notation.TryParse(parts[2], out Move move))
+                !Notation.TryParse(parts[2], out Move move, _session.State.GoalRow(0)))
             {
                 return;
             }
@@ -445,7 +445,7 @@ public partial class GameView : UserControl
 
         if (_reviewPly is not { } ply) return;
 
-        StatusText.Text = ply == 0 ? "Starting position" : $"After {Notation.Format(_session.Moves[ply - 1])}";
+        StatusText.Text = ply == 0 ? "Starting position" : $"After {Notation.Format(_session.Moves[ply - 1], _session.State)}";
         HintText.Text = $"Move {ply} of {played}. Play is paused — press Live to catch up.";
         EngineLine.Visibility = Visibility.Collapsed;
 
@@ -534,7 +534,11 @@ public partial class GameView : UserControl
         }
         else
         {
-            SettingsNote.Text = $"This game: {_session.Options.Setup.Describe()}.";
+            SettingsNote.Text = _session.Options.Setup.Pickups > 0
+                ? $"This game: {_session.Options.Setup.Describe()}. A bar on a square is a spare " +
+                  "wall; a ring is a free move, which does not pass the turn. The rules screen " +
+                  "in the menu has both in full."
+                : $"This game: {_session.Options.Setup.Describe()}.";
             SettingsOverlay.Visibility = Visibility.Visible;
         }
 
@@ -721,8 +725,8 @@ public partial class GameView : UserControl
 
         for (int row = 0; row < rows; row++)
         {
-            string first = Notation.Format(moves[row * 2]);
-            string second = row * 2 + 1 < moves.Count ? Notation.Format(moves[row * 2 + 1]) : string.Empty;
+            string first = Notation.Format(moves[row * 2], _session.State);
+            string second = row * 2 + 1 < moves.Count ? Notation.Format(moves[row * 2 + 1], _session.State) : string.Empty;
             ((TextBlock)LogPanel.Children[row]).Text = $"{row + 1,2}.  {first,-6}{second}";
         }
 
