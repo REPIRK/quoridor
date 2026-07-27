@@ -133,13 +133,18 @@
         int cell = State.PawnOf(player);
         bool active = !State.IsGameOver && State.SideToMove == player;
 
-        @* Keyed on the board as well as the player: a pawn slides to where it moved,
+        @* Placed by a transform on the group rather than by the circle's own centre:
+           that is what the slide animates, and moving a transform is far cheaper for
+           the browser than moving geometry.
+
+           Keyed on the board as well as the player: a pawn slides to where it moved,
            but starting a different-sized game is not a move, and sliding across the
            whole board for it would be nonsense. A new key means a new element, which
            simply appears where it belongs. *@
-        <circle @key="(player, From)"
-                class="pawn @(player == 0 ? "p0" : "p1") @(active ? "active" : "")"
-                cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="20" />
+        <g @key="(player, From)" class="pawn-holder"
+           transform="translate(@Centre(Board.ColOf(cell)) @Centre(Board.RowOf(cell)))">
+            <circle class="pawn @(player == 0 ? "p0" : "p1") @(active ? "active" : "")" r="20" />
+        </g>
     }
 
     @* Hit targets last so they sit above everything they select. Squares first,

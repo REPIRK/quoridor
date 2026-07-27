@@ -468,14 +468,10 @@ input.slider::-moz-range-thumb {
 /* Something lying on a square waiting to be stepped on. Drawn in the neutral ink
    rather than either player's colour, because it belongs to whoever gets there, and
    breathing slowly so it reads as a thing to collect rather than part of the board. */
-.board .pickup {
-    pointer-events: none;
-
-    /* Everything inside is drawn around (0,0) and placed by the group above, so the
-       scale has a sensible centre without needing the bounding box. */
-    transform-origin: 0 0;
-    animation: pickup-breathe 2.8s ease-in-out infinite;
-}
+/* Deliberately not animated. A pulse looked good and cost the browser a repaint of
+   the whole board on every frame, for as long as any pickup was still on it — the
+   board is one SVG, so there is no cheap corner of it to animate. */
+.board .pickup { pointer-events: none; }
 
 .board .pickup.wall rect { fill: var(--text); stroke: none; opacity: 0.38; }
 
@@ -489,13 +485,6 @@ input.slider::-moz-range-thumb {
 
 .board .pickup.skip .head { fill: var(--text); stroke: none; opacity: 0.5; }
 
-/* The wall's own timing is offset so a board full of pickups does not pulse in unison. */
-.board .pickup.wall { animation-delay: -1.4s; }
-
-@keyframes pickup-breathe {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.07); opacity: 0.82; }
-}
 
 /* A square out of play reads as a gap in the board rather than a darker square: no
    fill at all, only a faint outline where the square would have been. */
@@ -563,12 +552,20 @@ input.slider::-moz-range-thumb {
 .board .pawn.p0 { fill: var(--p0); }
 .board .pawn.p1 { fill: var(--p1); }
 
-.board .hit { fill: transparent; cursor: pointer; }
+/* `fill: none` rather than a transparent fill: a transparent fill is still a fill,
+   and the browser paints all hundred and thirty of these on every frame for nothing.
+   `pointer-events: all` keeps them catching the mouse without being drawn at all. */
+.board .hit { fill: none; pointer-events: all; cursor: pointer; }
 
 /* ============================================================ transitions ==== */
 
-.board .pawn {
-    transition: cx 0.3s cubic-bezier(0.4, 0, 0.2, 1), cy 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* The pawn slides on a transform, not on cx/cy. Animating the geometry attributes
+   makes the browser recompute and repaint the whole board every frame; a transform
+   moves an already-painted thing, and `will-change` gives it a layer of its own so
+   the three hundred other elements are left alone while it travels. */
+.board .pawn-holder {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
 }
 
 .board .wall {
@@ -589,7 +586,7 @@ input.slider::-moz-range-thumb {
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-    .board .pawn, .board .wall, .board .pickup,
+    .board .pawn-holder, .board .wall,
     .overlay, .result, .setup { transition: none; animation: none; }
 }
 
