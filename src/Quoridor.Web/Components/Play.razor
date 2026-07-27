@@ -392,6 +392,7 @@
     private bool _showSetup = true;
     private bool _showSettings;
     private bool _thinking;
+    private bool _engineRunning;
     private bool _light;
     private bool _routes;
     private bool _confirm;
@@ -919,19 +920,33 @@
     /// </summary>
     private async Task RunEngine()
     {
-        while (_session.IsBotTurn)
+        // Only ever one of these. The loop yields so the browser can paint "Thinking",
+        // and a restart pressed inside that gap would otherwise start a second loop
+        // alongside the first, both driving the same game.
+        if (_engineRunning) return;
+        _engineRunning = true;
+
+        try
         {
-            _thinking = true;
-            StateHasChanged();
-            await Task.Delay(40);
+            while (_session.IsBotTurn)
+            {
+                _thinking = true;
+                StateHasChanged();
+                await Task.Delay(40);
 
-            Move move = _session.Think();
-            _session.Apply(move);
-            _ = SoundFor(move);
+                Move move = _session.Think();
+                _session.Apply(move);
+                _ = SoundFor(move);
 
+                _thinking = false;
+                StateHasChanged();
+                await Task.Delay(1);
+            }
+        }
+        finally
+        {
             _thinking = false;
-            StateHasChanged();
-            await Task.Delay(1);
+            _engineRunning = false;
         }
 
         await TryPremoveAsync();

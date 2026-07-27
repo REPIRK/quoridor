@@ -4,6 +4,3 @@ publish/
 publish-web/
 *.user
 .vs/
-
-# Editor and assistant configuration — useful locally, noise in a public repository.
-.claude/

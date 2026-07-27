@@ -276,7 +276,9 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
 
 /* And the page behind it does not scroll at all while it is up. Scroll chaining is
    only half the problem: a touch that starts outside the card would otherwise drag
-   the game around underneath the dialog covering it. */
+   the game around underneath the dialog covering it. Both elements are named because
+   which of the two actually scrolls the document differs between browsers. */
+html:has(.overlay),
 body:has(.overlay) { overflow: hidden; }
 
 .result, .setup {
