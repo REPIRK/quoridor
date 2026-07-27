@@ -66,7 +66,14 @@ public sealed class BoardView : UserControl
     /// <summary>The square rectangles, in screen order, so holes can be restyled later.</summary>
     private readonly Rectangle[] _cells = new Rectangle[Board.CellCount];
 
+    private readonly Canvas _frame = new();
+    private readonly Rectangle _backdrop = new();
+    private readonly Canvas _pickupLayer = new();
+
     private UInt128 _holes;
+
+    /// <summary>First row of the game as last drawn, so the frame is only redone on a change.</summary>
+    private int _framedFrom = -1;
     private Move? _ghostMove;
     private bool _ghostLegal;
 
@@ -76,10 +83,17 @@ public sealed class BoardView : UserControl
 
         BuildVisuals();
 
+        // A smaller game is played on a centred square of the same grid, so the drawing
+        // never changes — the frame simply shows less of it, and the root slides under.
+        _frame.Width = Extent;
+        _frame.Height = Extent;
+        _frame.ClipToBounds = true;
+        _frame.Children.Add(_root);
+
         Content = new Viewbox
         {
             Stretch = Stretch.Uniform,
-            Child = _root,
+            Child = _frame,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -199,18 +213,15 @@ public sealed class BoardView : UserControl
 
     private void BuildVisuals()
     {
-        var backdrop = new Rectangle
-        {
-            Width = Extent,
-            Height = Extent,
-            RadiusX = 6,
-            RadiusY = 6,
-            Fill = Palette.BrushOf(Palette.BoardSurface),
-            Stroke = Palette.BrushOf(Palette.Line),
-            StrokeThickness = 1,
-        };
-        Place(backdrop, 0, 0);
-        _root.Children.Add(backdrop);
+        _backdrop.Width = Extent;
+        _backdrop.Height = Extent;
+        _backdrop.RadiusX = 6;
+        _backdrop.RadiusY = 6;
+        _backdrop.Fill = Palette.BrushOf(Palette.BoardSurface);
+        _backdrop.Stroke = Palette.BrushOf(Palette.Line);
+        _backdrop.StrokeThickness = 1;
+        Place(_backdrop, 0, 0);
+        _root.Children.Add(_backdrop);
 
         _root.Children.Add(_coordinateLayer);
         BuildCoordinates();
@@ -265,6 +276,9 @@ public sealed class BoardView : UserControl
 
         _hintLayer.IsHitTestVisible = false;
         _root.Children.Add(_hintLayer);
+
+        _pickupLayer.IsHitTestVisible = false;
+        _root.Children.Add(_pickupLayer);
 
         _root.Children.Add(_wallLayer);
 
@@ -367,12 +381,20 @@ public sealed class BoardView : UserControl
     {
         _coordinateLayer.Children.Clear();
 
-        for (int i = 0; i < Board.Size; i++)
+        // Only the squares in the game are labelled, and the labels sit against the
+        // edges of what is shown rather than the edges of the whole grid.
+        int from = Math.Max(0, _framedFrom);
+        int last = Board.Size - 1 - from;
+
+        double left = from * Pitch + 4;
+        double bottom = (Board.Size - 1 - from) * Pitch + CellSize + Pad + 5;
+
+        for (int i = from; i <= last; i++)
         {
             int logical = ViewIndex(i);
 
-            _coordinateLayer.Children.Add(Label($"{Board.Size - logical}", 4, Centre(i) - 9));
-            _coordinateLayer.Children.Add(Label($"{(char)('a' + logical)}", Centre(i) - 10, Extent - Pad + 5));
+            _coordinateLayer.Children.Add(Label($"{Board.Size - logical}", left, Centre(i) - 9));
+            _coordinateLayer.Children.Add(Label($"{(char)('a' + logical)}", Centre(i) - 10, bottom));
         }
 
         static TextBlock Label(string text, double x, double y)
@@ -395,12 +417,100 @@ public sealed class BoardView : UserControl
 
     // ============================================================== position ==
 
+    /// <summary>
+    /// Shows only the square the game is actually played on. Nothing that draws the
+    /// board changes: the frame is narrowed and the full-size root slides underneath,
+    /// which also means the ring outside stops receiving the mouse.
+    /// </summary>
+    private void FrameBoard()
+    {
+        int from = _state.GoalRow(0);
+        if (from == _framedFrom) return;
+
+        _framedFrom = from;
+
+        int span = _state.GoalRow(1) - from + 1;
+        double size = (span - 1) * Pitch + CellSize + Pad * 2;
+        double offset = from * Pitch;
+
+        _frame.Width = size;
+        _frame.Height = size;
+
+        Canvas.SetLeft(_root, -offset);
+        Canvas.SetTop(_root, -offset);
+
+        _backdrop.Width = size;
+        _backdrop.Height = size;
+        Place(_backdrop, offset, offset);
+
+        BuildCoordinates();
+    }
+
+    /// <summary>Whatever is still lying on the board waiting to be stepped on.</summary>
+    private void RefreshPickups()
+    {
+        _pickupLayer.Children.Clear();
+
+        UInt128 walls = _state.WallPickups;
+        UInt128 skips = _state.SkipPickups;
+
+        for (int cell = 0; cell < Board.CellCount && (walls | skips) != 0; cell++)
+        {
+            UInt128 bit = Board.Bit(cell);
+            bool isWall = (walls & bit) != 0;
+
+            if (!isWall && (skips & bit) == 0) continue;
+
+            walls &= ~bit;
+            skips &= ~bit;
+
+            double x = CellCentreOf(ViewIndex(Board.ColOf(cell)));
+            double y = CellCentreOf(ViewIndex(Board.RowOf(cell)));
+
+            Brush ink = Palette.BrushOf(Palette.Text);
+
+            if (isWall)
+            {
+                // A spare wall, drawn as the thing it gives you.
+                var bar = new Rectangle
+                {
+                    Width = 26,
+                    Height = 8,
+                    RadiusX = 2,
+                    RadiusY = 2,
+                    Fill = ink,
+                    Opacity = 0.34,
+                };
+                Place(bar, x - 13, y - 4);
+                _pickupLayer.Children.Add(bar);
+                continue;
+            }
+
+            // A free move: a ring with a mark in it, so the two never read alike.
+            var ring = new Ellipse
+            {
+                Width = 22,
+                Height = 22,
+                Stroke = ink,
+                StrokeThickness = 2,
+                Opacity = 0.42,
+            };
+            Place(ring, x - 11, y - 11);
+            _pickupLayer.Children.Add(ring);
+
+            var pip = new Ellipse { Width = 8, Height = 8, Fill = ink, Opacity = 0.34 };
+            Place(pip, x - 4, y - 4);
+            _pickupLayer.Children.Add(pip);
+        }
+    }
+
     /// <summary>Snaps the board to a position with no animation (new game, undo, restart).</summary>
     public void Reset(GameState state, Move? lastMove = null)
     {
         _state = state;
         _busy = false;
 
+        FrameBoard();
         _wallLayer.Children.Clear();
 
         for (int slot = 0; slot < Board.SlotCount; slot++)
@@ -774,6 +884,7 @@ public sealed class BoardView : UserControl
             SetPulse(player, live && player == active);
 
         RefreshRoutes();
+        RefreshPickups();
         RefreshHover();
 
         if (!_interactive || !live) return;

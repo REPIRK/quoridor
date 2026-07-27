@@ -9,7 +9,11 @@ public static class Zobrist
 {
     public static readonly ulong[,] Pawn = new ulong[2, Board.CellCount];
     public static readonly ulong[,] Wall = new ulong[2, Board.SlotCount];
-    public static readonly ulong[,] WallsLeft = new ulong[2, Board.WallsPerPlayer + 1];
+    public static readonly ulong[,] WallsLeft = new ulong[2, Board.MaxWalls + 1];
+
+    /// <summary>A pickup still lying on a square, by kind. Cleared when it is taken.</summary>
+    public static readonly ulong[,] Pickup = new ulong[2, Board.CellCount];
+
     public static readonly ulong SideToMove;
 
     static Zobrist()
@@ -22,7 +26,8 @@ public static class Zobrist
         {
             for (int c = 0; c < Board.CellCount; c++) Pawn[p, c] = Next(ref state);
             for (int s = 0; s < Board.SlotCount; s++) Wall[p, s] = Next(ref state);
-            for (int w = 0; w <= Board.WallsPerPlayer; w++) WallsLeft[p, w] = Next(ref state);
+            for (int w = 0; w <= Board.MaxWalls; w++) WallsLeft[p, w] = Next(ref state);
+            for (int c = 0; c < Board.CellCount; c++) Pickup[p, c] = Next(ref state);
         }
 
         SideToMove = Next(ref state);

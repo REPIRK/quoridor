@@ -30,7 +30,7 @@ public static class PathFinder
     /// <summary>True when the player can still reach their goal row.</summary>
     public static bool HasPath(in GameState state, int player)
     {
-        UInt128 goal = Board.GoalMask(player);
+        UInt128 goal = state.GoalMask(player);
         UInt128 reached = Board.Bit(state.PawnOf(player));
 
         while ((reached & goal) == 0)
@@ -48,7 +48,7 @@ public static class PathFinder
     /// </summary>
     public static int Distance(in GameState state, int player)
     {
-        UInt128 goal = Board.GoalMask(player);
+        UInt128 goal = state.GoalMask(player);
         UInt128 reached = Board.Bit(state.PawnOf(player));
         if ((reached & goal) != 0) return 0;
 
@@ -75,7 +75,7 @@ public static class PathFinder
     {
         distances.Fill(Unreachable);
 
-        UInt128 reached = Board.GoalMask(player);
+        UInt128 reached = state.GoalMask(player);
         UInt128 previous = 0;
         byte distance = 0;
 

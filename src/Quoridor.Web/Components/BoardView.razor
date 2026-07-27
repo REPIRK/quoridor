@@ -8,9 +8,11 @@
     cursor is rather than from a toggle.
 *@
 
-<svg class="board" viewBox="0 0 728 728" preserveAspectRatio="xMidYMid meet" @onmouseleave="ClearHover">
+@* A smaller game is played on a centred square of the same grid, so the geometry below
+   never changes — the view simply looks at less of it. *@
+<svg class="board" viewBox="@ViewBox" preserveAspectRatio="xMidYMid meet" @onmouseleave="ClearHover">
 
-    <rect class="backdrop" x="0" y="0" width="728" height="728" rx="6" />
+    <rect class="backdrop" x="@ViewX" y="@ViewY" width="@ViewSize" height="@ViewSize" rx="6" />
 
     @* Razor claims <text> for its own block syntax, so the coordinate labels are the
        one part of the board that has to be emitted through the render tree directly. *@
@@ -75,6 +77,24 @@
               x="@WallX(kind, col)" y="@WallY(kind, row)"
               width="@(kind == MoveKind.HorizontalWall ? WallLength : Gap)"
               height="@(kind == MoveKind.HorizontalWall ? Gap : WallLength)" />
+    }
+
+    @* Whatever is still lying on the board to be picked up. A spare wall is drawn as
+       what it gives you; a free move as an arrow going round again. *@
+    @foreach ((int cell, bool isWall) in Pickups())
+    {
+        int cx = Centre(Board.ColOf(cell));
+        int cy = Centre(Board.RowOf(cell));
+
+        if (isWall)
+        {
+            <rect class="pickup wall" x="@(cx - 13)" y="@(cy - 4)" width="26" height="8" rx="2" />
+        }
+        else
+        {
+            <circle class="pickup skip" cx="@cx" cy="@cy" r="11" />
+            <circle class="pickup skip dot" cx="@cx" cy="@cy" r="4" />
+        }
     }
 
     @* What the pointer is aiming at, what is waiting to be confirmed, and what is
@@ -153,6 +173,19 @@
     private const int Extent = Pad * 2 + Board.Size * Cell + (Board.Size - 1) * Gap;
     private const int WallLength = Cell * 2 + Gap;
 
+    /// <summary>First row and column in the game — non-zero only on a smaller board.</summary>
+    private int From => State.GoalRow(0);
+
+    private int Span => State.GoalRow(1) - State.GoalRow(0) + 1;
+
+    private int ViewX => From * Pitch;
+
+    private int ViewY => ViewX;
+
+    private int ViewSize => (Span - 1) * Pitch + Cell + Pad * 2;
+
+    private string ViewBox => $"{ViewX} {ViewY} {ViewSize} {ViewSize}";
+
     // What the pointer is over, recorded whether or not it is our turn. Dropping it
     // when the turn passes is what made a resting cursor go dead: you would have to
     // move off the square and back before the click would take.
@@ -214,14 +247,18 @@
     {
         int sequence = 0;
 
-        for (int i = 0; i < Quoridor.Core.Board.Size; i++)
+        // Only the squares in the game are labelled, and the labels sit against the
+        // edges of what is actually shown rather than the edges of the whole grid.
+        int last = From + Span - 1;
+
+        for (int i = From; i <= last; i++)
         {
             // The labels are not rotated with the board, so they are renumbered instead.
             int rank = Flipped ? i + 1 : Quoridor.Core.Board.Size - i;
             int file = Flipped ? Quoridor.Core.Board.Size - 1 - i : i;
 
-            Label($"{rank}", 14, Centre(i) + 4);
-            Label($"{(char)('a' + file)}", Centre(i), Extent - Pad + 16);
+            Label($"{rank}", ViewX + 14, Centre(i) + 4);
+            Label($"{(char)('a' + file)}", Centre(i), ViewY + ViewSize - Pad + 16);
         }
 
         void Label(string text, int x, int y)
@@ -341,6 +378,29 @@
     }
 
     // =================================================================== contents ==
+
+    /// <summary>Every square still holding something, and whether it is a spare wall.</summary>
+    private IEnumerable<(int Cell, bool IsWall)> Pickups()
+    {
+        UInt128 walls = State.WallPickups;
+        UInt128 skips = State.SkipPickups;
+
+        for (int cell = 0; cell < Board.CellCount && (walls | skips) != 0; cell++)
+        {
+            UInt128 bit = Board.Bit(cell);
+
+            if ((walls & bit) != 0)
+            {
+                walls &= ~bit;
+                yield return (cell, true);
+            }
+            else if ((skips & bit) != 0)
+            {
+                skips &= ~bit;
+                yield return (cell, false);
+            }
+        }
+    }
 
     private IEnumerable<(Move Move, string Style)> Marks()
     {

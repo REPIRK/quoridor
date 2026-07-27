@@ -44,52 +44,128 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
+                    <!-- Three ways in. Most people want the first, and should not have to
+                         read past everything the third can do to find the button. -->
                     <TextBlock Grid.Row="0" Grid.Column="0"
                                Style="{StaticResource Text.Section}"
-                               Text="Bot strength" VerticalAlignment="Center" />
+                               Text="Game" VerticalAlignment="Center" />
                     <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
-                        <RadioButton x:Name="EasyOption" GroupName="Strength"
-                                     Style="{StaticResource Button.Segment}" Content="Easy" />
-                        <RadioButton x:Name="NormalOption" GroupName="Strength"
-                                     Style="{StaticResource Button.Segment}" Content="Normal" />
-                        <RadioButton x:Name="HardOption" GroupName="Strength"
-                                     Style="{StaticResource Button.Segment}" Content="Hard" IsChecked="True" />
+                        <RadioButton x:Name="FlavourStandardOption" GroupName="Flavour"
+                                     Style="{StaticResource Button.Segment}" Content="Standard" IsChecked="True" />
+                        <RadioButton x:Name="FlavourRandomOption" GroupName="Flavour"
+                                     Style="{StaticResource Button.Segment}" Content="Random" />
+                        <RadioButton x:Name="FlavourCustomOption" GroupName="Flavour"
+                                     Style="{StaticResource Button.Segment}" Content="Custom" />
                     </StackPanel>
 
-                    <TextBlock Grid.Row="1" Grid.Column="0"
-                               Style="{StaticResource Text.Section}"
-                               Text="Clock" VerticalAlignment="Center" Margin="0,10,0,0" />
-                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
-                        <RadioButton x:Name="ClockOffOption" GroupName="Clock"
-                                     Style="{StaticResource Button.Segment}" Content="Off" IsChecked="True" />
-                        <RadioButton x:Name="ClockBlitzOption" GroupName="Clock"
-                                     Style="{StaticResource Button.Segment}" Content="5+3" />
-                        <RadioButton x:Name="ClockRapidOption" GroupName="Clock"
-                                     Style="{StaticResource Button.Segment}" Content="3+2" />
-                    </StackPanel>
+                    <TextBlock x:Name="FlavourNote" Grid.Row="1" Grid.ColumnSpan="2"
+                               Style="{StaticResource Text.Subtitle}"
+                               Margin="0,8,0,0" TextWrapping="Wrap" />
 
                     <TextBlock Grid.Row="2" Grid.Column="0"
                                Style="{StaticResource Text.Section}"
-                               Text="You move" VerticalAlignment="Center" Margin="0,10,0,0" />
-                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
-                        <RadioButton x:Name="MoveFirstOption" GroupName="Order"
-                                     Style="{StaticResource Button.Segment}" Content="First" IsChecked="True" />
-                        <RadioButton x:Name="MoveSecondOption" GroupName="Order"
-                                     Style="{StaticResource Button.Segment}" Content="Second" />
-                    </StackPanel>
+                               Text="Bot strength" VerticalAlignment="Center" Margin="0,10,0,0" />
+                    <ComboBox x:Name="StrengthPick" Grid.Row="2" Grid.Column="1"
+                              Style="{StaticResource Pick}" Margin="0,10,0,0"
+                              SelectedIndex="2">
+                        <ComboBoxItem Content="Easy" />
+                        <ComboBoxItem Content="Normal" />
+                        <ComboBoxItem Content="Hard" />
+                    </ComboBox>
 
                     <TextBlock Grid.Row="3" Grid.Column="0"
                                Style="{StaticResource Text.Section}"
-                               Text="Board" VerticalAlignment="Center" Margin="0,10,0,0" />
-                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,10,0,0">
-                        <RadioButton x:Name="BoardOpenOption" GroupName="Board"
-                                     Style="{StaticResource Button.Segment}" Content="Classic" IsChecked="True" />
-                        <RadioButton x:Name="BoardPillarsOption" GroupName="Board"
-                                     Style="{StaticResource Button.Segment}" Content="Pillars" />
-                        <RadioButton x:Name="BoardDiamondOption" GroupName="Board"
-                                     Style="{StaticResource Button.Segment}" Content="Diamond" />
+                               Text="Clock" VerticalAlignment="Center" Margin="0,10,0,0" />
+                    <ComboBox x:Name="ClockPick" Grid.Row="3" Grid.Column="1"
+                              Style="{StaticResource Pick}" Margin="0,10,0,0"
+                              SelectedIndex="0">
+                        <ComboBoxItem Content="No clock" />
+                        <ComboBoxItem Content="5 min + 3 sec" />
+                        <ComboBoxItem Content="3 min + 2 sec" />
+                    </ComboBox>
+
+                    <StackPanel x:Name="CustomOptions" Grid.Row="4" Grid.ColumnSpan="2"
+                                Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="112" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Style="{StaticResource Text.Section}"
+                                       Text="You move" VerticalAlignment="Center" Margin="0,10,0,0" />
+                            <ComboBox x:Name="OrderPick" Grid.Row="0" Grid.Column="1"
+                                      Style="{StaticResource Pick}" Margin="0,10,0,0"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="First" />
+                                <ComboBoxItem Content="Second" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0"
+                                       Style="{StaticResource Text.Section}"
+                                       Text="Board" VerticalAlignment="Center" Margin="0,10,0,0" />
+                            <ComboBox x:Name="SizePick" Grid.Row="1" Grid.Column="1"
+                                      Style="{StaticResource Pick}" Margin="0,10,0,0"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="9 × 9 — standard" />
+                                <ComboBoxItem Content="7 × 7 — quick" />
+                                <ComboBoxItem Content="5 × 5 — tiny" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0"
+                                       Style="{StaticResource Text.Section}"
+                                       Text="Walls each" VerticalAlignment="Center" Margin="0,10,0,0" />
+                            <ComboBox x:Name="WallsPick" Grid.Row="2" Grid.Column="1"
+                                      Style="{StaticResource Pick}" Margin="0,10,0,0"
+                                      SelectedIndex="4">
+                                <ComboBoxItem Content="0" />
+                                <ComboBoxItem Content="3" />
+                                <ComboBoxItem Content="5" />
+                                <ComboBoxItem Content="7" />
+                                <ComboBoxItem Content="10" />
+                                <ComboBoxItem Content="14" />
+                                <ComboBoxItem Content="20" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0"
+                                       Style="{StaticResource Text.Section}"
+                                       Text="Holes" VerticalAlignment="Center" Margin="0,10,0,0" />
+                            <ComboBox x:Name="HolesPick" Grid.Row="3" Grid.Column="1"
+                                      Style="{StaticResource Pick}" Margin="0,10,0,0"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="None" />
+                                <ComboBoxItem Content="2 — scattered at random" />
+                                <ComboBoxItem Content="4 — scattered at random" />
+                                <ComboBoxItem Content="6 — scattered at random" />
+                                <ComboBoxItem Content="10 — scattered at random" />
+                            </ComboBox>
+
+                            <TextBlock Grid.Row="4" Grid.Column="0"
+                                       Style="{StaticResource Text.Section}"
+                                       Text="Pickups" VerticalAlignment="Center" Margin="0,10,0,0" />
+                            <ComboBox x:Name="PickupsPick" Grid.Row="4" Grid.Column="1"
+                                      Style="{StaticResource Pick}" Margin="0,10,0,0"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="None" />
+                                <ComboBoxItem Content="4 — a spare wall or a free move" />
+                                <ComboBoxItem Content="6 — a spare wall or a free move" />
+                                <ComboBoxItem Content="10 — a spare wall or a free move" />
+                            </ComboBox>
+                        </Grid>
                     </StackPanel>
                 </Grid>
 
@@ -269,21 +345,29 @@
 
                         <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Text.Section}"
                                    Text="Sound" VerticalAlignment="Center" Margin="0,14,0,0" />
-                        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
-                            <RadioButton x:Name="SoundOnOption" GroupName="SetSound"
-                                         Style="{StaticResource Button.Segment}" Content="On" />
-                            <RadioButton x:Name="SoundOffOption" GroupName="SetSound"
-                                         Style="{StaticResource Button.Segment}" Content="Off" />
-                        </StackPanel>
+                        <Grid Grid.Row="4" Grid.Column="1" Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="46" />
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="SoundDial" Grid.Column="0" Style="{StaticResource Dial}"
+                                    Margin="0,0,10,0" VerticalAlignment="Center" />
+                            <TextBlock x:Name="SoundReading" Grid.Column="1" Style="{StaticResource Text.Mono}"
+                                       VerticalAlignment="Center" TextAlignment="Right" />
+                        </Grid>
 
                         <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource Text.Section}"
                                    Text="Music" VerticalAlignment="Center" Margin="0,14,0,0" />
-                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
-                            <RadioButton x:Name="MusicOnOption" GroupName="SetMusic"
-                                         Style="{StaticResource Button.Segment}" Content="On" />
-                            <RadioButton x:Name="MusicOffOption" GroupName="SetMusic"
-                                         Style="{StaticResource Button.Segment}" Content="Off" />
-                        </StackPanel>
+                        <Grid Grid.Row="5" Grid.Column="1" Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="46" />
+                            </Grid.ColumnDefinitions>
+                            <Slider x:Name="MusicDial" Grid.Column="0" Style="{StaticResource Dial}"
+                                    Margin="0,0,10,0" VerticalAlignment="Center" />
+                            <TextBlock x:Name="MusicReading" Grid.Column="1" Style="{StaticResource Text.Mono}"
+                                       VerticalAlignment="Center" TextAlignment="Right" />
+                        </Grid>
                     </Grid>
 
                     <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,24,0,0" TextWrapping="Wrap"

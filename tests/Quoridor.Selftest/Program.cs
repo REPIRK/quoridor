@@ -24,7 +24,8 @@ internal static class Program
         Run("win detection", WinDetection);
         Run("hash is order independent", HashConsistency);
         Run("bot games terminate legally", BotPlayouts);
-        Run("boards with squares out of play", BlockedSquares);
+        Run("alternative boards, holes and pickups", BlockedSquares);
+        Run("pickups do what they say", PickupEffects);
         Run("wall-graph fast path never hides a block", WallGraphFastPath);
         Run("progress test never hides a change in distance", ProgressShortcut);
         Run("search engine respects its budget and outplays the heuristic", SearchAgentStrength);
@@ -248,25 +249,47 @@ internal static class Program
     /// </summary>
     private static void BlockedSquares()
     {
-        foreach (BoardLayout layout in Layouts.All)
+        GameSetup[] setups =
         {
-            GameState start = GameState.CreateInitial(layout);
-            UInt128 holes = Layouts.Holes(layout);
+            GameSetup.Standard,
+            new() { Holes = 6, Seed = 11 },
+            new() { Holes = 10, Seed = 12 },
+            new() { Size = 7, Walls = 7, Seed = 13 },
+            new() { Size = 7, Walls = 6, Holes = 4, Seed = 14 },
+            new() { Pickups = 6, Seed = 15 },
+            new() { Size = 7, Walls = 6, Holes = 4, Pickups = 4, Seed = 16 },
+        };
 
-            Check(start.HasHoles == (holes != 0), $"{Layouts.Name(layout)}: the position knows whether it has holes");
+        foreach (GameSetup setup in setups)
+        {
+            string name = setup.Describe();
+            BuiltBoard built = setup.Build();
+            GameState start = built.State;
+
             Check(PathFinder.HasPath(start, 0) && PathFinder.HasPath(start, 1),
-                $"{Layouts.Name(layout)}: both players start with a route");
+                $"{name}: both players start with a route");
+
+            Check(start.WallsOf(0) == setup.Walls && start.WallsOf(1) == setup.Walls,
+                $"{name}: both players start with the wall supply asked for");
+
+            // A half turn of the grid maps one player's half onto the other's, so a fair
+            // board is one that is unchanged by it.
+            Check(Mirrored(built.Holes), $"{name}: the holes are symmetric");
+            Check(Mirrored(start.WallPickups) && Mirrored(start.SkipPickups),
+                $"{name}: the pickups are symmetric");
+
+            Check((built.Holes & (Board.Bit(start.PawnOf(0)) | Board.Bit(start.PawnOf(1)))) == 0,
+                $"{name}: no hole under a starting pawn");
+            Check((built.Holes & (start.GoalMask(0) | start.GoalMask(1))) == 0,
+                $"{name}: no hole in either goal row");
 
             for (int cell = 0; cell < Board.CellCount; cell++)
             {
-                if ((holes & Board.Bit(cell)) == 0) continue;
-
-                Check(cell != start.PawnOf(0) && cell != start.PawnOf(1),
-                    $"{Layouts.Name(layout)}: no hole under a starting pawn");
+                if ((built.Holes & Board.Bit(cell)) == 0) continue;
 
                 for (int direction = 0; direction < 4; direction++)
                 {
-                    Check(start.Blocked(cell, direction), $"{Layouts.Name(layout)}: nothing leaves a hole");
+                    Check(start.Blocked(cell, direction), $"{name}: nothing leaves a hole");
 
                     int neighbour = cell + Board.Delta[direction];
                     if (neighbour < 0 || neighbour >= Board.CellCount) continue;
@@ -286,8 +309,22 @@ internal static class Program
                         _ => Board.West,
                     };
 
-                    Check(start.Blocked(neighbour, back), $"{Layouts.Name(layout)}: nothing steps into a hole");
+                    Check(start.Blocked(neighbour, back), $"{name}: nothing steps into a hole");
                 }
+            }
+
+            // A smaller game is played on a centred square, and the ring around it must
+            // be out of reach — including for walls, which would otherwise be wasted on
+            // squares nobody can stand on.
+            if (setup.Size < Board.Size)
+            {
+                int origin = start.GoalRow(0);
+
+                Check(origin == (Board.Size - setup.Size) / 2, $"{name}: the game is centred");
+                Check(!start.IsSlotFree(MoveKind.HorizontalWall, origin - 1, origin),
+                    $"{name}: no wall slots outside the game");
+                Check(start.IsSlotFree(MoveKind.HorizontalWall, origin, origin),
+                    $"{name}: wall slots inside the game are usable");
             }
 
             // Play the board out, auditing every geometrically legal wall as we go.
@@ -298,8 +335,9 @@ internal static class Program
             };
 
             GameState state = start;
+            bool sawPickup = false;
 
-            for (int ply = 0; ply < 300 && !state.IsGameOver; ply++)
+            for (int ply = 0; ply < 400 && !state.IsGameOver; ply++)
             {
                 foreach (MoveKind kind in new[] { MoveKind.HorizontalWall, MoveKind.VerticalWall })
                 {
@@ -315,25 +353,124 @@ internal static class Program
 
                             if (PathFinder.HasPath(probe, 0) && PathFinder.HasPath(probe, 1)) continue;
 
-                            Check(false, $"{Layouts.Name(layout)}: fast path cleared a sealing wall {new Move(kind, row, col)}");
+                            Check(false, $"{name}: fast path cleared a sealing wall {new Move(kind, row, col)}");
                             return;
                         }
                     }
                 }
 
-                Move move = agents[state.SideToMove].ChooseMove(state);
+                int mover = state.SideToMove;
+                Move move = agents[mover].ChooseMove(state);
 
                 if (!state.IsLegal(move))
                 {
-                    Check(false, $"{Layouts.Name(layout)} ply {ply}: illegal move {move}");
+                    Check(false, $"{name} ply {ply}: illegal move {move}");
                     return;
                 }
 
+                int wallsBefore = state.WallsOf(mover);
+                bool onSkip = move.Kind == MoveKind.Pawn &&
+                              (state.SkipPickups & Board.Bit(move.Cell)) != 0;
+                bool onWall = move.Kind == MoveKind.Pawn &&
+                              (state.WallPickups & Board.Bit(move.Cell)) != 0;
+
                 state.Apply(move);
+
+                if (onWall)
+                {
+                    sawPickup = true;
+                    Check(state.WallsOf(mover) == wallsBefore + 1, $"{name}: a wall pickup adds a wall");
+                    Check(state.SideToMove != mover, $"{name}: a wall pickup still passes the turn");
+                }
+
+                if (onSkip && !state.IsGameOver)
+                {
+                    sawPickup = true;
+                    Check(state.SideToMove == mover, $"{name}: a free move keeps the turn");
+                }
             }
 
-            Check(state.IsGameOver, $"{Layouts.Name(layout)}: the game reached a result");
+            Check(state.IsGameOver, $"{name}: the game reached a result");
+
+            // Not asserted: that a pickup was taken. Both bots walk their route and a
+            // pickup a step off it is usually not worth the two tempi — which is correct
+            // play, not a broken mechanic. The mechanic itself is checked below, where it
+            // can be made to happen rather than waited for.
+            _ = sawPickup;
         }
+    }
+
+    /// <summary>
+    /// The two pickups, driven directly rather than waited for. A spare wall adds to the
+    /// supply and the turn passes as usual; a free move keeps the turn — except on the
+    /// goal row, where another move would have nowhere to go.
+    /// </summary>
+    private static void PickupEffects()
+    {
+        GameState wall = GameState.Create(
+            pawn0: Board.Index(4, 4), pawn1: Board.Index(0, 0),
+            walls0: 3, walls1: 10, sideToMove: 0);
+
+        wall.PlacePickup(Board.Index(3, 4), PickupKind.Wall);
+        ulong before = wall.Hash;
+
+        wall.Apply(Move.Pawn(3, 4));
+
+        Check(wall.WallsOf(0) == 4, "a spare wall joins the supply");
+        Check(wall.SideToMove == 1, "and the turn passes as usual");
+        Check(wall.WallPickups == 0, "the square is empty afterwards");
+        Check(wall.Hash != before, "the hash moved with it");
+        Check(!wall.HasPickups, "the board reports nothing left to pick up");
+
+        GameState skip = GameState.Create(
+            pawn0: Board.Index(4, 4), pawn1: Board.Index(0, 0),
+            walls0: 10, walls1: 10, sideToMove: 0);
+
+        skip.PlacePickup(Board.Index(3, 4), PickupKind.Skip);
+        skip.Apply(Move.Pawn(3, 4));
+
+        Check(skip.SideToMove == 0, "a free move keeps the turn");
+        Check(skip.WallsOf(0) == 10, "and hands out nothing else");
+        Check(skip.Ply == 1, "the move still counts as a ply");
+
+        // Two positions that differ only in an uncollected pickup must not share a hash,
+        // or the transposition table would answer one with the other.
+        GameState bare = GameState.Create(
+            pawn0: Board.Index(4, 4), pawn1: Board.Index(0, 0),
+            walls0: 10, walls1: 10, sideToMove: 0);
+
+        GameState loaded = bare;
+        loaded.PlacePickup(Board.Index(2, 2), PickupKind.Skip);
+
+        Check(bare.Hash != loaded.Hash, "a pickup on the board changes the hash");
+
+        // Stepping onto the goal row over a free move: the game is over, so the extra
+        // move is not handed out and the turn passes like any other winning move. That
+        // keeps the invariant the search relies on — a finished game is never left with
+        // the winner on move.
+        GameState finish = GameState.Create(
+            pawn0: Board.Index(1, 4), pawn1: Board.Index(8, 0),
+            walls0: 0, walls1: 0, sideToMove: 0);
+
+        finish.PlacePickup(Board.Index(0, 4), PickupKind.Skip);
+        finish.Apply(Move.Pawn(0, 4));
+
+        Check(finish.Winner == 0, "reaching the goal row still wins");
+        Check(finish.SideToMove == 1, "and a won game never leaves the winner on move");
+    }
+
+    /// <summary>Whether a set of squares is unchanged by a half turn of the grid.</summary>
+    private static bool Mirrored(UInt128 cells)
+    {
+        for (int cell = 0; cell < Board.CellCount; cell++)
+        {
+            bool here = (cells & Board.Bit(cell)) != 0;
+            bool opposite = (cells & Board.Bit(Board.CellCount - 1 - cell)) != 0;
+
+            if (here != opposite) return false;
+        }
+
+        return true;
     }
 
     /// <summary>

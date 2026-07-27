@@ -24,12 +24,11 @@ public sealed class WebSession
     private readonly List<Move> _moves = new();
     private readonly IQuoridorAgent? _bot;
 
-    public WebSession(
-        WebMode mode, BotStrength strength, int localSeat = 0, BoardLayout layout = BoardLayout.Open)
+    public WebSession(WebMode mode, BotStrength strength, int localSeat = 0, GameSetup? setup = null)
     {
         Mode = mode;
         Strength = strength;
-        Layout = layout;
+        Setup = setup ?? GameSetup.Standard;
 
         // Hotseat has no other side, so both seats are played from this keyboard.
         LocalSeat = mode == WebMode.Hotseat ? -1 : localSeat;
@@ -40,18 +39,21 @@ public sealed class WebSession
             ? AgentFactory.Create(strength, TimeSpan.FromMilliseconds(600))
             : null;
 
-        State = GameState.CreateInitial(layout);
+        BuiltBoard built = Setup.Build();
+
+        State = built.State;
+        Holes = built.Holes;
     }
 
     public WebMode Mode { get; }
 
     public BotStrength Strength { get; }
 
-    /// <summary>The shape of the board, which is fixed for the whole game.</summary>
-    public BoardLayout Layout { get; }
+    /// <summary>The board this game is played on, fixed once it has begun.</summary>
+    public GameSetup Setup { get; }
 
     /// <summary>The squares out of play, for the board to draw.</summary>
-    public UInt128 Holes => Layouts.Holes(Layout);
+    public UInt128 Holes { get; }
 
     /// <summary>Which seat this browser plays, or -1 when it plays both.</summary>
     public int LocalSeat { get; }

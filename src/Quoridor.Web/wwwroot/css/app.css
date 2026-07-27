@@ -317,6 +317,86 @@ input.code::placeholder { color: var(--muted); }
 
 .setup .actions { margin-top: 26px; }
 
+/* A dropdown rather than a row of segments: it shows what is chosen and nothing else
+   until you ask, which is what keeps the setup screen readable as it grows. */
+select.pick {
+    font: inherit;
+    font-size: 13.5px;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 7px 30px 7px 11px;
+    min-width: 210px;
+    cursor: pointer;
+
+    /* The chevron, drawn rather than downloaded. */
+    appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, currentColor 50%),
+        linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 14px top 55%, right 9px top 55%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+}
+
+select.pick:hover { border-color: var(--p1); }
+select.pick:focus-visible { outline: 1px solid var(--p1); outline-offset: 1px; }
+
+/* Options are drawn by the operating system, which will not follow the page's
+   variables — so they get explicit colours or a dark theme shows black on black. */
+select.pick option { background: var(--panel); color: var(--text); }
+
+.settings .row { align-items: center; gap: 10px; }
+.settings .reading {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    width: 42px;
+    text-align: right;
+}
+
+input.slider {
+    appearance: none;
+    flex: 1;
+    min-width: 120px;
+    height: 20px;
+    background: transparent;
+    cursor: pointer;
+}
+
+input.slider:disabled { opacity: 0.35; cursor: default; }
+
+input.slider::-webkit-slider-runnable-track {
+    height: 2px;
+    background: var(--line);
+    border-radius: 1px;
+}
+
+input.slider::-moz-range-track {
+    height: 2px;
+    background: var(--line);
+    border-radius: 1px;
+}
+
+input.slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 13px;
+    height: 13px;
+    margin-top: -5.5px;
+    border-radius: 50%;
+    background: var(--p1);
+    border: none;
+}
+
+input.slider::-moz-range-thumb {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--p1);
+    border: none;
+}
+
 /* ================================================================== board ====
 
    Every selector here is scoped under .board. The page and the board both have a
@@ -325,6 +405,19 @@ input.code::placeholder { color: var(--muted); }
 
 .board .backdrop { fill: var(--board); stroke: var(--line); stroke-width: 1; }
 .board .cell { fill: var(--cell); opacity: 0.9; }
+
+/* Something lying on a square waiting to be stepped on. Drawn in the neutral ink
+   rather than either player's colour, because it belongs to whoever gets there. */
+.board .pickup {
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2;
+    opacity: 0.42;
+    pointer-events: none;
+}
+
+.board .pickup.wall { fill: var(--text); stroke: none; opacity: 0.34; }
+.board .pickup.skip.dot { fill: var(--text); stroke: none; opacity: 0.34; }
 
 /* A square out of play reads as a gap in the board rather than a darker square: no
    fill at all, only a faint outline where the square would have been. */

@@ -41,7 +41,7 @@ public partial class MainWindow : Window
 
     /// <summary>Starts a game on an already-connected link. The game view owns it from here.</summary>
     public void StartNetworkGame(NetPeer peer) =>
-        Navigate(new GameView(this, GameOptions.Online(peer.LocalSeat == 0, peer.Layout), peer));
+        Navigate(new GameView(this, GameOptions.Online(peer.LocalSeat == 0, peer.Setup), peer));
 
     /// <summary>
     /// Cross-fades the old view out and the new one in, with a short vertical

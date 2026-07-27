@@ -26,16 +26,29 @@ play the engine, play a friend on the same screen, or **send someone a link and 
 them online**. It works on a phone, and it keeps premoves and a move list.
 
 Either build lets you choose which side you take — before the game and again on a
-rematch — and either can be played on a board with squares taken out of play:
+rematch. Setting a game up asks one question first:
 
-| Board | |
+| | |
 | --- | --- |
-| **Classic** | the game as it is normally played |
-| **Pillars** | four squares out of play, wide apart |
-| **Diamond** | four squares out of play around the centre |
+| **Standard** | nine by nine, ten walls each. Starts without further questions. |
+| **Random** | board, walls, holes, pickups and who moves first, all rolled |
+| **Custom** | every setting, in dropdowns |
 
-Both alternatives are symmetric under a half turn, so whatever a hole does to your
-route it does to your opponent's.
+Custom opens up the board itself: **7×7** and **5×5** as well as the usual 9×9, a wall
+supply from none to twenty, **holes** — squares taken out of play, scattered at random —
+and **pickups**, which sit on squares waiting to be stepped on. A pickup is either a
+spare wall or a free move that skips your opponent's turn.
+
+Holes and pickups are always placed in pairs that map onto each other under a half turn
+of the board, the same turn that maps one player's half onto the other's. So a random
+board is still a fair one: whatever the roll does to your route, it does to theirs.
+
+There is no 11×11. The core is compiled around a nine-wide grid, and a smaller game is
+played on a centred square of it — which costs nothing and is why 7×7 and 5×5 are here.
+Going the other way would mean making the board size a runtime value: every index,
+shift and mask stops being a constant, and 121 wall slots no longer fit the 64-bit word
+they are packed into. That is a real cost to the engine, which is the thing this project
+is actually about.
 
 | | |
 | --- | --- |
@@ -92,7 +105,12 @@ Those same four boards are what makes the alternative boards nearly free: a squa
 of play is sealed on all four sides, and its neighbours are sealed against stepping into
 it. After that the rules, the flood fill and the search need no idea that holes exist —
 they are already walls as far as the masks are concerned. The one place that does care
-is noted below.
+is noted below. A smaller game is the same trick applied to the ring around a centred
+square, plus a pair of bytes saying which rows the players are aiming for.
+
+Pickups are two more bitboards, cleared as they are taken and folded into the hash. They
+cost the standard game nothing measurable — the position is copied per node either way,
+and it is still a handful of vector moves.
 
 ### The engine
 
@@ -114,6 +132,12 @@ fills can be skipped. That argument knows about walls and borders; a square out 
 is neither, and a chain could run to one and cut the board with nothing else attached.
 So on those boards the shortcut is simply not taken and the exact check always runs.
 Slower, and correct.
+
+Pickups break a different assumption: that the two players alternate. A free move does
+not pass the turn, so the child of that move is scored from the same side and must not
+be negated — every recursion goes through one helper that checks which it is. The exact
+race verdict also stops being exact while pickups are on the board, since one can hand
+out a wall in a position that had none, so it is switched off until they are gone.
 
 ```
                      depth reached, one thread

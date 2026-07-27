@@ -69,6 +69,12 @@ public partial class GameView : UserControl
         if (options.Mode is GameMode.VersusBot or GameMode.Online)
             SwapSidesButton.Visibility = Visibility.Visible;
         RoutesButton.Click += (_, _) => ToggleRoutes();
+
+        SettingsButton.Click += (_, _) => ShowSettings(true);
+        CloseSettingsButton.Click += (_, _) => ShowSettings(false);
+        SettingsOverlay.MouseLeftButtonDown += (_, _) => ShowSettings(false);
+
+        BuildDials();
         ReviewPrevButton.Click += (_, _) => StepReview(-1);
         ReviewNextButton.Click += (_, _) => StepReview(+1);
         ReviewLiveButton.Click += (_, _) => ReturnToLive();
@@ -262,13 +268,16 @@ public partial class GameView : UserControl
         // Whoever the local player is sits at the near edge, so the board turns around
         // when they take the second seat.
         _board.Flipped = options.HumanSeat == 1;
-        _board.Holes = Layouts.Holes(options.Layout);
+        _board.Holes = _session.Holes;
 
         int nearPlayer = options.HumanSeat;
         int farPlayer = nearPlayer ^ 1;
 
-        _cards[farPlayer] = new PlayerCard(farPlayer == 0 ? Palette.Accent0 : Palette.Accent1);
-        _cards[nearPlayer] = new PlayerCard(nearPlayer == 0 ? Palette.Accent0 : Palette.Accent1)
+        // Pickups can hand out walls beyond the starting supply, so leave room for them.
+        int pips = Math.Min(Board.MaxWalls, options.Setup.Walls + (options.Setup.Pickups > 0 ? 4 : 0));
+
+        _cards[farPlayer] = new PlayerCard(farPlayer == 0 ? Palette.Accent0 : Palette.Accent1, pips);
+        _cards[nearPlayer] = new PlayerCard(nearPlayer == 0 ? Palette.Accent0 : Palette.Accent1, pips)
         {
             Margin = new Thickness(0, 22, 0, 0),
         };
@@ -344,7 +353,8 @@ public partial class GameView : UserControl
         switch (e.Key)
         {
             case Key.Escape:
-                LeaveToMenu();
+                if (_settingsOpen) ShowSettings(false);
+                else LeaveToMenu();
                 e.Handled = true;
                 break;
 
@@ -459,6 +469,87 @@ public partial class GameView : UserControl
         RoutesButton.Foreground = _board.ShowRoutes
             ? Palette.BrushOf(Palette.Accent0)
             : Palette.BrushOf(Palette.Text);
+    }
+
+    // ============================================================== settings ==
+
+    private bool _settingsOpen;
+
+    /// <summary>
+    /// Wires the two volume dials. Dragging one applies immediately — a volume you have
+    /// to confirm before you can hear it is a volume you cannot set — and the effects
+    /// dial plays a sound as it moves, so what you are setting is audible while you set it.
+    /// </summary>
+    private void BuildDials()
+    {
+        Settings settings = Settings.Current;
+
+        SoundDial.Value = settings.SoundVolume;
+        MusicDial.Value = settings.MusicVolume;
+
+        SoundReading.Text = $"{settings.SoundVolume}%";
+        MusicReading.Text = $"{settings.MusicVolume}%";
+
+        SoundDial.ValueChanged += (_, e) =>
+        {
+            int level = (int)Math.Round(e.NewValue);
+
+            settings.SoundVolume = level;
+            settings.Sound = level > 0;
+            SoundReading.Text = $"{level}%";
+
+            Sfx.RefreshVolumes();
+            Sfx.Play(Sound.Move);
+        };
+
+        MusicDial.ValueChanged += (_, e) =>
+        {
+            int level = (int)Math.Round(e.NewValue);
+
+            settings.MusicVolume = level;
+            MusicReading.Text = $"{level}%";
+
+            // Above zero the music should be playing; at zero there is nothing to hear,
+            // so it is stopped rather than left running silently.
+            bool wanted = level > 0;
+            if (wanted != settings.Music)
+            {
+                settings.Music = wanted;
+                Sfx.Music(wanted);
+            }
+
+            Sfx.RefreshVolumes();
+        };
+    }
+
+    private void ShowSettings(bool visible)
+    {
+        if (_settingsOpen == visible) return;
+
+        _settingsOpen = visible;
+
+        if (!visible)
+        {
+            Settings.Current.Save();
+        }
+        else
+        {
+            SettingsNote.Text = $"This game: {_session.Options.Setup.Describe()}.";
+            SettingsOverlay.Visibility = Visibility.Visible;
+        }
+
+        var fade = new DoubleAnimation(visible ? 1 : 0, TimeSpan.FromMilliseconds(visible ? 220 : 160));
+        if (!visible) fade.Completed += (_, _) => SettingsOverlay.Visibility = Visibility.Collapsed;
+
+        SettingsOverlay.BeginAnimation(OpacityProperty, fade);
+
+        var grow = new DoubleAnimation(visible ? 1 : 0.97, TimeSpan.FromMilliseconds(visible ? 320 : 160))
+        {
+            EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut },
+        };
+
+        SettingsScale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        SettingsScale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
     }
 
     // ================================================================= clock ==

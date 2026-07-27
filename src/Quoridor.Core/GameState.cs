@@ -34,10 +34,24 @@ public struct GameState
     /// </summary>
     public ulong WallsByPlayer1;
 
+    /// <summary>Squares still holding a spare wall to pick up. Cleared as they are taken.</summary>
+    public UInt128 WallPickups;
+
+    /// <summary>Squares still holding a free move — take one and the opponent is skipped.</summary>
+    public UInt128 SkipPickups;
+
     private byte _pawn0;
     private byte _pawn1;
     private byte _walls0;
     private byte _walls1;
+
+    /// <summary>
+    /// The rows the two players are trying to reach. Normally 0 and 8, but a smaller
+    /// game is played on a centred square of the same grid, and then they move inward.
+    /// They also give the playable area away: it is the square between them.
+    /// </summary>
+    private byte _goal0;
+    private byte _goal1;
 
     /// <summary>0 or 1 — whose turn it is.</summary>
     public byte SideToMove;
@@ -65,6 +79,9 @@ public struct GameState
         s.BlockedWest = Board.LeftColumn;
         s.BlockedEast = Board.RightColumn;
 
+        s._goal0 = 0;
+        s._goal1 = Board.Size - 1;
+
         s._pawn0 = (byte)Board.StartCell[0];
         s._pawn1 = (byte)Board.StartCell[1];
         s._walls0 = Board.WallsPerPlayer;
@@ -79,45 +96,87 @@ public struct GameState
     }
 
     /// <summary>
-    /// The starting position on a board with squares taken out of play.
-    ///
-    /// A hole is sealed on all four sides, and each of its neighbours is sealed against
-    /// stepping into it — after which nothing else in the rules or the engine has to know
-    /// about holes at all, because they are already walls as far as the block masks are
-    /// concerned. The layout is not part of the hash: it never changes within a game, and
-    /// a transposition table is never shared between games.
+    /// The starting position of a game played on a centred square of the grid, with a
+    /// wall supply of its own. A 9-wide game is the ordinary board; anything smaller
+    /// leaves a ring around it that is simply not part of the game, sealed exactly the
+    /// way a hole is.
     /// </summary>
-    public static GameState CreateInitial(BoardLayout layout)
+    public static GameState CreateInitial(int size, int walls)
     {
+        if ((size & 1) == 0 || size < 3 || size > Board.Size)
+            throw new ArgumentOutOfRangeException(nameof(size), size, "Board size must be odd and fit the grid.");
+
         GameState s = CreateInitial();
 
-        UInt128 holes = Layouts.Holes(layout);
-        if (holes == 0) return s;
+        walls = Math.Clamp(walls, 0, Board.MaxWalls);
+        s.Hash ^= Zobrist.WallsLeft[0, s._walls0] ^ Zobrist.WallsLeft[1, s._walls1];
+        s._walls0 = (byte)walls;
+        s._walls1 = (byte)walls;
+        s.Hash ^= Zobrist.WallsLeft[0, s._walls0] ^ Zobrist.WallsLeft[1, s._walls1];
 
-        s.HasHoles = true;
+        if (size == Board.Size) return s;
 
+        int origin = (Board.Size - size) / 2;
+
+        s._goal0 = (byte)origin;
+        s._goal1 = (byte)(origin + size - 1);
+
+        s.Hash ^= Zobrist.Pawn[0, s._pawn0] ^ Zobrist.Pawn[1, s._pawn1];
+        s._pawn0 = (byte)Board.Index(s._goal1, origin + size / 2);
+        s._pawn1 = (byte)Board.Index(s._goal0, origin + size / 2);
+        s.Hash ^= Zobrist.Pawn[0, s._pawn0] ^ Zobrist.Pawn[1, s._pawn1];
+
+        // The ring outside the game is taken out of play like any other hole.
         for (int cell = 0; cell < Board.CellCount; cell++)
         {
-            if ((holes & Board.Bit(cell)) == 0) continue;
-
             int row = Board.RowOf(cell);
             int col = Board.ColOf(cell);
-            UInt128 bit = Board.Bit(cell);
 
-            // Nothing leaves the hole…
-            s.BlockedNorth |= bit;
-            s.BlockedSouth |= bit;
-            s.BlockedWest |= bit;
-            s.BlockedEast |= bit;
+            if (row >= origin && row <= s._goal1 && col >= origin && col <= s._goal1) continue;
 
-            // …and nothing steps into it.
-            if (row > 0) s.BlockedSouth |= Board.Bit(Board.Index(row - 1, col));
-            if (row < Board.Size - 1) s.BlockedNorth |= Board.Bit(Board.Index(row + 1, col));
-            if (col > 0) s.BlockedEast |= Board.Bit(Board.Index(row, col - 1));
-            if (col < Board.Size - 1) s.BlockedWest |= Board.Bit(Board.Index(row, col + 1));
+            s.SealCell(cell);
         }
 
         return s;
+    }
+
+    /// <summary>
+    /// Takes a square out of play: nothing leaves it and nothing steps into it. After
+    /// this the rules, the flood fill and the search need no idea holes exist, because
+    /// as far as the block masks are concerned it is already walled off on all sides.
+    /// </summary>
+    public void SealCell(int cell)
+    {
+        int row = Board.RowOf(cell);
+        int col = Board.ColOf(cell);
+        UInt128 bit = Board.Bit(cell);
+
+        HasHoles = true;
+
+        BlockedNorth |= bit;
+        BlockedSouth |= bit;
+        BlockedWest |= bit;
+        BlockedEast |= bit;
+
+        if (row > 0) BlockedSouth |= Board.Bit(Board.Index(row - 1, col));
+        if (row < Board.Size - 1) BlockedNorth |= Board.Bit(Board.Index(row + 1, col));
+        if (col > 0) BlockedEast |= Board.Bit(Board.Index(row, col - 1));
+        if (col < Board.Size - 1) BlockedWest |= Board.Bit(Board.Index(row, col + 1));
+    }
+
+    /// <summary>Puts a pickup on a square. Both kinds are part of the hash.</summary>
+    public void PlacePickup(int cell, PickupKind kind)
+    {
+        if (kind == PickupKind.Wall)
+        {
+            WallPickups |= Board.Bit(cell);
+            Hash ^= Zobrist.Pickup[0, cell];
+        }
+        else
+        {
+            SkipPickups |= Board.Bit(cell);
+            Hash ^= Zobrist.Pickup[1, cell];
+        }
     }
 
     /// <summary>
@@ -166,13 +225,23 @@ public struct GameState
         };
     }
 
+    /// <summary>The row the given player is trying to reach.</summary>
+    public readonly int GoalRow(int player) => player == 0 ? _goal0 : _goal1;
+
+    /// <summary>That row as a bitboard, which is what the flood fill starts from.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly UInt128 GoalMask(int player) => Board.RowMask[player == 0 ? _goal0 : _goal1];
+
+    /// <summary>Whether any pickup is still lying on the board.</summary>
+    public readonly bool HasPickups => (WallPickups | SkipPickups) != 0;
+
     /// <summary>The player who has reached their goal row, or -1 if the game is live.</summary>
     public readonly int Winner
     {
         get
         {
-            if (Board.RowOf(_pawn0) == Board.GoalRow(0)) return 0;
-            if (Board.RowOf(_pawn1) == Board.GoalRow(1)) return 1;
+            if (Board.RowOf(_pawn0) == _goal0) return 0;
+            if (Board.RowOf(_pawn1) == _goal1) return 1;
             return -1;
         }
     }
@@ -189,6 +258,10 @@ public struct GameState
     public readonly bool IsSlotFree(MoveKind kind, int row, int col)
     {
         if (!Board.SlotInBounds(row, col)) return false;
+
+        // A slot exists only where all four squares around it are in the game, which on
+        // a smaller board rules out the whole ring the game is not played on.
+        if (row < _goal0 || row >= _goal1 || col < _goal0 || col >= _goal1) return false;
 
         ulong bit = 1UL << Board.SlotIndex(row, col);
 
@@ -349,6 +422,10 @@ public struct GameState
     {
         int player = SideToMove;
 
+        // Set by a free move picked up on the square just stepped onto: the turn does
+        // not pass, so the same player moves again.
+        bool again = false;
+
         if (move.Kind == MoveKind.Pawn)
         {
             int from = PawnOf(player);
@@ -358,6 +435,8 @@ public struct GameState
 
             if (player == 0) _pawn0 = (byte)to;
             else _pawn1 = (byte)to;
+
+            if (HasPickups) again = Collect(to, player);
         }
         else
         {
@@ -375,8 +454,47 @@ public struct GameState
             else _walls1 = (byte)after;
         }
 
-        SideToMove = (byte)(player ^ 1);
-        Hash ^= Zobrist.SideToMove;
+        if (!again)
+        {
+            SideToMove = (byte)(player ^ 1);
+            Hash ^= Zobrist.SideToMove;
+        }
+
         Ply++;
+    }
+
+    /// <summary>
+    /// Takes whatever was lying on the square just stepped onto. Returns true when it
+    /// was a free move, which is the one effect the caller has to act on.
+    /// </summary>
+    private bool Collect(int cell, int player)
+    {
+        UInt128 bit = Board.Bit(cell);
+
+        if ((WallPickups & bit) != 0)
+        {
+            WallPickups &= ~bit;
+            Hash ^= Zobrist.Pickup[0, cell];
+
+            int before = WallsOf(player);
+            if (before < Board.MaxWalls)
+            {
+                Hash ^= Zobrist.WallsLeft[player, before] ^ Zobrist.WallsLeft[player, before + 1];
+
+                if (player == 0) _walls0 = (byte)(before + 1);
+                else _walls1 = (byte)(before + 1);
+            }
+
+            return false;
+        }
+
+        if ((SkipPickups & bit) == 0) return false;
+
+        SkipPickups &= ~bit;
+        Hash ^= Zobrist.Pickup[1, cell];
+
+        // Reaching your goal row ends the game; another move on top of it would be a
+        // move with nowhere to go.
+        return !IsGameOver;
     }
 }

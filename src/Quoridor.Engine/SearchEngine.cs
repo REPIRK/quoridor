@@ -170,13 +170,13 @@ public sealed class SearchEngine
             int score;
             if (i == 0)
             {
-                score = -Negamax(next, depth - 1, 1, -beta, -alpha);
+                score = Child(root, next, depth - 1, 1, alpha, beta);
             }
             else
             {
-                score = -Negamax(next, depth - 1, 1, -alpha - 1, -alpha);
+                score = Child(root, next, depth - 1, 1, alpha, alpha + 1);
                 if (score > alpha && score < beta)
-                    score = -Negamax(next, depth - 1, 1, -beta, -alpha);
+                    score = Child(root, next, depth - 1, 1, alpha, beta);
             }
 
             if (_stopped) break;
@@ -202,6 +202,19 @@ public sealed class SearchEngine
 
     // ================================================================ negamax ==
 
+    /// <summary>
+    /// Searches a position one move on. Normally the turn has passed, so the child's
+    /// score is the opponent's and gets negated with the window flipped — the usual
+    /// negamax step. A free move picked up off the board does not pass the turn, and
+    /// then the child is scored from the same side and must be taken as it is.
+    /// </summary>
+    private int Child(in GameState parent, in GameState next, int depth, int ply, int alpha, int beta)
+    {
+        return next.SideToMove == parent.SideToMove
+            ? Negamax(next, depth, ply, alpha, beta)
+            : -Negamax(next, depth, ply, -beta, -alpha);
+    }
+
     private int Negamax(in GameState state, int depth, int ply, int alpha, int beta)
     {
         if (_stopped) return 0;
@@ -209,9 +222,17 @@ public sealed class SearchEngine
         Nodes++;
         if ((Nodes & TimeCheckInterval) == 0) CheckTime();
 
-        // Reaching the goal row is what handed the turn over, so a finished game is
-        // always a loss for the side to move. The ply term prefers faster wins.
-        if (state.IsGameOver) return -(Evaluation.Mate - ply);
+        // Reaching the goal row is what handed the turn over, so a finished game is a
+        // loss for the side to move. The ply term prefers faster wins. Asking who won
+        // rather than assuming costs one comparison in a branch that is already rare,
+        // and means a free move that ever did leave its winner on move would score as a
+        // win here instead of silently inverting the whole subtree.
+        if (state.IsGameOver)
+        {
+            return state.Winner == state.SideToMove
+                ? Evaluation.Mate - ply
+                : -(Evaluation.Mate - ply);
+        }
 
         // Quoridor has no draw rule, so a repetition is not a result — it is a wasted
         // pair of moves. Scoring it slightly against the side to move stops the engine
@@ -220,7 +241,9 @@ public sealed class SearchEngine
         if (ply >= MaxPly - 2) return Evaluation.Evaluate(state, state.SideToMove, _weights);
 
         // With no walls left the game is a settled race; no amount of search changes it.
-        if (state.WallsOf(0) == 0 && state.WallsOf(1) == 0)
+        // Unless there are pickups still lying about, which can hand out both a wall and
+        // an extra move — and then the race is not settled at all.
+        if (state.WallsOf(0) == 0 && state.WallsOf(1) == 0 && !state.HasPickups)
         {
             int race = Evaluation.RaceScore(state, ply);
             if (race != Evaluation.Unknown) return race;
@@ -297,7 +320,7 @@ public sealed class SearchEngine
 
             if (i == 0)
             {
-                score = -Negamax(next, depth - 1, ply + 1, -beta, -alpha);
+                score = Child(state, next, depth - 1, ply + 1, alpha, beta);
             }
             else
             {
@@ -314,13 +337,13 @@ public sealed class SearchEngine
                     if (_history[(int)move.Kind, HistoryIndex(move)] > 2000) reduction--;
                 }
 
-                score = -Negamax(next, depth - 1 - reduction, ply + 1, -alpha - 1, -alpha);
+                score = Child(state, next, depth - 1 - reduction, ply + 1, alpha, alpha + 1);
 
                 if (score > alpha && reduction > 0)
-                    score = -Negamax(next, depth - 1, ply + 1, -alpha - 1, -alpha);
+                    score = Child(state, next, depth - 1, ply + 1, alpha, alpha + 1);
 
                 if (score > alpha && score < beta)
-                    score = -Negamax(next, depth - 1, ply + 1, -beta, -alpha);
+                    score = Child(state, next, depth - 1, ply + 1, alpha, beta);
             }
 
             if (_stopped) return 0;

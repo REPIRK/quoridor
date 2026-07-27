@@ -16,21 +16,24 @@ public sealed record GameOptions(
     BotStrength Strength,
     TimeControl Clock,
     bool HumanMovesFirst = true,
-    BoardLayout Layout = BoardLayout.Open)
+    GameSetup? Board = null)
 {
-    public static GameOptions Hotseat(TimeControl clock, BoardLayout layout) =>
-        new(GameMode.Hotseat, BotStrength.Normal, clock, Layout: layout);
+    /// <summary>The board this game is played on, standard unless something says otherwise.</summary>
+    public GameSetup Setup => Board ?? GameSetup.Standard;
+
+    public static GameOptions Hotseat(TimeControl clock, GameSetup board) =>
+        new(GameMode.Hotseat, BotStrength.Normal, clock, Board: board);
 
     public static GameOptions VersusBot(
-        BotStrength strength, TimeControl clock, bool humanMovesFirst, BoardLayout layout) =>
-        new(GameMode.VersusBot, strength, clock, humanMovesFirst, layout);
+        BotStrength strength, TimeControl clock, bool humanMovesFirst, GameSetup board) =>
+        new(GameMode.VersusBot, strength, clock, humanMovesFirst, board);
 
-    public static GameOptions Spectate(BotStrength strength, BoardLayout layout) =>
-        new(GameMode.Spectate, strength, TimeControl.None, Layout: layout);
+    public static GameOptions Spectate(BotStrength strength, GameSetup board) =>
+        new(GameMode.Spectate, strength, TimeControl.None, Board: board);
 
     /// <summary>A network game is set up by the host, who says which seat and board.</summary>
-    public static GameOptions Online(bool isHost, BoardLayout layout) =>
-        new(GameMode.Online, BotStrength.Normal, TimeControl.None, HumanMovesFirst: isHost, Layout: layout);
+    public static GameOptions Online(bool isHost, GameSetup board) =>
+        new(GameMode.Online, BotStrength.Normal, TimeControl.None, HumanMovesFirst: isHost, Board: board);
 
     /// <summary>
     /// Which seat the local player occupies. Player 0 always moves first by the rules,
@@ -51,7 +54,7 @@ public sealed record GameOptions(
                 _ => $"Versus {Strength.ToString().ToLowerInvariant()} bot",
             };
 
-            if (Layout != BoardLayout.Open) name += $" · {Layouts.Name(Layout).ToLowerInvariant()}";
+            if (!Setup.IsStandard) name += $" · {Setup.Describe()}";
             if (Mode == GameMode.VersusBot && !HumanMovesFirst) name += " · you move second";
             if (Clock.IsEnabled) name += $" · {Clock.Label}";
 
@@ -97,11 +100,18 @@ public sealed class GameSession
                 break;
         }
 
-        State = GameState.CreateInitial(options.Layout);
+        BuiltBoard built = options.Setup.Build();
+
+        State = built.State;
+        Holes = built.Holes;
+
         ResetClocks();
     }
 
     public GameOptions Options { get; }
+
+    /// <summary>The squares out of play, for the board to draw.</summary>
+    public UInt128 Holes { get; }
 
     public GameState State { get; private set; }
 
@@ -210,7 +220,10 @@ public sealed class GameSession
         _positions.Clear();
         _moves.Clear();
         _flagged = -1;
-        State = GameState.CreateInitial(Options.Layout);
+
+        // The same numbers give the same board, so a rematch is played on the one you
+        // just played on rather than a fresh roll of the dice.
+        State = Options.Setup.Build().State;
         ResetClocks();
     }
 

@@ -60,11 +60,12 @@ public static class Sfx
 
             if (!Players.TryGetValue(sound, out MediaPlayer? player))
             {
-                player = new MediaPlayer { Volume = 0.45 };
+                player = new MediaPlayer();
                 player.Open(new Uri(PathOf(sound.ToString().ToLowerInvariant())));
                 Players[sound] = player;
             }
 
+            player.Volume = Settings.Current.SoundVolume / 100.0;
             player.Position = TimeSpan.Zero;
             player.Play();
         }
@@ -88,7 +89,7 @@ public static class Sfx
 
             if (_music is null)
             {
-                _music = new MediaPlayer { Volume = 0.30 };
+                _music = new MediaPlayer();
                 _music.Open(new Uri(PathOf("music")));
 
                 // The loop fades in and out at its own edges, so the pause while it is
@@ -100,8 +101,24 @@ public static class Sfx
                 };
             }
 
+            _music.Volume = Settings.Current.MusicVolume / 100.0;
             _music.Position = TimeSpan.Zero;
             _music.Play();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>Applies the volumes to whatever is already playing.</summary>
+    public static void RefreshVolumes()
+    {
+        try
+        {
+            foreach (MediaPlayer player in Players.Values)
+                player.Volume = Settings.Current.SoundVolume / 100.0;
+
+            if (_music is not null) _music.Volume = Settings.Current.MusicVolume / 100.0;
         }
         catch (Exception)
         {

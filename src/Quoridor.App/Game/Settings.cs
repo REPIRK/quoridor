@@ -38,6 +38,11 @@ public sealed class Settings
     /// <summary>The ambient loop. Off, because that is a matter of taste.</summary>
     public bool Music { get; set; }
 
+    /// <summary>Loudness of the effects and of the music, each 0 to 100.</summary>
+    public int SoundVolume { get; set; } = 45;
+
+    public int MusicVolume { get; set; } = 30;
+
     public static Settings Current { get; } = Load();
 
     public TimeSpan EngineMoveTime => TimeSpan.FromMilliseconds(EngineMoveTimeMs);

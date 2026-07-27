@@ -7,8 +7,14 @@
 
 let audio = null;
 let master = null;
+let musicBus = null;
 let musicGain = null;
 let musicStop = null;
+
+// Remembered across a context that does not exist yet, so the sliders work before the
+// first sound has been made.
+let effectsVolume = 0.5;
+let musicVolume = 0.3;
 
 function context() {
     if (audio === null) {
@@ -16,9 +22,15 @@ function context() {
         if (!Ctor) return null;
 
         audio = new Ctor();
+
         master = audio.createGain();
-        master.gain.value = 0.5;
+        master.gain.value = effectsVolume;
         master.connect(audio.destination);
+
+        // The music has its own bus so the two sliders are genuinely independent.
+        musicBus = audio.createGain();
+        musicBus.gain.value = musicVolume;
+        musicBus.connect(audio.destination);
     }
 
     if (audio.state === 'suspended') audio.resume();
@@ -119,7 +131,7 @@ export function music(on) {
     musicGain = audio.createGain();
     musicGain.gain.value = 0.0001;
     musicGain.gain.exponentialRampToValueAtTime(0.5, audio.currentTime + 3);
-    musicGain.connect(master);
+    musicGain.connect(musicBus);
 
     // The pad: two slightly detuned saws kept dark by a lowpass that breathes.
     const pad = audio.createGain();
@@ -192,7 +204,14 @@ export function music(on) {
     };
 }
 
-export function setVolume(value) {
-    if (!context()) return;
-    master.gain.value = Math.max(0, Math.min(1, value));
+export function setVolume(effects, music) {
+    effectsVolume = Math.max(0, Math.min(1, effects));
+    musicVolume = Math.max(0, Math.min(1, music));
+
+    // Setting a volume must not be what starts the audio: a page the player has not
+    // touched yet would only get a console warning for its trouble.
+    if (audio === null) return;
+
+    master.gain.value = effectsVolume;
+    musicBus.gain.value = musicVolume;
 }

@@ -27,14 +27,20 @@ public sealed class PlayerCard : UserControl
     private readonly TextBlock _steps;
     private readonly TextBlock _wallCount;
     private readonly TextBlock _clock;
-    private readonly Rectangle[] _walls = new Rectangle[Board.WallsPerPlayer];
+    private readonly Rectangle[] _walls;
 
-    private int _lastWalls = Board.WallsPerPlayer;
+    private int _lastWalls;
     private bool _lastActive;
 
-    public PlayerCard(string accentKey)
+    /// <param name="walls">
+    /// How many uprights to draw. A game can start with any supply, and pickups can push
+    /// a player above it, so the row is sized to the largest it will ever need to show.
+    /// </param>
+    public PlayerCard(string accentKey, int walls = Board.WallsPerPlayer)
     {
         _accentKey = accentKey;
+        _walls = new Rectangle[Math.Clamp(walls, 1, Board.MaxWalls)];
+        _lastWalls = _walls.Length;
 
         _turnMark = new Rectangle
         {

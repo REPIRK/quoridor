@@ -8,13 +8,13 @@
     <header class="bar">
         <div class="brand">Quoridor</div>
         <div class="mode">@Title</div>
+        @* One button, not six. What is behind it is not needed mid-move, and a row of
+           toggles above the board is a row of things to read past. *@
         <div class="actions">
             <button class="ghost" @onclick="OpenSetup">New game</button>
-            <button class="ghost @(_routes ? "on" : "")" @onclick="() => _routes = !_routes">Routes</button>
-            <button class="ghost @(_confirm ? "on" : "")" @onclick="() => _confirm = !_confirm">Confirm</button>
-            <button class="ghost @(_sound ? "on" : "")" @onclick="() => _sound = !_sound">Sound</button>
-            <button class="ghost @(_music ? "on" : "")" @onclick="ToggleMusic">Music</button>
-            <button class="ghost" @onclick="() => _light = !_light">@(_light ? "Dark" : "Light")</button>
+            <button class="ghost @(_showSettings ? "on" : "")" @onclick="() => _showSettings = !_showSettings">
+                Settings
+            </button>
         </div>
     </header>
 
@@ -31,7 +31,7 @@
                     <div class="who">
                         <div class="name">@_session.PlayerName(player)</div>
                         <div class="walls @(player == 0 ? "p0" : "p1")">
-                            @for (int i = 0; i < Board.WallsPerPlayer; i++)
+                            @for (int i = 0; i < WallPips; i++)
                             {
                                 <i class="@(i < _session.State.WallsOf(player) ? "" : "spent")"></i>
                             }
@@ -104,6 +104,51 @@
         </aside>
     </main>
 
+    @if (_showSettings)
+    {
+        <div class="overlay" @onclick="() => _showSettings = false">
+            <div class="setup settings" @onclick:stopPropagation="true">
+                <h1>Settings</h1>
+
+                <div class="row">
+                    <span class="label">Board</span>
+                    <button class="seg @(_routes ? "on" : "")" @onclick="() => _routes = !_routes">Show routes</button>
+                    <button class="seg @(_confirm ? "on" : "")" @onclick="() => _confirm = !_confirm">Confirm moves</button>
+                </div>
+
+                <div class="row">
+                    <span class="label">Theme</span>
+                    <button class="seg @(!_light ? "on" : "")" @onclick="() => _light = false">Dark</button>
+                    <button class="seg @(_light ? "on" : "")" @onclick="() => _light = true">Light</button>
+                </div>
+
+                <div class="row">
+                    <span class="label">Sound</span>
+                    <button class="seg @(_sound ? "on" : "")" @onclick="ToggleSound">@(_sound ? "On" : "Off")</button>
+                    <input class="slider" type="range" min="0" max="100" step="1" disabled="@(!_sound)"
+                           value="@_soundVolume"
+                           @oninput="e => SetVolume(e.Value, music: false)" />
+                    <span class="reading">@_soundVolume%</span>
+                </div>
+
+                <div class="row">
+                    <span class="label">Music</span>
+                    <button class="seg @(_music ? "on" : "")" @onclick="ToggleMusic">@(_music ? "On" : "Off")</button>
+                    <input class="slider" type="range" min="0" max="100" step="1" disabled="@(!_music)"
+                           value="@_musicVolume"
+                           @oninput="e => SetVolume(e.Value, music: true)" />
+                    <span class="reading">@_musicVolume%</span>
+                </div>
+
+                <p class="fine">This game: @_session.Setup.Describe().</p>
+
+                <div class="actions">
+                    <button class="ghost primary" @onclick="() => _showSettings = false">Done</button>
+                </div>
+            </div>
+        </div>
+    }
+
     @if (_session.IsOver)
     {
         <div class="overlay">
@@ -141,40 +186,88 @@
                             @onclick="() => SelectMode(WebMode.Online)">A friend, online</button>
                 </div>
 
+                @* The three ways in. Most people want the first one and should not have
+                   to read past everything the third one can do to reach it. *@
+                <div class="row">
+                    <span class="label">Game</span>
+                    @foreach (GameFlavour option in new[] { GameFlavour.Standard, GameFlavour.Random, GameFlavour.Custom })
+                    {
+                        GameFlavour choice = option;
+                        <button class="seg @(_flavour == choice ? "on" : "")"
+                                @onclick="() => _flavour = choice">@choice</button>
+                    }
+                </div>
+                <p class="fine">@FlavourNote</p>
+
                 @if (_mode == WebMode.VersusBot)
                 {
                     <div class="row">
                         <span class="label">Strength</span>
-                        @foreach (BotStrength option in new[] { BotStrength.Easy, BotStrength.Normal, BotStrength.Hard })
-                        {
-                            BotStrength choice = option;
-                            <button class="seg @(_strength == choice ? "on" : "")"
-                                    @onclick="() => _strength = choice">@choice</button>
-                        }
+                        <select class="pick" value="@((int)_strength)"
+                                @onchange="e => _strength = (BotStrength)Number(e, 2)">
+                            <option value="0">Easy</option>
+                            <option value="1">Normal</option>
+                            <option value="2">Hard</option>
+                        </select>
                     </div>
                 }
 
-                @if (_net.State == NetState.Idle)
+                @if (_flavour == GameFlavour.Custom)
                 {
-                    <div class="row">
-                        <span class="label">Board</span>
-                        @foreach (BoardLayout option in Layouts.All)
-                        {
-                            BoardLayout choice = option;
-                            <button class="seg @(_layout == choice ? "on" : "")"
-                                    @onclick="() => _layout = choice">@Layouts.Name(choice)</button>
-                        }
-                    </div>
-                    <p class="fine">@Layouts.Description(_layout)</p>
-                }
+                    @if (_mode != WebMode.Hotseat)
+                    {
+                        <div class="row">
+                            <span class="label">You play</span>
+                            <select class="pick" value="@_seat" @onchange="e => _seat = Number(e, 0)">
+                                <option value="0">First</option>
+                                <option value="1">Second</option>
+                            </select>
+                        </div>
+                    }
 
-                @if (_mode == WebMode.VersusBot)
-                {
-                    <div class="row">
-                        <span class="label">You play</span>
-                        <button class="seg @(_seat == 0 ? "on" : "")" @onclick="() => _seat = 0">First</button>
-                        <button class="seg @(_seat == 1 ? "on" : "")" @onclick="() => _seat = 1">Second</button>
-                    </div>
+                    @if (_net.State == NetState.Idle)
+                    {
+                        <div class="row">
+                            <span class="label">Board</span>
+                            <select class="pick" value="@_size" @onchange="e => _size = Number(e, Board.Size)">
+                                <option value="9">9 × 9 — standard</option>
+                                <option value="7">7 × 7 — quick</option>
+                                <option value="5">5 × 5 — tiny</option>
+                            </select>
+                        </div>
+
+                        <div class="row">
+                            <span class="label">Walls each</span>
+                            <select class="pick" value="@_walls"
+                                    @onchange="e => _walls = Number(e, Board.WallsPerPlayer)">
+                                @foreach (int option in new[] { 0, 3, 5, 7, 10, 14, 20 })
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="row">
+                            <span class="label">Holes</span>
+                            <select class="pick" value="@_holes" @onchange="e => _holes = Number(e, 0)">
+                                <option value="0">None</option>
+                                <option value="2">2 — scattered at random</option>
+                                <option value="4">4 — scattered at random</option>
+                                <option value="6">6 — scattered at random</option>
+                                <option value="10">10 — scattered at random</option>
+                            </select>
+                        </div>
+
+                        <div class="row">
+                            <span class="label">Pickups</span>
+                            <select class="pick" value="@_pickups" @onchange="e => _pickups = Number(e, 0)">
+                                <option value="0">None</option>
+                                <option value="4">4 — a spare wall or a free move</option>
+                                <option value="6">6 — a spare wall or a free move</option>
+                                <option value="10">10 — a spare wall or a free move</option>
+                            </select>
+                        </div>
+                    }
                 }
 
                 @if (_mode == WebMode.Online)
@@ -182,13 +275,8 @@
                     <div class="online">
                         @if (_net.State == NetState.Idle)
                         {
-                            @* Only the player who creates the game picks the sides; the one who
-                               opens the link takes whatever is left. *@
-                            <div class="row">
-                                <span class="label">You play</span>
-                                <button class="seg @(_seat == 0 ? "on" : "")" @onclick="() => _seat = 0">First</button>
-                                <button class="seg @(_seat == 1 ? "on" : "")" @onclick="() => _seat = 1">Second</button>
-                            </div>
+                            @* Only the player who creates the game picks the board and the
+                               sides; the one who opens the link is told what they are. *@
                             <div class="row">
                                 <button class="ghost primary" @onclick="HostGame">Create a game</button>
                             </div>
@@ -277,9 +365,16 @@
     /// <summary>The seat this browser takes in the game being set up. Seat 0 moves first.</summary>
     private int _seat;
 
-    private BoardLayout _layout = BoardLayout.Open;
+    private GameFlavour _flavour = GameFlavour.Standard;
+
+    // The custom knobs, only reachable through the third flavour.
+    private int _size = Board.Size;
+    private int _walls = Board.WallsPerPlayer;
+    private int _holes;
+    private int _pickups;
 
     private bool _showSetup = true;
+    private bool _showSettings;
     private bool _thinking;
     private bool _light;
     private bool _routes;
@@ -287,8 +382,66 @@
     private bool _touch;
     private bool _sound = true;
     private bool _music;
+    private int _soundVolume = 50;
+    private int _musicVolume = 30;
     private string? _preview;
     private string _joinCode = string.Empty;
+
+    /// <summary>
+    /// How many wall pips to draw. Sized once, to the most the row will ever have to
+    /// show — pickups can push a player above the starting supply, and a row that grew
+    /// as they did would reflow the panel mid-game.
+    /// </summary>
+    private int WallPips => Math.Min(Board.MaxWalls,
+        _session.Setup.Walls + (_session.Setup.Pickups > 0 ? 4 : 0));
+
+    /// <summary>A dropdown's new value, or the fallback if the browser sent nonsense.</summary>
+    private static int Number(ChangeEventArgs e, int fallback) =>
+        int.TryParse(e.Value?.ToString(), out int value) ? value : fallback;
+
+    private string FlavourNote => _flavour switch
+    {
+        GameFlavour.Random => "Board, walls, holes, pickups and who moves first — all rolled for you.",
+        GameFlavour.Custom => "Everything is yours to set.",
+        _ => "Nine by nine, ten walls each. The game as it is normally played.",
+    };
+
+    /// <summary>
+    /// The board this setup screen describes. Standard is the plain game; Random rolls
+    /// everything, seeded from the clock so two games are never the same; Custom is
+    /// whatever the knobs say, with a fresh seed so the same numbers still give a
+    /// different scatter each time.
+    /// </summary>
+    private GameSetup BuildSetup()
+    {
+        int seed = Environment.TickCount;
+
+        if (_flavour == GameFlavour.Standard) return GameSetup.Standard;
+
+        if (_flavour == GameFlavour.Custom)
+        {
+            return new GameSetup
+            {
+                Size = _size,
+                Walls = _walls,
+                Holes = _holes,
+                Pickups = _pickups,
+                Seed = seed,
+            };
+        }
+
+        var roll = new Random(seed);
+        int size = roll.Next(4) == 0 ? 7 : Board.Size;
+
+        return new GameSetup
+        {
+            Size = size,
+            Walls = roll.Next(4, size == 7 ? 9 : 13),
+            Holes = new[] { 0, 0, 2, 4, 6 }[roll.Next(5)],
+            Pickups = new[] { 0, 4, 4, 6, 10 }[roll.Next(5)],
+            Seed = seed,
+        };
+    }
 
     /// <summary>A move chosen during the opponent's turn, played the moment ours starts.</summary>
     private Move? _premove;
@@ -372,9 +525,7 @@
                 _ => $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine",
             };
 
-            return _session.Layout == BoardLayout.Open
-                ? name
-                : $"{name} · {Layouts.Name(_session.Layout).ToLowerInvariant()}";
+            return _session.Setup.IsStandard ? name : $"{name} · {_session.Setup.Describe()}";
         }
     }
 
@@ -467,7 +618,10 @@
 
     private async Task StartGame()
     {
-        _session = new WebSession(_mode, _strength, _seat, _layout);
+        // A rolled game rolls the order of play too.
+        if (_flavour == GameFlavour.Random) _seat = Random.Shared.Next(2);
+
+        _session = new WebSession(_mode, _strength, _seat, BuildSetup());
         _showSetup = false;
         ResetPlayState();
 
@@ -487,7 +641,7 @@
             await _net.SendAsync(swap ? "restart|swap" : "restart");
 
         _seat = seat < 0 ? 0 : seat;
-        _session = new WebSession(_session.Mode, _session.Strength, _seat, _session.Layout);
+        _session = new WebSession(_session.Mode, _session.Strength, _seat, _session.Setup);
         ResetPlayState();
 
         if (_session.IsBotTurn) await RunEngine();
@@ -541,11 +695,43 @@
         try
         {
             _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+            await _sfx.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
             await _sfx.InvokeVoidAsync("music", _music);
         }
         catch (Exception)
         {
         }
+    }
+
+    /// <summary>Turning the effects on plays one, so the slider can be heard.</summary>
+    private async Task ToggleSound()
+    {
+        _sound = !_sound;
+        if (_sound) await Sfx("move");
+    }
+
+    private async Task SetVolume(object? value, bool music)
+    {
+        if (!int.TryParse(value?.ToString(), out int level)) return;
+
+        level = Math.Clamp(level, 0, 100);
+
+        if (music) _musicVolume = level;
+        else _soundVolume = level;
+
+        try
+        {
+            _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+            await _sfx.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        // A volume you cannot hear is a volume you cannot set, so the effects slider
+        // makes a sound as it moves.
+        if (!music && _sound) await Sfx("move");
     }
 
     /// <summary>Anything that only made sense for the position we just left.</summary>
@@ -582,17 +768,14 @@
 
             // The player who opened the link takes the second seat and the standard board
             // until told otherwise, which happens immediately.
-            if (!host)
-            {
-                _seat = 1;
-                _layout = BoardLayout.Open;
-            }
+            GameSetup setup = host ? BuildSetup() : GameSetup.Standard;
+            if (!host) _seat = 1;
 
-            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _layout);
+            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, setup);
             _showSetup = false;
             ResetPlayState();
 
-            if (host) await _net.SendAsync($"seat|{_seat ^ 1}|{(int)_layout}");
+            if (host) await _net.SendAsync($"seat|{_seat ^ 1}|{setup.Encode()}");
         }
 
         StateHasChanged();
@@ -600,22 +783,22 @@
 
     private void OnNetMessage(string message) => InvokeAsync(async () =>
     {
-        // "seat|<n>|<layout>" — the side and the board the other browser has set up.
+        // "seat|<n>|<board>" — the side and the board the other browser has set up, the
+        // board as the numbers it was generated from so both sides build the same one.
         // Sent once, on connecting, by whoever created the game.
         if (message.StartsWith("seat|"))
         {
             string[] terms = message.Split('|');
 
-            if (terms.Length == 3 &&
+            if (terms.Length == 7 &&
                 int.TryParse(terms[1], out int mine) && mine is 0 or 1 &&
-                int.TryParse(terms[2], out int shape) && Enum.IsDefined(typeof(BoardLayout), shape))
+                GameSetup.TryDecode(terms.AsSpan(2), out GameSetup setup))
             {
                 _seat = mine;
-                _layout = (BoardLayout)shape;
 
-                if (mine != _session.LocalSeat || _layout != _session.Layout)
+                if (mine != _session.LocalSeat || setup != _session.Setup)
                 {
-                    _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _layout);
+                    _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, setup);
                     ResetPlayState();
                 }
             }
@@ -628,7 +811,7 @@
         {
             _seat = message.EndsWith("swap") ? _session.LocalSeat ^ 1 : _session.LocalSeat;
 
-            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _session.Layout);
+            _session = new WebSession(WebMode.Online, BotStrength.Normal, _seat, _session.Setup);
             ResetPlayState();
             StateHasChanged();
             return;

@@ -52,13 +52,13 @@ public sealed class NetPeer : IDisposable
     public int LocalSeat { get; private set; }
 
     /// <summary>The board the host set up. Likewise agreed on connecting.</summary>
-    public BoardLayout Layout { get; private set; }
+    public GameSetup Setup { get; private set; } = GameSetup.Standard;
 
-    public async Task HostAsync(int port, int seat = 0, BoardLayout layout = BoardLayout.Open)
+    public async Task HostAsync(int port, int seat = 0, GameSetup? setup = null)
     {
         Close();
         LocalSeat = seat == 1 ? 1 : 0;
-        Layout = layout;
+        Setup = setup ?? GameSetup.Standard;
         Set(NetState.Listening);
 
         try
@@ -87,7 +87,7 @@ public sealed class NetPeer : IDisposable
     {
         Close();
         LocalSeat = 1;
-        Layout = BoardLayout.Open;
+        Setup = GameSetup.Standard;
         Set(NetState.Connecting);
 
         try
@@ -158,7 +158,7 @@ public sealed class NetPeer : IDisposable
 
         if (host)
         {
-            await writer.WriteLineAsync($"seat|{LocalSeat ^ 1}|{(int)Layout}");
+            await writer.WriteLineAsync($"seat|{LocalSeat ^ 1}|{Setup.Encode()}");
         }
         else
         {
@@ -176,13 +176,13 @@ public sealed class NetPeer : IDisposable
 
             string[] terms = hello?.Split('|') ?? Array.Empty<string>();
 
-            if (terms.Length == 3 &&
+            if (terms.Length == 7 &&
                 terms[0] == "seat" &&
                 int.TryParse(terms[1], out int seat) && seat is 0 or 1 &&
-                int.TryParse(terms[2], out int shape) && Enum.IsDefined(typeof(BoardLayout), shape))
+                GameSetup.TryDecode(terms.AsSpan(2), out GameSetup setup))
             {
                 LocalSeat = seat;
-                Layout = (BoardLayout)shape;
+                Setup = setup;
             }
         }
 

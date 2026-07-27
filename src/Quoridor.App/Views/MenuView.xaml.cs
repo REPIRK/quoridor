@@ -46,11 +46,16 @@ public partial class MenuView : UserControl
         _demo.IsHitTestVisible = false;
         DemoHost.Children.Add(_demo);
 
-        LocalButton.Click += (_, _) => _host.StartGame(GameOptions.Hotseat(SelectedClock(), SelectedLayout()));
+        LocalButton.Click += (_, _) => _host.StartGame(GameOptions.Hotseat(SelectedClock(), SelectedBoard()));
         BotButton.Click += (_, _) => _host.StartGame(GameOptions.VersusBot(
-            SelectedStrength(), SelectedClock(), MoveFirstOption.IsChecked == true, SelectedLayout()));
+            SelectedStrength(), SelectedClock(), SelectedMovesFirst(), SelectedBoard()));
         SpectateButton.Click += (_, _) => _host.StartGame(
-            GameOptions.Spectate(SelectedStrength(), SelectedLayout()));
+            GameOptions.Spectate(SelectedStrength(), SelectedBoard()));
+
+        foreach (RadioButton option in new[] { FlavourStandardOption, FlavourRandomOption, FlavourCustomOption })
+            option.Checked += (_, _) => ApplyFlavour();
+
+        ApplyFlavour();
 
         NetworkButton.Click += (_, _) => ShowNetwork(true);
         CloseNetworkButton.Click += (_, _) => ShowNetwork(false);
@@ -104,25 +109,93 @@ public partial class MenuView : UserControl
     }
 
     /// <summary>The full engine is the default; the two heuristic bots are the handicap.</summary>
-    private BotStrength SelectedStrength()
+    private BotStrength SelectedStrength() => StrengthPick.SelectedIndex switch
     {
-        if (EasyOption.IsChecked == true) return BotStrength.Easy;
-        if (NormalOption.IsChecked == true) return BotStrength.Normal;
-        return BotStrength.Hard;
+        0 => BotStrength.Easy,
+        1 => BotStrength.Normal,
+        _ => BotStrength.Hard,
+    };
+
+    private TimeControl SelectedClock() => ClockPick.SelectedIndex switch
+    {
+        1 => TimeControl.Blitz,
+        2 => TimeControl.Rapid,
+        _ => TimeControl.None,
+    };
+
+    private GameFlavour SelectedFlavour()
+    {
+        if (FlavourRandomOption.IsChecked == true) return GameFlavour.Random;
+        if (FlavourCustomOption.IsChecked == true) return GameFlavour.Custom;
+        return GameFlavour.Standard;
     }
 
-    private TimeControl SelectedClock()
+    /// <summary>Whether the local player takes the first seat, rolled for a random game.</summary>
+    private bool SelectedMovesFirst() => SelectedFlavour() switch
     {
-        if (ClockBlitzOption.IsChecked == true) return TimeControl.Blitz;
-        if (ClockRapidOption.IsChecked == true) return TimeControl.Rapid;
-        return TimeControl.None;
+        GameFlavour.Random => Random.Shared.Next(2) == 0,
+        GameFlavour.Custom => OrderPick.SelectedIndex == 0,
+        _ => true,
+    };
+
+    /// <summary>
+    /// The board the menu currently describes. Standard is the plain game; Random rolls
+    /// everything, seeded from the clock so no two are alike; Custom is whatever the
+    /// dropdowns say, with a fresh seed so the same numbers still scatter differently.
+    /// </summary>
+    private GameSetup SelectedBoard()
+    {
+        int seed = Environment.TickCount;
+
+        switch (SelectedFlavour())
+        {
+            case GameFlavour.Custom:
+                int[] walls = { 0, 3, 5, 7, 10, 14, 20 };
+                int[] holes = { 0, 2, 4, 6, 10 };
+                int[] pickups = { 0, 4, 6, 10 };
+
+                return new GameSetup
+                {
+                    Size = SizePick.SelectedIndex switch { 1 => 7, 2 => 5, _ => Board.Size },
+                    Walls = walls[Math.Clamp(WallsPick.SelectedIndex, 0, walls.Length - 1)],
+                    Holes = holes[Math.Clamp(HolesPick.SelectedIndex, 0, holes.Length - 1)],
+                    Pickups = pickups[Math.Clamp(PickupsPick.SelectedIndex, 0, pickups.Length - 1)],
+                    Seed = seed,
+                };
+
+            case GameFlavour.Random:
+                var roll = new Random(seed);
+                int size = roll.Next(4) == 0 ? 7 : Board.Size;
+
+                return new GameSetup
+                {
+                    Size = size,
+                    Walls = roll.Next(4, size == 7 ? 9 : 13),
+                    Holes = new[] { 0, 0, 2, 4, 6 }[roll.Next(5)],
+                    Pickups = new[] { 0, 4, 4, 6, 10 }[roll.Next(5)],
+                    Seed = seed,
+                };
+
+            default:
+                return GameSetup.Standard;
+        }
     }
 
-    private BoardLayout SelectedLayout()
+    /// <summary>Shows only what the chosen flavour is willing to be asked about.</summary>
+    private void ApplyFlavour()
     {
-        if (BoardPillarsOption.IsChecked == true) return BoardLayout.Pillars;
-        if (BoardDiamondOption.IsChecked == true) return BoardLayout.Diamond;
-        return BoardLayout.Open;
+        GameFlavour flavour = SelectedFlavour();
+
+        CustomOptions.Visibility = flavour == GameFlavour.Custom
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        FlavourNote.Text = flavour switch
+        {
+            GameFlavour.Random => "Board, walls, holes, pickups and who moves first — all rolled for you.",
+            GameFlavour.Custom => "Everything is yours to set.",
+            _ => "Nine by nine, ten walls each. The game as it is normally played.",
+        };
     }
 
     private void UpdateThemeButton() =>
@@ -308,7 +381,7 @@ public partial class MenuView : UserControl
             ? "They should type:  " + string.Join("   or   ", addresses)
             : "No network address found — is this machine on a network?";
 
-        _ = peer.HostAsync(NetPeer.DefaultPort, seat, SelectedLayout());
+        _ = peer.HostAsync(NetPeer.DefaultPort, seat, SelectedBoard());
     }
 
     private void StartJoining()
@@ -411,25 +484,41 @@ public partial class MenuView : UserControl
         RoutesHiddenOption.Checked += (_, _) => Store(() => settings.ShowRoutes = false);
         RoutesShownOption.Checked += (_, _) => Store(() => settings.ShowRoutes = true);
 
-        (settings.Sound ? SoundOnOption : SoundOffOption).IsChecked = true;
-        SoundOffOption.Checked += (_, _) => Store(() => settings.Sound = false);
-        SoundOnOption.Checked += (_, _) => Store(() =>
+        // Volume doubles as the on/off switch: nothing to hear is what "off" means, and
+        // one control is easier to reason about than a switch plus a level that disagree.
+        SoundDial.Value = settings.SoundVolume;
+        MusicDial.Value = settings.MusicVolume;
+
+        SoundReading.Text = $"{settings.SoundVolume}%";
+        MusicReading.Text = $"{settings.MusicVolume}%";
+
+        SoundDial.ValueChanged += (_, e) => Store(() =>
         {
-            settings.Sound = true;
+            int level = (int)Math.Round(e.NewValue);
+
+            settings.SoundVolume = level;
+            settings.Sound = level > 0;
+            SoundReading.Text = $"{level}%";
+
+            Sfx.RefreshVolumes();
             Sfx.Play(Sound.Move);
         });
 
-        (settings.Music ? MusicOnOption : MusicOffOption).IsChecked = true;
-        MusicOffOption.Checked += (_, _) => Store(() =>
+        MusicDial.ValueChanged += (_, e) => Store(() =>
         {
-            settings.Music = false;
-            Sfx.Music(false);
-        });
+            int level = (int)Math.Round(e.NewValue);
 
-        MusicOnOption.Checked += (_, _) => Store(() =>
-        {
-            settings.Music = true;
-            Sfx.Music(true);
+            settings.MusicVolume = level;
+            MusicReading.Text = $"{level}%";
+
+            bool wanted = level > 0;
+            if (wanted != settings.Music)
+            {
+                settings.Music = wanted;
+                Sfx.Music(wanted);
+            }
+
+            Sfx.RefreshVolumes();
         });
 
         // Picks the option matching the stored value, falling back to the middle one so

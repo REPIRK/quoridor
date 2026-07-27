@@ -14,11 +14,21 @@ namespace Quoridor.Core;
 /// </summary>
 public static class Board
 {
+    /// <summary>
+    /// The width of the grid the whole engine is compiled around. A smaller game is
+    /// played on a centred square of this grid rather than on a smaller grid: the ring
+    /// around it is simply not part of the board. That keeps every index, shift and mask
+    /// a compile-time constant, which is worth more than the handful of unused bits.
+    /// </summary>
     public const int Size = 9;
+
     public const int CellCount = Size * Size;
     public const int SlotSize = Size - 1;
     public const int SlotCount = SlotSize * SlotSize;
     public const int WallsPerPlayer = 10;
+
+    /// <summary>The most walls a player can ever hold, pickups included.</summary>
+    public const int MaxWalls = 20;
 
     /// <summary>Direction ids. Deltas assume row-major indexing.</summary>
     public const int North = 0;
@@ -50,22 +60,27 @@ public static class Board
     public static readonly UInt128 LeftColumn;
     public static readonly UInt128 RightColumn;
 
+    /// <summary>Each row as a bitboard, so a goal row that is not an edge costs a lookup.</summary>
+    public static readonly UInt128[] RowMask = new UInt128[Size];
+
     /// <summary>Starting cell of each player: player 0 at e1 (bottom), player 1 at e9 (top).</summary>
     public static readonly int[] StartCell = { Index(Size - 1, Size / 2), Index(0, Size / 2) };
 
     static Board()
     {
-        UInt128 top = 0, bottom = 0, left = 0, right = 0;
+        UInt128 left = 0, right = 0;
         for (int i = 0; i < Size; i++)
         {
-            top |= Bit(Index(0, i));
-            bottom |= Bit(Index(Size - 1, i));
             left |= Bit(Index(i, 0));
             right |= Bit(Index(i, Size - 1));
+
+            UInt128 row = 0;
+            for (int col = 0; col < Size; col++) row |= Bit(Index(i, col));
+            RowMask[i] = row;
         }
 
-        TopRow = top;
-        BottomRow = bottom;
+        TopRow = RowMask[0];
+        BottomRow = RowMask[Size - 1];
         LeftColumn = left;
         RightColumn = right;
     }

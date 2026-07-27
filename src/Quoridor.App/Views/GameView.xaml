@@ -21,8 +21,10 @@
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center" />
 
+            <!-- One button, not a row of toggles. None of it is needed mid-move. -->
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="ThemeButton" Style="{StaticResource Button.Ghost}" Content="Light" Margin="0,0,8,0" />
+                <Button x:Name="SettingsButton" Style="{StaticResource Button.Ghost}"
+                        Content="Settings" Margin="0,0,8,0" />
                 <Button x:Name="FullscreenButton" Style="{StaticResource Button.Ghost}" Content="Fullscreen" />
             </StackPanel>
         </Grid>
@@ -96,10 +98,87 @@
 
                 <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
                     <Button x:Name="UndoButton" Style="{StaticResource Button.Ghost}" Content="Undo" Margin="0,0,8,0" />
-                    <Button x:Name="RestartButton" Style="{StaticResource Button.Ghost}" Content="Restart" Margin="0,0,8,0" />
-                    <Button x:Name="RoutesButton" Style="{StaticResource Button.Ghost}" Content="Routes" />
+                    <Button x:Name="RestartButton" Style="{StaticResource Button.Ghost}" Content="Restart" />
                 </StackPanel>
             </StackPanel>
+        </Grid>
+
+        <!-- ================================================ settings overlay ==== -->
+        <Grid x:Name="SettingsOverlay"
+              Grid.RowSpan="2"
+              Background="{DynamicResource Brush.Overlay}"
+              Visibility="Collapsed"
+              Opacity="0">
+
+            <Border x:Name="SettingsCard"
+                    Style="{StaticResource Card}"
+                    MaxWidth="470"
+                    Padding="34,30"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center"
+                    RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="SettingsScale" ScaleX="0.96" ScaleY="0.96" />
+                </Border.RenderTransform>
+
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Text.Display}" FontSize="30" Text="Settings" />
+
+                    <Grid Margin="0,24,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="96" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="46" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Board" VerticalAlignment="Center" />
+                        <StackPanel Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
+                            <Button x:Name="RoutesButton" Style="{StaticResource Button.Ghost}" Content="Routes" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Theme" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                    Orientation="Horizontal" Margin="0,14,0,0">
+                            <Button x:Name="ThemeButton" Style="{StaticResource Button.Ghost}" Content="Light" />
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Sound" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <Slider x:Name="SoundDial" Grid.Row="2" Grid.Column="1"
+                                Style="{StaticResource Dial}" Margin="0,14,10,0"
+                                VerticalAlignment="Center" />
+                        <TextBlock x:Name="SoundReading" Grid.Row="2" Grid.Column="2"
+                                   Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
+                                   VerticalAlignment="Center" TextAlignment="Right" />
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource Text.Section}"
+                                   Text="Music" VerticalAlignment="Center" Margin="0,14,0,0" />
+                        <Slider x:Name="MusicDial" Grid.Row="3" Grid.Column="1"
+                                Style="{StaticResource Dial}" Margin="0,14,10,0"
+                                VerticalAlignment="Center" />
+                        <TextBlock x:Name="MusicReading" Grid.Row="3" Grid.Column="2"
+                                   Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
+                                   VerticalAlignment="Center" TextAlignment="Right" />
+                    </Grid>
+
+                    <TextBlock x:Name="SettingsNote" Style="{StaticResource Text.Subtitle}"
+                               Margin="0,24,0,0" TextWrapping="Wrap" />
+
+                    <Button x:Name="CloseSettingsButton"
+                            Style="{StaticResource Button.Ghost}"
+                            Content="Done"
+                            HorizontalAlignment="Right"
+                            Margin="0,24,0,0" />
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- ==================================================== result card ==== -->
