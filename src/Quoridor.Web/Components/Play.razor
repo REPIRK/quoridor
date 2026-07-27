@@ -476,6 +476,10 @@
     {
         if (!firstRender) return;
 
+        // Fetch the sound module now, while nobody is waiting for anything, so the first
+        // move does not find itself paying for it.
+        _ = LoadSfx();
+
         // A touch screen has no hover, so one stray tap would move a pawn. Confirmation
         // is the right default there and the wrong one with a mouse.
         try
@@ -662,18 +666,29 @@
     /// there is nothing to download and nothing to wait for. Loaded on the first sound
     /// because a page may never make one.
     /// </summary>
+    private async Task<IJSObjectReference?> LoadSfx()
+    {
+        try
+        {
+            return _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+        }
+        catch (Exception)
+        {
+            // Audio is a nicety; a browser that refuses it should not break the game.
+            return null;
+        }
+    }
+
     private async Task Sfx(string kind)
     {
         if (!_sound) return;
 
         try
         {
-            _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
-            await _sfx.InvokeVoidAsync("play", kind);
+            if (await LoadSfx() is { } module) await module.InvokeVoidAsync("play", kind);
         }
         catch (Exception)
         {
-            // Audio is a nicety; a browser that refuses it should not break the game.
         }
     }
 
@@ -694,9 +709,10 @@
 
         try
         {
-            _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
-            await _sfx.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
-            await _sfx.InvokeVoidAsync("music", _music);
+            if (await LoadSfx() is not { } module) return;
+
+            await module.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
+            await module.InvokeVoidAsync("music", _music);
         }
         catch (Exception)
         {
@@ -721,8 +737,9 @@
 
         try
         {
-            _sfx ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
-            await _sfx.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
+            if (await LoadSfx() is not { } module) return;
+
+            await module.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
         }
         catch (Exception)
         {
@@ -829,7 +846,7 @@
             Notation.TryParse(parts[2], out Move move) &&
             _session.Apply(move))
         {
-            await SoundFor(move);
+            _ = SoundFor(move);
         }
 
         StateHasChanged();
@@ -846,7 +863,10 @@
         if (!_session.Apply(move)) return;
 
         _preview = null;
-        await SoundFor(move);
+
+        // Deliberately not awaited. The first sound has to fetch its module, and waiting
+        // on that once held the engine's reply up for five seconds on a cold load.
+        _ = SoundFor(move);
 
         if (_session.Mode == WebMode.Online)
         {
@@ -891,7 +911,7 @@
 
             Move move = _session.Think();
             _session.Apply(move);
-            await SoundFor(move);
+            _ = SoundFor(move);
 
             _thinking = false;
             StateHasChanged();
