@@ -546,6 +546,24 @@ input.slider::-moz-range-thumb {
 
 .board .pickup.skip .head { fill: var(--text); stroke: none; opacity: 0.5; }
 
+/* Taking one should be worth watching. A ring opening outward and fading, once, on
+   the square it came from — short enough to finish inside the pause the engine waits
+   out, so it never freezes half-drawn. */
+.board .pickup-burst {
+    pointer-events: none;
+    transform-origin: 0 0;
+    animation: pickup-taken 0.26s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.board .pickup-burst .halo { fill: none; stroke-width: 3; }
+.board .pickup-burst.wall .halo { stroke: var(--text); }
+.board .pickup-burst.skip .halo { stroke: var(--p0); }
+
+@keyframes pickup-taken {
+    from { opacity: 0.85; transform: scale(0.35); }
+    to { opacity: 0; transform: scale(1.5); }
+}
+
 
 /* A square out of play reads as a gap in the board rather than a darker square: no
    fill at all, only a faint outline where the square would have been. */
@@ -690,6 +708,7 @@ input.slider::-moz-range-thumb {
 
 @media (prefers-reduced-motion: reduce) {
     .board .pawn-holder, .board .wall, .board .wall-lip, .board .hint-dot,
+    .board .pickup-burst,
     .overlay, .result, .setup { transition: none; animation: none; }
 }
 

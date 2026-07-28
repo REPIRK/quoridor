@@ -650,7 +650,7 @@ public partial class GameView : UserControl
         string advice = _session.LastMoveWentAgain
             ? "Free move — the turn does not pass. Go again."
             : _session.LastMoveTookAWall
-                ? "A spare wall picked up — one more than you started with."
+                ? "Two spare walls picked up, on top of what you started with."
                 : state.WallsOf(side) == 0
                     ? "No walls left — it is a straight race now."
                     : "Click a square to step, or hover a groove between squares to place a wall.";

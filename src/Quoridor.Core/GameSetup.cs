@@ -138,11 +138,33 @@ public sealed record GameSetup
                 return new BuiltBoard(GameState.CreateInitial(Size, Walls), 0);
             }
 
+            // Pickups go where players actually walk. A free move is worth a whole tempo,
+            // but only if you were going that way anyway: two squares off your route
+            // costs two moves to fetch one, and the prize is a loss. Scattered evenly
+            // over the board that is what most of them were. Weighted toward the middle
+            // files they become something both players pass, and therefore contest.
+            List<int> lanes = NearTheMiddle(state, free);
+
             int pickupCount = Math.Min(Pickups & ~1, free.Count);
             for (int i = 0; i < pickupCount; i += 2)
             {
-                int cell = TakePair(random, free, reserved | holes, out int mirror);
+                // A bias, not a rule. Three in four go where the walking is, which is
+                // what makes them worth taking; the rest are scattered, so the edges of
+                // the board are not dead ground and no two games look the same.
+                bool inLane = random.Next(4) != 0;
+
+                int cell = inLane
+                    ? TakePair(random, lanes, reserved | holes, out int mirror)
+                    : TakePair(random, free, reserved | holes, out mirror);
+
+                if (cell < 0) cell = TakePair(random, free, reserved | holes, out mirror);
                 if (cell < 0) break;
+
+                // Whichever list it came from, it is gone from both.
+                free.Remove(cell);
+                free.Remove(mirror);
+                lanes.Remove(cell);
+                lanes.Remove(mirror);
 
                 // Both squares of a pair carry the same kind, or the mirror would not
                 // be a mirror. Walls are the commoner of the two: a free move is the
@@ -155,6 +177,27 @@ public sealed record GameSetup
 
             return new BuiltBoard(state, holes);
         }
+    }
+
+    /// <summary>
+    /// The squares near the middle files, where both players' routes run. Both start on
+    /// the centre file and the shortest way home is straight up it, so a pickup within a
+    /// square or two of that line is one you can take without leaving your route — which
+    /// is the difference between a prize and a tax.
+    /// </summary>
+    private static List<int> NearTheMiddle(in GameState state, List<int> free)
+    {
+        int origin = state.GoalRow(0);
+        int last = state.GoalRow(1);
+        int centre = (origin + last) / 2;
+
+        var lanes = new List<int>(free.Count);
+
+        foreach (int cell in free)
+            if (Math.Abs(Board.ColOf(cell) - centre) <= 2)
+                lanes.Add(cell);
+
+        return lanes;
     }
 
     /// <summary>Every square in the game, ignoring what is on it.</summary>

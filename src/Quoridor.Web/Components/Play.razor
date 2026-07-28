@@ -49,6 +49,7 @@
                        ShowRoutes="_routes"
                        Flipped="@(_session.LocalSeat == 1)"
                        Holes="_session.Holes"
+                       Collected="@(_reviewPly is null ? _session.LastPickup : null)"
                        ConfirmMoves="_confirm"
                        LastMove="ShownLastMove"
                        Premove="_premove"
@@ -600,7 +601,7 @@
                 return "Free move — the turn does not pass. Go again.";
 
             if (_session.LastMoveTookAWall)
-                return "A spare wall picked up — one more than you started with.";
+                return "Two spare walls picked up, on top of what you started with.";
 
             if (_session.State.WallsOf(_session.State.SideToMove) == 0)
                 return "No walls left — it is a straight race now.";

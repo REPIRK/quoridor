@@ -443,7 +443,7 @@
                                    Fill="{DynamicResource Brush.Text}" Opacity="0.45"
                                    HorizontalAlignment="Left" VerticalAlignment="Center" />
                         <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Text.Body}"
-                                   Text="A spare wall. Step on it and one more wall joins your supply, on top of whatever you started with. The turn passes as usual." />
+                                   Text="Two spare walls. Step on it and they join your supply, on top of whatever you started with. The turn passes as usual." />
 
                         <Canvas Grid.Row="1" Grid.Column="0" Margin="0,12,0,0"
                                 Width="24" Height="24"

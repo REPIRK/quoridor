@@ -124,6 +124,13 @@ public sealed class WebSession
         int mover = State.SideToMove;
         int wallsBefore = State.WallsOf(mover);
 
+        // Noted before the move, because taking it is what removes it.
+        LastPickup = move.Kind == MoveKind.Pawn && (State.WallPickups & Board.Bit(move.Cell)) != 0
+            ? (move.Cell, true)
+            : move.Kind == MoveKind.Pawn && (State.SkipPickups & Board.Bit(move.Cell)) != 0
+                ? (move.Cell, false)
+                : null;
+
         GameState next = State;
         next.Apply(move);
         State = next;
@@ -134,6 +141,9 @@ public sealed class WebSession
 
         return true;
     }
+
+    /// <summary>The pickup the last move took and where, for the board to see it off.</summary>
+    public (int Cell, bool IsWall)? LastPickup { get; private set; }
 
     public bool Undo()
     {

@@ -128,6 +128,17 @@
         </g>
     }
 
+    @* The one taken on the last move, still drawn for a moment while it leaves. Keyed
+       on the ply so each collection plays its own burst rather than reviving the last
+       one; it is removed from the render as soon as the next move arrives. *@
+    @if (Collected is { } taken)
+    {
+        <g @key="@($"taken-{State.Ply}")" class="pickup-burst @(taken.IsWall ? "wall" : "skip")"
+           transform="translate(@Centre(Board.ColOf(taken.Cell)) @Centre(Board.RowOf(taken.Cell)))">
+            <circle class="halo" r="15" />
+        </g>
+    }
+
     @* What the pointer is aiming at, what is waiting to be confirmed, and what is
        queued for when the turn arrives — the same three shapes, told apart by style. *@
     @foreach ((Move mark, string style) in Marks())
@@ -261,6 +272,9 @@
 
     /// <summary>Squares out of play, drawn as gaps rather than squares.</summary>
     [Parameter] public UInt128 Holes { get; set; }
+
+    /// <summary>The pickup taken by the last move, if it took one, for its send-off.</summary>
+    [Parameter] public (int Cell, bool IsWall)? Collected { get; set; }
 
     /// <summary>Require a second tap on the same target before the move is played.</summary>
     [Parameter] public bool ConfirmMoves { get; set; }

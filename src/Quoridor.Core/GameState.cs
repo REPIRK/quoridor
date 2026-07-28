@@ -164,6 +164,9 @@ public struct GameState
         if (col < Board.Size - 1) BlockedWest |= Board.Bit(Board.Index(row, col + 1));
     }
 
+    /// <summary>How many walls a spare-wall pickup is worth.</summary>
+    public const int WallsPerPickup = 2;
+
     /// <summary>Puts a pickup on a square. Both kinds are part of the hash.</summary>
     public void PlacePickup(int cell, PickupKind kind)
     {
@@ -476,13 +479,18 @@ public struct GameState
             WallPickups &= ~bit;
             Hash ^= Zobrist.Pickup[0, cell];
 
+            // Two, not one. Reaching a pickup that is not already on your route costs a
+            // move to step aside and a move to come back; a single wall does not repay
+            // that, so the prize was one nobody sensibly took.
             int before = WallsOf(player);
-            if (before < Board.MaxWalls)
-            {
-                Hash ^= Zobrist.WallsLeft[player, before] ^ Zobrist.WallsLeft[player, before + 1];
+            int after = Math.Min(before + WallsPerPickup, Board.MaxWalls);
 
-                if (player == 0) _walls0 = (byte)(before + 1);
-                else _walls1 = (byte)(before + 1);
+            if (after != before)
+            {
+                Hash ^= Zobrist.WallsLeft[player, before] ^ Zobrist.WallsLeft[player, after];
+
+                if (player == 0) _walls0 = (byte)after;
+                else _walls1 = (byte)after;
             }
 
             return false;

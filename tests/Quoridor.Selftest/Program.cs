@@ -400,7 +400,9 @@ internal static class Program
                 if (onWall)
                 {
                     sawPickup = true;
-                    Check(state.WallsOf(mover) == wallsBefore + 1, $"{name}: a wall pickup adds a wall");
+
+                    int expected = Math.Min(wallsBefore + GameState.WallsPerPickup, Board.MaxWalls);
+                    Check(state.WallsOf(mover) == expected, $"{name}: a wall pickup adds its walls");
                     Check(state.SideToMove != mover, $"{name}: a wall pickup still passes the turn");
                 }
 
@@ -437,7 +439,7 @@ internal static class Program
 
         wall.Apply(Move.Pawn(3, 4));
 
-        Check(wall.WallsOf(0) == 4, "a spare wall joins the supply");
+        Check(wall.WallsOf(0) == 3 + GameState.WallsPerPickup, "the spare walls join the supply");
         Check(wall.SideToMove == 1, "and the turn passes as usual");
         Check(wall.WallPickups == 0, "the square is empty afterwards");
         Check(wall.Hash != before, "the hash moved with it");
