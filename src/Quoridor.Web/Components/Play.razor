@@ -534,9 +534,36 @@
         await _net.JoinAsync(invite);
     }
 
+    /// <summary>What the move list was last scrolled for, so it is only scrolled again
+    /// when the game moved on or the review moved to another row.</summary>
+    private (int Played, int? Ply) _listed = (-1, null);
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        if (!firstRender)
+        {
+            // The list is a fixed height and a game outgrows it about ten moves in,
+            // after which the move just played is below the fold — including the one
+            // the arrow keys have just stepped to, which is the whole point of pressing
+            // them. It follows the game rather than being scrolled by hand every move.
+            (int, int?) now = (_session.Moves.Count, _reviewPly);
+
+            if (now != _listed && _page is not null)
+            {
+                _listed = now;
+
+                try
+                {
+                    await _page.InvokeVoidAsync("followMoves", _reviewPly is not null);
+                }
+                catch (Exception)
+                {
+                    // A list that does not scroll itself is not worth a broken page.
+                }
+            }
+
+            return;
+        }
 
         // Fetch the sound module now, while nobody is waiting for anything, so the first
         // move does not find itself paying for it.

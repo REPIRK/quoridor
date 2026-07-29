@@ -211,6 +211,10 @@ body {
    holding an empty gap open. */
 .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
 
+/* The shortcuts, which only appear with the help open. Set below the line that explains
+   how to move, because that one is what a first-time player came for. */
+.hint.keys { font-size: 12px; opacity: 0.75; margin-top: 7px; line-height: 1.6; }
+
 .panel .heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 
 /* The only thing left where the instructions used to be. */
@@ -246,6 +250,10 @@ body {
     padding: 0;
     height: 190px;
     overflow-y: auto;
+
+    /* The list follows the game on its own, and a jump gives no clue whether it moved
+       one row or twenty. Gliding says which. */
+    scroll-behavior: smooth;
     font-family: ui-monospace, Consolas, monospace;
     font-size: 12.5px;
     color: var(--muted);
@@ -770,6 +778,8 @@ input.slider::-moz-range-thumb {
     .board .pawn-holder, .board .wall, .board .wall-lip, .board .hint-dot,
     .board .pickup-burst, .board .cell.hole, .board .pickup-holder,
     .overlay, .result, .setup { transition: none; animation: none; }
+
+    .moves { scroll-behavior: auto; }
 }
 
 /* ================================================================ narrow ====

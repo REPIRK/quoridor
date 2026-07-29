@@ -43,6 +43,25 @@ export function isCoarsePointer() {
     return window.matchMedia('(hover: none)').matches;
 }
 
+/// Keeps the move list on the move that matters, which is decided by whether the game is
+/// being reviewed: stepping back names the row to show, and being live means the newest.
+///
+/// No "unless they have scrolled away" clause, deliberately. Reading the game so far is
+/// what review is for, and clicking a row enters it — so the case that clause would
+/// protect is already handled by the branch above it, and a rule that measures how far
+/// the list has drifted can strand itself out of reach with no way back.
+export function followMoves(reviewing) {
+    const list = document.querySelector('.moves');
+    if (!list || list.scrollHeight <= list.clientHeight) return;
+
+    if (reviewing) {
+        list.querySelector('li.here')?.scrollIntoView({ block: 'nearest' });
+        return;
+    }
+
+    list.scrollTo({ top: list.scrollHeight });
+}
+
 // The keys the game answers to. Listed here as well as in the component because the
 // default has to be cancelled in the same tick as the press — Space scrolls the page,
 // and waiting for the round trip into .NET to find out whether we wanted it is a tick
