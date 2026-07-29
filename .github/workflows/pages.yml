@@ -53,6 +53,14 @@ jobs:
           touch published/wwwroot/.nojekyll
           cp published/wwwroot/index.html published/wwwroot/404.html
 
+      # Turns Pages on if it is not already, rather than assuming someone has been
+      # into the settings. Without this the site cannot come back by itself after the
+      # repository is recreated — the deploy step would fail on a repository that has
+      # never had Pages enabled.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: published/wwwroot
