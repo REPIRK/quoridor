@@ -135,13 +135,21 @@ two squares whose distances differ, which is four array reads instead of a flood
 That claim is exact, the search leans on it hard, and it is verified by exhaustive audit
 in the self-tests.
 
-The second shortcut is the one holes break. A wall can only cut the board in two if it
-joins a chain running from one border to another, so unless two of its three grid points
-already touch a wall or a border it provably cannot seal anyone in — and the two flood
-fills can be skipped. That argument knows about walls and borders; a square out of play
-is neither, and a chain could run to one and cut the board with nothing else attached.
-So on those boards the shortcut is simply not taken and the exact check always runs.
-Slower, and correct.
+The second shortcut is about holes. A wall can only cut the board in two if it joins a
+chain running from one border to another, so unless two of its three grid points already
+touch a wall or a border it provably cannot seal anyone in — and the two flood fills can
+be skipped. A square out of play is neither a wall nor a border, and a chain can run to
+one and cut the board with nothing else attached, so the argument first appeared not to
+survive holes at all and the shortcut was switched off on those boards.
+
+That was too blunt. A hole is a boundary like any other: counting it as an anchor
+restores the argument, because the chain still has to enter the new wall at one of its
+points and leave at another whatever it is tied to at the far end. The test is "sealed on
+all four sides", which also catches a square walled in on every side — not a hole, but
+just as impassable, and counting it only ever asks for more full checks, never fewer.
+Boards with holes now skip half to three-quarters of their wall checks instead of none,
+worth about 7% more nodes a second, and the self-tests audit every legal placement
+through a whole game on each layout.
 
 Pickups break a different assumption: that the two players alternate. A free move does
 not pass the turn, so the child of that move is scored from the same side and must not
@@ -205,6 +213,12 @@ change). The engine ships single-threaded.
 
 **History ordering is a wash.** 13:11 over 24 games at equal depth. Kept because it is
 sound and nearly free, not because it was shown to help.
+
+**Walls are not worth more on a board with holes.** The reasoning was tidy — a hole
+narrows the board, so a wall placed on it should shut more down — and the games disagreed
+flatly. At equal depth over 40 games each, pricing a wall at 240 lost 11:29 and at 300
+lost 11:29 again; going the other way, 120 and 150 were a wash at 18:21 and 22:18. The
+default is right on those boards too. Re-runnable as the `holes` bench mode.
 
 **Twelve games prove nothing.** The same depth ladder gave 6:5 on twelve games and 14:9
 on twenty-four. Use twenty-four or more before believing a result.

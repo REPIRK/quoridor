@@ -30,6 +30,7 @@ internal static class Program
         if (mode is "race") SweepRaceVerdict();
         if (mode is "duel") Duel();
         if (mode is "pickups") PickupDuel();
+        if (mode is "holes") HoleDuel();
         if (mode is "smpduel") ThreadDuel();
 
         return 0;
@@ -103,6 +104,35 @@ internal static class Program
                  () => new SearchAgent(maxDepth: depth, moveTime: generous, threads: 1, weights: blind),
                  games,
                  (random, game) => PickupOpening(random, seed: 500 + game, plies: 4));
+        }
+
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// A hole makes the board narrower, so the guess was that a wall shuts more down
+    /// there and should be priced higher. It does not: 240 and 300 both lost 11:29, and
+    /// 120 and 150 were a wash. The default is right on these boards too, and this mode
+    /// is kept so the finding can be re-run rather than taken on trust.
+    /// </summary>
+    private static void HoleDuel()
+    {
+        const int games = 40;
+        const int depth = 5;
+        var generous = TimeSpan.FromSeconds(30);
+
+        Console.WriteLine($"Hole boards, equal depth {depth}, {games} games each");
+
+        foreach (int wall in new[] { 120, 150, 240 })
+        {
+            EvaluationWeights tried = EvaluationWeights.Default with { Wall = wall };
+
+            Play($"wall={wall,-3}",
+                 () => new SearchAgent(maxDepth: depth, moveTime: generous, threads: 1, weights: tried),
+                 $"wall={EvaluationWeights.Default.Wall}",
+                 () => new SearchAgent(maxDepth: depth, moveTime: generous, threads: 1),
+                 games,
+                 (random, game) => HoleOpening(random, seed: 700 + game, plies: 4));
         }
 
         Console.WriteLine();
@@ -419,11 +449,35 @@ internal static class Program
             walls0: 0, walls1: 1, sideToMove: 0);
 
         yield return ("endgame", race);
+
+        // A board with squares out of play, opened the same way. This is the position
+        // the wall-graph shortcut used to give up on entirely.
+        GameState holed = new GameSetup { Holes = 6, Seed = 11 }.Build().State;
+        foreach (string text in new[] { "e2", "e8", "e3", "e7" })
+        {
+            if (Notation.TryParse(text, out Move move) && holed.IsLegal(move)) holed.Apply(move);
+        }
+
+        yield return ("holes", holed);
     }
 
     private static GameState RandomOpening(Random random, int plies)
     {
         GameState state = GameState.CreateInitial();
+
+        for (int i = 0; i < plies; i++)
+        {
+            var moves = state.LegalMoves();
+            state.Apply(moves[random.Next(moves.Count)]);
+        }
+
+        return state;
+    }
+
+    /// <summary>A board with squares out of play, opened a few random plies.</summary>
+    private static GameState HoleOpening(Random random, int seed, int plies)
+    {
+        GameState state = new GameSetup { Holes = 8, Seed = seed }.Build().State;
 
         for (int i = 0; i < plies; i++)
         {

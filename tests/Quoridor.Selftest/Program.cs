@@ -357,6 +357,7 @@ internal static class Program
 
             GameState state = start;
             bool sawPickup = false;
+            int skipped = 0, checkedFully = 0;
 
             for (int ply = 0; ply < 400 && !state.IsGameOver; ply++)
             {
@@ -367,7 +368,14 @@ internal static class Program
                         for (int col = 0; col < Board.SlotSize; col++)
                         {
                             if (!state.IsSlotFree(kind, row, col)) continue;
-                            if (WallGraph.CanDisconnect(state, kind, row, col)) continue;
+
+                            if (WallGraph.CanDisconnect(state, kind, row, col))
+                            {
+                                checkedFully++;
+                                continue;
+                            }
+
+                            skipped++;
 
                             GameState probe = state;
                             probe.PlaceWallUnchecked(kind, row, col);
@@ -414,6 +422,18 @@ internal static class Program
             }
 
             Check(state.IsGameOver, $"{name}: the game reached a result");
+
+            // The shortcut used to be switched off entirely once a board had holes. It
+            // is not any more, and this is what it now saves — reported so a change that
+            // quietly turned it off again would show up here rather than in a lost game.
+            int total = skipped + checkedFully;
+            if (total > 0)
+            {
+                Report($"{name}: {100 * skipped / total}% of wall checks skipped");
+
+                if (setup.Holes > 0)
+                    Check(skipped > 0, $"{name}: the wall-graph shortcut still works with holes");
+            }
 
             // Not asserted: that a pickup was taken. Both bots walk their route and a
             // pickup a step off it is usually not worth the two tempi — which is correct
@@ -734,4 +754,7 @@ internal static class Program
         _failures++;
         Console.WriteLine($"      FAIL: {what}");
     }
+
+    /// <summary>A measurement worth printing next to the checks, but not a check itself.</summary>
+    private static void Report(string what) => Console.WriteLine($"      {what}");
 }
