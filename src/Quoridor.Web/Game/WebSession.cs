@@ -114,6 +114,10 @@ public sealed class WebSession
     /// <summary>Whether the move just played picked a spare wall up off the board.</summary>
     public bool LastMoveTookAWall { get; private set; }
 
+    /// <summary>Who made the move just played, or -1 for none — so what it did can be
+    /// shown beside the player it happened to rather than to both of them.</summary>
+    public int LastMover { get; private set; } = -1;
+
     public bool Apply(Move move)
     {
         if (IsOver || !State.IsLegal(move)) return false;
@@ -138,6 +142,7 @@ public sealed class WebSession
         // Placing a wall spends one, so a supply that went up can only mean a pickup.
         LastMoveWentAgain = !IsOver && State.SideToMove == mover;
         LastMoveTookAWall = State.WallsOf(mover) > wallsBefore;
+        LastMover = mover;
 
         return true;
     }
@@ -155,6 +160,14 @@ public sealed class WebSession
         State = _positions[target];
         _positions.RemoveRange(target, rewind);
         _moves.RemoveRange(target, rewind);
+
+        // What the last move did is no longer true of any move: the panel would go on
+        // announcing a free move that has been taken back, and the board would see the
+        // collected pickup off a second time as the position it was keyed on changed.
+        LastMoveWentAgain = false;
+        LastMoveTookAWall = false;
+        LastPickup = null;
+        LastMover = -1;
 
         return true;
     }

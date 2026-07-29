@@ -762,6 +762,23 @@ input.slider::-moz-range-thumb {
     animation: pickup-laid 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
 }
 
+/* Walls picked up off the board land in this row. The pips run left to right as the
+   supply fills, so the two that are new are the ones the sweep passes last — which is
+   why this is a wipe across the row rather than a flash of the whole of it. */
+.walls.gained i:not(.spent) {
+    animation: wall-gained 0.22s ease both;
+}
+
+.walls.gained .count { animation: count-gained 0.3s ease both; }
+
+@keyframes wall-gained {
+    40% { transform: scaleY(1.5); filter: brightness(1.7); }
+}
+
+@keyframes count-gained {
+    35% { transform: translateY(-3px); color: var(--text); }
+}
+
 /* Scaled about the square's own centre, which the outer group has already translated
    to — the reason the mark is drawn around the origin in the first place. */
 @keyframes pickup-laid {
@@ -777,6 +794,7 @@ input.slider::-moz-range-thumb {
 @media (prefers-reduced-motion: reduce) {
     .board .pawn-holder, .board .wall, .board .wall-lip, .board .hint-dot,
     .board .pickup-burst, .board .cell.hole, .board .pickup-holder,
+    .walls.gained i, .walls.gained .count,
     .overlay, .result, .setup { transition: none; animation: none; }
 
     .moves { scroll-behavior: auto; }

@@ -30,10 +30,21 @@
                     <span class="turn @(player == 0 ? "p0" : "p1")"></span>
                     <div class="who">
                         <div class="name">@_session.PlayerName(player)</div>
-                        <div class="walls @(player == 0 ? "p0" : "p1")">
+                        @* Two spare walls land in this row and nowhere else. The board
+                           sees the pickup off where it was taken, but the thing it was
+                           taken for arrives here, and arriving in silence is how a prize
+                           comes to feel like nothing much happened. Keyed on the ply so
+                           each collection plays once. *@
+                        <div class="walls @(player == 0 ? "p0" : "p1") @(Gained(player) ? "gained" : "")"
+                             @key="@(Gained(player) ? $"gained-{player}-{_session.State.Ply}" : $"walls-{player}")">
                             @for (int i = 0; i < WallPips; i++)
                             {
-                                <i class="@(i < _session.State.WallsOf(player) ? "" : "spent")"></i>
+                                @* The sweep crosses the row in a fixed time however long
+                                   the row is, and finishes inside the pause before the
+                                   engine takes the thread — as the board's own entrance
+                                   does, and for the same reason. *@
+                                <i class="@(i < _session.State.WallsOf(player) ? "" : "spent")"
+                                   style="@(Gained(player) ? $"animation-delay: {90 * i / Math.Max(1, WallPips - 1)}ms" : null)"></i>
                             }
                             <span class="count">@_session.State.WallsOf(player)</span>
                         </div>
@@ -460,6 +471,11 @@
     /// </summary>
     private int WallPips => Math.Min(Board.MaxWalls,
         _session.Setup.Walls + (_session.Setup.Pickups > 0 ? 4 : 0));
+
+    /// <summary>Whether this player's wall supply just grew, which only a pickup does.
+    /// Not while stepping back through the game, where nothing is happening now.</summary>
+    private bool Gained(int player) =>
+        _reviewPly is null && _session.LastMoveTookAWall && _session.LastMover == player;
 
     /// <summary>A dropdown's new value, or the fallback if the browser sent nonsense.</summary>
     private static int Number(ChangeEventArgs e, int fallback) =>
