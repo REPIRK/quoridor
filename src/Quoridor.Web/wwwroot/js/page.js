@@ -42,3 +42,47 @@ export async function copy(text) {
 export function isCoarsePointer() {
     return window.matchMedia('(hover: none)').matches;
 }
+
+// The keys the game answers to. Listed here as well as in the component because the
+// default has to be cancelled in the same tick as the press — Space scrolls the page,
+// and waiting for the round trip into .NET to find out whether we wanted it is a tick
+// too late. What each key does is decided on the other side; this only claims them.
+const claimed = new Set(['ArrowLeft', 'ArrowRight', ' ', '?', 'ctrl+z']);
+
+let keyOwner = null;
+
+/// Sends key presses to the component for as long as it is on the page. Listening on the
+/// document rather than an element means the shortcuts work without anything focused,
+/// which is the state the board is in for a player who has only been clicking.
+export function listenForKeys(owner) {
+    keyOwner = owner;
+    document.addEventListener('keydown', onKey);
+}
+
+export function stopListeningForKeys() {
+    document.removeEventListener('keydown', onKey);
+    keyOwner = null;
+}
+
+function onKey(event) {
+    if (!keyOwner || event.altKey || event.repeat) return;
+
+    // A key pressed into a field is the field's, not the game's. The invite code box is
+    // the one that matters: Ctrl+Z there should undo the typing.
+    const focused = document.activeElement;
+    if (focused && (focused.isContentEditable ||
+        ['INPUT', 'TEXTAREA', 'SELECT'].includes(focused.tagName))) {
+        return;
+    }
+
+    let name = event.key;
+
+    if (event.ctrlKey || event.metaKey) {
+        if (name.length !== 1) return;
+        name = 'ctrl+' + name.toLowerCase();
+    }
+
+    if (claimed.has(name)) event.preventDefault();
+
+    keyOwner.invokeMethodAsync('OnKey', name);
+}

@@ -49,6 +49,7 @@
                        ShowRoutes="_routes"
                        Flipped="@(_session.LocalSeat == 1)"
                        Holes="_session.Holes"
+                       Generation="_session.Setup.GetHashCode()"
                        Collected="@(_reviewPly is null ? _session.LastPickup : null)"
                        ConfirmMoves="_confirm"
                        LastMove="ShownLastMove"
@@ -74,6 +75,10 @@
             @if (note.Length > 0)
             {
                 <p class="hint">@note</p>
+            }
+            @if (_showHelp && Keys.Length > 0)
+            {
+                <p class="hint keys">@Keys</p>
             }
             @if (EngineLine is { } engine)
             {
@@ -542,6 +547,10 @@
         try
         {
             if (await LoadPage() is not { } page) return;
+
+            _keyOwner = DotNetObjectReference.Create(this);
+            await page.InvokeVoidAsync("listenForKeys", _keyOwner);
+
             if (!await page.InvokeAsync<bool>("isCoarsePointer")) return;
 
             _touch = true;
@@ -552,6 +561,63 @@
         {
             // Not worth a broken page if the check is unavailable.
         }
+    }
+
+    // ================================================================== keys ==
+
+    private DotNetObjectReference<Play>? _keyOwner;
+
+    /// <summary>
+    /// The keyboard, which the desktop build has always had and this one did not. The
+    /// map lives here rather than in the script so that what a key does sits beside the
+    /// thing it does it to; the script only claims the presses so the page does not
+    /// scroll out from under a player who pressed space.
+    /// </summary>
+    [JSInvokable]
+    public void OnKey(string key)
+    {
+        // While a game is being set up the board behind is not the player's yet.
+        if (_showSetup) return;
+
+        if (_showSettings)
+        {
+            // One way out of the panel, and it is the one everybody tries first.
+            if (key is "Escape") { _showSettings = false; StateHasChanged(); }
+            return;
+        }
+
+        switch (key)
+        {
+            case "ArrowLeft":
+                Review((_reviewPly ?? _session.Moves.Count) - 1);
+                break;
+
+            case "ArrowRight":
+                Review((_reviewPly ?? 0) + 1);
+                break;
+
+            // Back to the live position from anywhere in the game so far.
+            case "Escape" when _reviewPly is not null:
+                Review(null);
+                break;
+
+            case " ":
+                _routes = !_routes;
+                break;
+
+            case "?":
+                _showHelp = !_showHelp;
+                break;
+
+            case "ctrl+z" when _session.CanUndo && !_thinking:
+                Undo();
+                break;
+
+            default:
+                return;
+        }
+
+        StateHasChanged();
     }
 
     // ================================================================= review ==
@@ -637,6 +703,15 @@
         }
     }
 
+    /// <summary>
+    /// The keys, shown only with the help open. A shortcut nobody is told about is a
+    /// shortcut nobody uses, and a list of them standing over the board all game is the
+    /// furniture the help text was retired for being.
+    /// </summary>
+    private string Keys => _touch || _session.IsOver
+        ? string.Empty
+        : "Space draws both routes · ← → step through the game · Esc returns to it · Ctrl+Z undo";
+
     private string WinnerLabel
     {
         get
@@ -700,7 +775,7 @@
         ResetPlayState();
 
         // Taking the second seat means the engine opens.
-        if (_session.IsBotTurn) await RunEngine();
+        await OpenGame();
     }
 
     /// <summary>
@@ -730,7 +805,33 @@
         _session = new WebSession(_session.Mode, _session.Strength, _seat, setup, _session.Flavour);
         ResetPlayState();
 
-        if (_session.IsBotTurn) await RunEngine();
+        await OpenGame();
+    }
+
+    /// <summary>
+    /// How long a board takes to arrive: the gaps open, then the prizes are laid out.
+    /// The delays themselves are worked out in the board component, which keeps them
+    /// inside this window however many of each there are.
+    /// </summary>
+    private const int BoardEntranceMs = 330;
+
+    /// <summary>
+    /// Hands the game to the engine when the engine opens — but not before the board has
+    /// finished arriving. Every other move already waits for the pawn to land for the
+    /// same reason: the search runs on the only thread there is, and an entrance still
+    /// playing when it starts stops where it stands. At the start of a game that is a
+    /// board with its gaps not yet drawn, which is worse than a stopped pawn: it is a
+    /// board that is simply wrong until the search returns.
+    /// </summary>
+    private async Task OpenGame()
+    {
+        if (!_session.IsBotTurn) return;
+
+        // A plain board has nothing to arrive, so it has nothing to wait for.
+        if (_session.Setup.Holes > 0 || _session.Setup.Pickups > 0)
+            await Task.Delay(BoardEntranceMs);
+
+        await RunEngine();
     }
 
     private void Undo()
@@ -1141,6 +1242,22 @@
     public async ValueTask DisposeAsync()
     {
         await _net.DisposeAsync();
+
+        // The listener holds a reference back into here, so it goes first.
+        if (_keyOwner is not null)
+        {
+            try
+            {
+                if (_page is not null) await _page.InvokeVoidAsync("stopListeningForKeys");
+            }
+            catch (Exception)
+            {
+                // The page is going away; the listener goes with it.
+            }
+
+            _keyOwner.Dispose();
+            _keyOwner = null;
+        }
 
         foreach (IJSObjectReference? module in new[] { _sfx, _page })
         {

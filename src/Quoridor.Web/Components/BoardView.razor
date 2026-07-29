@@ -36,13 +36,21 @@
     @* Only the squares in the game are drawn. On a smaller board the ring around it
        would otherwise poke into view, since the frame is a clean margin around the
        playable square and the ring's squares start half a cell outside it. *@
+    @{ int opened = 0; }
     @for (int row = From; row <= Last; row++)
     {
         for (int col = From; col <= Last; col++)
         {
             bool hole = (Holes & Board.Bit(Board.Index(row, col))) != 0;
 
-            <rect class="cell @(hole ? "hole" : "")"
+            @* Only the gaps are keyed on the game. A plain square is the same square in
+               every game and rebuilding it would buy nothing; a gap is what this board
+               has that the last one did not, so it gets a fresh element and opens. They
+               open in turn rather than at once — a dozen things moving together read as
+               one flicker, and the point is to be able to count them. *@
+            <rect @key="(hole ? Generation : 0, row, col)"
+                  class="cell @(hole ? "hole" : "")"
+                  style="@(hole ? $"animation-delay: {Stagger(opened++, HoleCount, 0, 90)}ms" : null)"
                   x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell" rx="3" />
         }
     }
@@ -102,14 +110,19 @@
 
     @* Whatever is still lying on the board to be picked up. A spare wall is drawn as
        what it gives you; a free move as an arrow going round again. *@
-    @foreach ((int cell, bool isWall) in Pickups())
+    @{ int laid = 0; List<(int Cell, bool IsWall)> lying = Pickups().ToList(); }
+    @foreach ((int cell, bool isWall) in lying)
     {
         int cx = Centre(Board.ColOf(cell));
         int cy = Centre(Board.RowOf(cell));
 
         @* Positioned by the outer group so the inner one is free to be scaled about its
-           own origin — everything inside is drawn around (0,0). *@
-        <g transform="translate(@cx @cy)">
+           own origin — everything inside is drawn around (0,0). Keyed on the game so a
+           new board lays them out again; they follow the gaps rather than joining them,
+           since a prize is worth reading after the hazard. *@
+        <g @key="(Generation, cell)" class="pickup-holder"
+           style="animation-delay: @(Stagger(laid++, lying.Count, 60, 110))ms"
+           transform="translate(@cx @cy)">
             @if (isWall)
             {
                 <g class="pickup wall">
@@ -272,6 +285,27 @@
 
     /// <summary>Squares out of play, drawn as gaps rather than squares.</summary>
     [Parameter] public UInt128 Holes { get; set; }
+
+    /// <summary>
+    /// Counts the games, so a new one can be told from a move within one. A rolled board
+    /// is a different board every time and the things that make it different — the gaps
+    /// and the prizes — are worth a moment to read before the clock starts. Changing this
+    /// rebuilds the board's elements, which is what lets their entrance play again.
+    /// </summary>
+    [Parameter] public int Generation { get; set; }
+
+    private int HoleCount => (int)UInt128.PopCount(Holes);
+
+    /// <summary>
+    /// Where the nth of <paramref name="count"/> things falls inside a fixed window,
+    /// rather than a step each. The window has to stay put however many there are: this
+    /// build has one thread and the search takes it as soon as the pause after a move
+    /// runs out, so an entrance still going when that happens stops dead — and stopped
+    /// at the start of one of these is stopped at nothing visible. Ten pickups and two
+    /// gaps therefore arrive in the same time two pickups do, just closer together.
+    /// </summary>
+    private static int Stagger(int index, int count, int start, int window) =>
+        count <= 1 ? start : start + window * index / (count - 1);
 
     /// <summary>The pickup taken by the last move, if it took one, for its send-off.</summary>
     [Parameter] public (int Cell, bool IsWall)? Collected { get; set; }

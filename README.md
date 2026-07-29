@@ -59,6 +59,11 @@ is actually about.
 | `←` `→` | step back through the game |
 | `Ctrl+Z` undo · `F2` restart · `Esc` menu · `Ctrl+T` theme · `F11` fullscreen | |
 
+The browser build answers to the same keys where it has the same thing to do: `Space`,
+`←` `→`, `Esc` to return to the live position, and `Ctrl+Z`. They are listed beside the
+board under the `?`, which is also what brings back the line explaining how to move once
+it has retired itself.
+
 ## Running it
 
 ```bash
