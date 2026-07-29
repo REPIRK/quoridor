@@ -59,9 +59,22 @@
         </div>
 
         <aside class="panel">
-            <h2>Status</h2>
+            @* The instructions teach themselves in two moves and then become furniture,
+               so they retire on their own. The mark brings them back for anyone who
+               wants them, and is the only thing left in their place. *@
+            <div class="heading">
+                <h2>Status</h2>
+                <button class="ask @(_showHelp ? "on" : "")" title="How to move"
+                        @onclick="() => _showHelp = !_showHelp">?</button>
+            </div>
+
             <p class="status">@Status@(_thinking ? "…" : "")</p>
-            <p class="hint">@(_preview ?? Hint)</p>
+
+            @{ string note = _preview ?? Hint; }
+            @if (note.Length > 0)
+            {
+                <p class="hint">@note</p>
+            }
             @if (EngineLine is { } engine)
             {
                 <p class="engine">@engine</p>
@@ -420,6 +433,7 @@
     private bool _routes;
     private bool _confirm;
     private bool _touch;
+    private bool _showHelp;
     private bool _sound = true;
     private bool _music;
     private int _soundVolume = 70;
@@ -611,6 +625,11 @@
 
             if (_session.State.WallsOf(_session.State.SideToMove) == 0)
                 return "No walls left — it is a straight race now.";
+
+            // How to move is worth saying once. After a couple of moves it has been
+            // learned by doing, and a line that never changes is a line you stop
+            // reading — so it goes, and the mark by the heading brings it back.
+            if (!_showHelp && _session.Moves.Count > 2) return string.Empty;
 
             return _touch
                 ? "Tap a square to step, or the gap between squares for a wall. Tap again to confirm."
