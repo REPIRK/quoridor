@@ -477,7 +477,11 @@
 
     private GameSetup BuildSetup(GameFlavour flavour)
     {
-        int seed = Environment.TickCount;
+        // The seed is drawn rather than read off the clock. The clock only ticks every
+        // few milliseconds, so a rematch taken straight away used to be handed the same
+        // number and rebuilt the very board it was asked to replace; and a seed that
+        // climbs steadily makes the boards it produces cycle instead of scatter.
+        int seed = Random.Shared.Next();
 
         if (flavour == GameFlavour.Standard) return GameSetup.Standard;
 
@@ -493,17 +497,7 @@
             };
         }
 
-        var roll = new Random(seed);
-        int size = roll.Next(4) == 0 ? 7 : Board.Size;
-
-        return new GameSetup
-        {
-            Size = size,
-            Walls = roll.Next(4, size == 7 ? 9 : 13),
-            Holes = new[] { 0, 0, 2, 4, 6 }[roll.Next(5)],
-            Pickups = new[] { 0, 4, 4, 6, 10 }[roll.Next(5)],
-            Seed = seed,
-        };
+        return GameSetup.Roll(seed);
     }
 
     /// <summary>A move chosen during the opponent's turn, played the moment ours starts.</summary>

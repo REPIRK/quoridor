@@ -57,6 +57,64 @@ public sealed record GameSetup
 
     public static GameSetup Standard { get; } = new();
 
+    /// <summary>
+    /// A game with everything rolled. Lives here rather than in either menu because both
+    /// builds offer it and a roll that differed between them would not be the same game.
+    ///
+    /// The size is drawn first and the rest is scaled to it. The numbers that make a
+    /// lively nine make a five unplayable: a five has a quarter of the wall slots, and
+    /// its two back rows — which no hole may take, or a player could be left with nowhere
+    /// to arrive — are already half of its squares.
+    /// </summary>
+    public static GameSetup Roll(int seed)
+    {
+        var random = new Random(seed);
+
+        // Nine is the game as people know it and stays the common draw. Five is over in
+        // a dozen moves, which is a change of pace rather than an equal third of them.
+        int size = random.Next(8) switch
+        {
+            0 => 5,
+            1 or 2 => 7,
+            _ => Board.Size,
+        };
+
+        int walls = size switch
+        {
+            5 => random.Next(1, 5),
+            7 => random.Next(3, 9),
+            _ => random.Next(4, 13),
+        };
+
+        // Nothing at all is a common roll for both: a board that is merely a different
+        // shape is a game in its own right, and every roll carrying a gimmick would make
+        // the plain one feel like the thing that went wrong.
+        int holes = Draw(random, size switch
+        {
+            5 => new[] { 0, 0, 0, 2, 2 },
+            7 => new[] { 0, 0, 2, 4, 4 },
+            _ => new[] { 0, 0, 2, 4, 6 },
+        });
+
+        int pickups = Draw(random, size switch
+        {
+            5 => new[] { 0, 2, 2, 4, 4 },
+            7 => new[] { 0, 4, 4, 6, 6 },
+            _ => new[] { 0, 4, 4, 6, 10 },
+        });
+
+        return new GameSetup
+        {
+            Size = size,
+            Walls = walls,
+            Holes = holes,
+            Pickups = pickups,
+            Seed = seed,
+        };
+    }
+
+    private static int Draw(Random random, int[] table) => table[random.Next(table.Length)];
+
     /// <summary>The numbers, for sending over a link so both sides build the same board.</summary>
     public string Encode() => $"{Size}|{Walls}|{Holes}|{Pickups}|{Seed}";
 
@@ -88,7 +146,7 @@ public sealed record GameSetup
         var parts = new List<string>(3);
 
         if (Size != Board.Size) parts.Add($"{Size}×{Size}");
-        if (Walls != Board.WallsPerPlayer) parts.Add($"{Walls} walls");
+        if (Walls != Board.WallsPerPlayer) parts.Add(Walls == 1 ? "1 wall" : $"{Walls} walls");
         if (Holes > 0) parts.Add($"{Holes} holes");
         if (Pickups > 0) parts.Add($"{Pickups} pickups");
 

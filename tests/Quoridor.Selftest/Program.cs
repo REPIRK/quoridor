@@ -25,6 +25,7 @@ internal static class Program
         Run("hash is order independent", HashConsistency);
         Run("bot games terminate legally", BotPlayouts);
         Run("alternative boards, holes and pickups", BlockedSquares);
+        Run("a rolled game reaches every board and is always playable", RolledBoards);
         Run("pickups do what they say", PickupEffects);
         Run("wall-graph fast path never hides a block", WallGraphFastPath);
         Run("progress test never hides a change in distance", ProgressShortcut);
@@ -279,6 +280,12 @@ internal static class Program
             new() { Size = 7, Walls = 6, Holes = 4, Seed = 14 },
             new() { Pickups = 6, Seed = 15 },
             new() { Size = 7, Walls = 6, Holes = 4, Pickups = 4, Seed = 16 },
+
+            // The smallest board, which a rolled game can now land on. Everything is
+            // tighter here: two rows of five are already the goal rows, so a hole or a
+            // pickup has fifteen squares to go on and a wall has a quarter of the slots.
+            new() { Size = 5, Walls = 2, Seed = 17 },
+            new() { Size = 5, Walls = 3, Holes = 2, Pickups = 4, Seed = 18 },
         };
 
         foreach (GameSetup setup in setups)
@@ -440,6 +447,54 @@ internal static class Program
             // play, not a broken mechanic. The mechanic itself is checked below, where it
             // can be made to happen rather than waited for.
             _ = sawPickup;
+        }
+    }
+
+    /// <summary>
+    /// The rolled game. Every board the menus offer has to be reachable by the roll —
+    /// 5×5 was offered under Custom for a while before the roll could produce it, and
+    /// nothing failed, it simply never came up.
+    ///
+    /// And the numbers rolled alongside the size have to suit it. A five has a quarter
+    /// of the wall slots a nine has and its two back rows are half its squares, so the
+    /// generous end of the nine's range would build boards that fall back to a plain one
+    /// — which is the same silence as before, one layer down. Both are checked here.
+    /// </summary>
+    private static void RolledBoards()
+    {
+        var seen = new Dictionary<int, int>();
+
+        for (int seed = 0; seed < 600; seed++)
+        {
+            GameSetup setup = GameSetup.Roll(seed);
+            string name = $"seed {seed} ({setup.Describe()})";
+
+            Check(setup.Size is 5 or 7 or Board.Size, $"{name}: a size the board supports");
+            seen[setup.Size] = seen.GetValueOrDefault(setup.Size) + 1;
+
+            BuiltBoard built = setup.Build();
+            GameState start = built.State;
+
+            Check(PathFinder.HasPath(start, 0) && PathFinder.HasPath(start, 1),
+                $"{name}: both players start with a route");
+
+            Check(start.WallsOf(0) == setup.Walls && start.WallsOf(1) == setup.Walls,
+                $"{name}: the wall supply survived the build");
+
+            // The build gives up and returns a plain board when the numbers themselves
+            // cannot be placed. That is a safety net, not an outcome a roll may reach:
+            // asking for holes and getting none means the roll was beyond the board.
+            Check(setup.Holes == 0 || built.Holes != 0,
+                $"{name}: the holes asked for actually fit");
+
+            Check(setup.Pickups == 0 || (start.WallPickups | start.SkipPickups) != 0,
+                $"{name}: the pickups asked for actually fit");
+        }
+
+        foreach (int size in new[] { 5, 7, Board.Size })
+        {
+            Check(seen.GetValueOrDefault(size) > 0, $"{size}×{size} comes up in a rolled game");
+            Report($"{size}×{size}: {seen.GetValueOrDefault(size)} of 600 rolls");
         }
     }
 

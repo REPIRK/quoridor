@@ -145,7 +145,10 @@ public partial class MenuView : UserControl
     /// </summary>
     private GameSetup SelectedBoard()
     {
-        int seed = Environment.TickCount;
+        // Drawn, not read off the clock: the clock only ticks every few milliseconds, so
+        // two games started in quick succession were handed the same number and built the
+        // same board, and a seed that climbs steadily makes them cycle rather than scatter.
+        int seed = Random.Shared.Next();
 
         switch (SelectedFlavour())
         {
@@ -164,17 +167,7 @@ public partial class MenuView : UserControl
                 };
 
             case GameFlavour.Random:
-                var roll = new Random(seed);
-                int size = roll.Next(4) == 0 ? 7 : Board.Size;
-
-                return new GameSetup
-                {
-                    Size = size,
-                    Walls = roll.Next(4, size == 7 ? 9 : 13),
-                    Holes = new[] { 0, 0, 2, 4, 6 }[roll.Next(5)],
-                    Pickups = new[] { 0, 4, 4, 6, 10 }[roll.Next(5)],
-                    Seed = seed,
-                };
+                return GameSetup.Roll(seed);
 
             default:
                 return GameSetup.Standard;
