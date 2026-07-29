@@ -347,34 +347,40 @@
                     </div>
                 }
 
-                <p class="fine">
-                    @if (_mode == WebMode.Online)
-                    {
-                        <text>
-                            The two browsers talk directly to each other over WebRTC — there is no
-                            server of ours in the middle. A free public service is used once, only to
-                            introduce them; after that the moves never touch a third party. Strict
-                            networks sometimes block the direct connection.
-                        </text>
-                    }
-                    else
-                    {
-                        <text>
-                            Click a square to step, or hover the groove between two squares to place a
-                            wall. Hard runs a real alpha-beta search — in a browser it gets one thread,
-                            so it thinks a little less deeply than the desktop build.
-                        </text>
-                    }
-                </p>
+                @* The prose is welcome on the plain screen and in the way once every knob
+                   is open: with Custom showing, it is what pushes the button that actually
+                   starts the game below the fold. *@
+                @if (_flavour != GameFlavour.Custom)
+                {
+                    <p class="fine">
+                        @if (_mode == WebMode.Online)
+                        {
+                            <text>
+                                The two browsers talk directly to each other over WebRTC — there is no
+                                server of ours in the middle. A free public service is used once, only to
+                                introduce them; after that the moves never touch a third party. Strict
+                                networks sometimes block the direct connection.
+                            </text>
+                        }
+                        else
+                        {
+                            <text>
+                                Click a square to step, or hover the groove between two squares to place a
+                                wall. Hard runs a real alpha-beta search — in a browser it gets one thread,
+                                so it thinks a little less deeply than the desktop build.
+                            </text>
+                        }
+                    </p>
 
-                <p class="fine">
-                    Prefer it on your desktop?
-                    <a href="https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe">
-                        Download the Windows app
-                    </a>
-                    — it adds clocks, engine against engine, game review and play over your
-                    own network.
-                </p>
+                    <p class="fine">
+                        Prefer it on your desktop?
+                        <a href="https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe">
+                            Download the Windows app
+                        </a>
+                        — it adds clocks, engine against engine, game review and play over your
+                        own network.
+                    </p>
+                }
 
                 @if (_mode != WebMode.Online)
                 {

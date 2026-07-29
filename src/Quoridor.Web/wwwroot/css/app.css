@@ -352,7 +352,7 @@ body:has(.overlay) { overflow: hidden; }
 
 .setup .lead { color: var(--muted); margin: 0 0 24px; }
 
-.setup .row { display: flex; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.setup .row { display: flex; align-items: center; margin-bottom: 11px; flex-wrap: wrap; }
 
 .setup .label {
     font-family: Georgia, "Times New Roman", serif;
