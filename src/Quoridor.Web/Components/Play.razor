@@ -253,7 +253,13 @@
                         </div>
                     }
 
-                    @if (_net.State == NetState.Idle)
+                    @* Still shown while the link is out. The board is not read until the
+                       other player actually connects, so these stay live and the host can
+                       keep adjusting while they wait — and taking them away the instant
+                       the button was pressed made the card collapse and looked like the
+                       settings had been thrown away. Only the player joining loses them,
+                       because for them the board is the host's to choose. *@
+                    @if (_net.State != NetState.Joining)
                     {
                         <div class="row">
                             <span class="label">Board</span>

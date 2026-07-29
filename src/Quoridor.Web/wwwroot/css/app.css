@@ -357,8 +357,12 @@ body:has(.overlay) { overflow: hidden; }
     border: 1px solid var(--line);
     border-radius: 5px;
     padding: 34px 36px;
-    max-width: 560px;
     text-align: center;
+
+    /* The card sizes to its content, but the overlay centring will not shrink it, so
+       without the second term a long row leaves it wider than a phone and the whole
+       card scrolls sideways under the dialog. */
+    max-width: min(560px, 100%);
 }
 
 .setup { text-align: left; }
