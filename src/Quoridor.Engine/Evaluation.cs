@@ -53,7 +53,64 @@ public static class Evaluation
         if (verdict > 0)
             score += ArrivesFirst(state, player, myDistance, theirDistance) ? verdict : -verdict;
 
+        if (weights.Pickup > 0 && state.HasPickups)
+            score += PickupEdge(state, player, weights);
+
         return score;
+    }
+
+    /// <summary>
+    /// What the pickups still on the board are worth to each side, by how near they are.
+    ///
+    /// Without this the engine only ever finds one by searching onto it, so anything
+    /// more than a few plies away is invisible and it walks past prizes a person plans
+    /// a route around. Nearness is measured as plain distance ignoring walls: a real
+    /// one would want a flood fill from each pawn, which would double what an
+    /// evaluation costs, and the point here is only to lean the search the right way —
+    /// the search itself works out whether the trip is actually possible.
+    /// </summary>
+    private static int PickupEdge(in GameState state, int player, EvaluationWeights weights)
+    {
+        // How far a pickup can be and still pull at all. Beyond this the trip costs
+        // more than anything on the board is worth.
+        const int Reach = 5;
+
+        int total = 0;
+
+        for (int kind = 0; kind < 2; kind++)
+        {
+            UInt128 remaining = kind == 0 ? state.WallPickups : state.SkipPickups;
+            if (remaining == 0) continue;
+
+            // A spare wall is two walls; a free move is a whole move, which is worth
+            // rather more than the step it buys because the other player loses theirs.
+            int worth = kind == 0
+                ? weights.Wall * GameState.WallsPerPickup
+                : weights.Path * 2;
+
+            while (remaining != 0)
+            {
+                int cell = Board.LowestBit(remaining);
+                remaining &= remaining - UInt128.One;
+
+                total += Pull(state, player, cell, worth, weights) -
+                         Pull(state, player ^ 1, cell, worth, weights);
+            }
+        }
+
+        return total;
+
+        static int Pull(in GameState state, int who, int cell, int worth, EvaluationWeights weights)
+        {
+            int pawn = state.PawnOf(who);
+
+            int steps = Math.Abs(Board.RowOf(pawn) - Board.RowOf(cell)) +
+                        Math.Abs(Board.ColOf(pawn) - Board.ColOf(cell));
+
+            if (steps >= Reach) return 0;
+
+            return worth * weights.Pickup * (Reach - steps) / (Reach * 100);
+        }
     }
 
     /// <summary>

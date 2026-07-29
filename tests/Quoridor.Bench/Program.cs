@@ -29,6 +29,7 @@ internal static class Program
         if (mode is "ablate") Ablate();
         if (mode is "race") SweepRaceVerdict();
         if (mode is "duel") Duel();
+        if (mode is "pickups") PickupDuel();
         if (mode is "smpduel") ThreadDuel();
 
         return 0;
@@ -75,6 +76,34 @@ internal static class Program
         Play("history off  ", () => Make(EngineOptions.Default with { UseHistoryOrdering = false }),
              "current default", () => Make(),
              games);
+
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// How much a pickup should pull, decided the only honest way: the same engine at
+    /// the same depth, on boards with pickups, with the term on against it off.
+    /// </summary>
+    private static void PickupDuel()
+    {
+        const int games = 40;
+        const int depth = 5;
+        var generous = TimeSpan.FromSeconds(30);
+
+        Console.WriteLine($"Pickup boards, equal depth {depth}, {games} games each");
+
+        foreach (int value in new[] { 12, 25, 40 })
+        {
+            EvaluationWeights aware = EvaluationWeights.Default with { Pickup = value };
+            EvaluationWeights blind = EvaluationWeights.Default with { Pickup = 0 };
+
+            Play($"pickup={value,-3}",
+                 () => new SearchAgent(maxDepth: depth, moveTime: generous, threads: 1, weights: aware),
+                 "blind",
+                 () => new SearchAgent(maxDepth: depth, moveTime: generous, threads: 1, weights: blind),
+                 games,
+                 (random, game) => PickupOpening(random, seed: 500 + game, plies: 4));
+        }
 
         Console.WriteLine();
     }
@@ -283,7 +312,16 @@ internal static class Program
         Func<IQuoridorAgent> makeA,
         string nameB,
         Func<IQuoridorAgent> makeB,
-        int games)
+        int games) =>
+        Play(nameA, makeA, nameB, makeB, games, (random, _) => RandomOpening(random, plies: 4));
+
+    private static void Play(
+        string nameA,
+        Func<IQuoridorAgent> makeA,
+        string nameB,
+        Func<IQuoridorAgent> makeB,
+        int games,
+        Func<Random, int, GameState> opening)
     {
         int winsA = 0;
         int winsB = 0;
@@ -299,7 +337,7 @@ internal static class Program
             agents[playerA] = makeA();
             agents[playerA ^ 1] = makeB();
 
-            GameState state = RandomOpening(new Random(1000 + game), plies: 4);
+            GameState state = opening(new Random(1000 + game), game);
 
             var history = new List<ulong>();
 
@@ -386,6 +424,20 @@ internal static class Program
     private static GameState RandomOpening(Random random, int plies)
     {
         GameState state = GameState.CreateInitial();
+
+        for (int i = 0; i < plies; i++)
+        {
+            var moves = state.LegalMoves();
+            state.Apply(moves[random.Next(moves.Count)]);
+        }
+
+        return state;
+    }
+
+    /// <summary>A board with pickups on it, opened a few random plies like the others.</summary>
+    private static GameState PickupOpening(Random random, int seed, int plies)
+    {
+        GameState state = new GameSetup { Pickups = 8, Seed = seed }.Build().State;
 
         for (int i = 0; i < plies; i++)
         {

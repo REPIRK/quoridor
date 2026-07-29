@@ -112,6 +112,16 @@ Pickups are two more bitboards, cleared as they are taken and folded into the ha
 cost the standard game nothing measurable — the position is copied per node either way,
 and it is still a handful of vector moves.
 
+The engine used to be blind to them: it found one only by searching onto it, so anything
+further out was invisible and it walked past prizes a person plans a route around. The
+evaluation now counts what the pickups on the board are worth to whoever is nearer, using
+plain distance — a true one would want a flood fill from each pawn and double what an
+evaluation costs, and the term only has to lean the search the right way. How hard to lean
+was settled by duel rather than taste: at equal depth on pickup boards, 25 per cent of a
+pickup's worth beat blind 41:23 over 64 games, while 100 per cent lost 11:13. Overpriced,
+it stops racing and goes shopping. A standard board pays nothing: the term is skipped
+before any arithmetic when there are no pickups.
+
 ### The engine
 
 Alpha-beta with a principal variation search: transposition table, killers, history,

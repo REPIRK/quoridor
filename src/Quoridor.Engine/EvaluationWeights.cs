@@ -9,7 +9,8 @@ public sealed record EvaluationWeights(
     int Path,
     int Wall,
     int RaceVerdict,
-    int WallUncertainty)
+    int WallUncertainty,
+    int Pickup = 0)
 {
     /// <summary>One step of route. Everything else is priced against this.</summary>
     public const int Step = 100;
@@ -34,5 +35,14 @@ public sealed record EvaluationWeights(
         RaceVerdict: 220,
 
         // Each wall still in play is one more thing that can overturn that verdict.
-        WallUncertainty: 14);
+        WallUncertainty: 14,
+
+        // How much of a pickup's worth to count for being near it, as a percentage.
+        // Zero means the engine only ever finds one by searching onto it, which is what
+        // it did before and why it walked past prizes a person plans a route around.
+        //
+        // A lean, not a lunge. Measured on pickup boards at equal depth: 25 beat blind
+        // 16:8 and then 25:15 — 41:23 over 64 games — while 50 was a wash at 13:11 and
+        // 100 lost 11:13. Priced too high it stops racing and goes shopping.
+        Pickup: 25);
 }
