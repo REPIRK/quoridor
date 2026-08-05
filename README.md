@@ -36,12 +36,19 @@ rematch. Setting a game up asks one question first:
 
 Custom opens up the board itself: **7×7** and **5×5** as well as the usual 9×9, a wall
 supply from none to twenty, **holes** — squares taken out of play, scattered at random —
-and **pickups**, which sit on squares waiting to be stepped on. A pickup is either a
-spare wall or a free move that skips your opponent's turn.
+**pickups**, which sit on squares waiting to be stepped on, and **portals**. A pickup is
+either a spare wall or a free move that skips your opponent's turn.
 
-Holes and pickups are always placed in pairs that map onto each other under a half turn
-of the board, the same turn that maps one player's half onto the other's. So a random
-board is still a fair one: whatever the roll does to your route, it does to theirs.
+A portal is a pair of linked squares. Stepping between them is one move like any other
+and it passes the turn, which is the whole of the rule: no charge, no cooldown, and it
+never runs out. It is worth what the trip to reach it costs, so the skill in it is
+deciding whose route it shortens more — and a wall on the approach adds two to a journey
+that was about to be short. There are at most two pairs, never on a goal row or the row
+beside one, and never on a 5×5, where two of the five rows are already goal rows.
+
+Holes, pickups and portals are always placed in pairs that map onto each other under a
+half turn of the board, the same turn that maps one player's half onto the other's. So a
+random board is still a fair one: whatever the roll does to your route, it does to theirs.
 
 There is no 11×11. The core is compiled around a nine-wide grid, and a smaller game is
 played on a centred square of it — which costs nothing and is why 7×7 and 5×5 are here.
@@ -64,13 +71,23 @@ The browser build answers to the same keys where it has the same thing to do: `S
 board under the `?`, which is also what brings back the line explaining how to move once
 it has retired itself.
 
+It can also be played without a mouse at all. `Tab` reaches the board, the arrow keys
+move a cursor, `Enter` plays the square under it, `W` goes to the grooves to place a wall
+and `R` turns it. The cursor moves in the directions you see rather than the board's own,
+so it does not invert when the board turns around for the second seat.
+
+Two looks are offered under Settings. **Flat** is the default and is the plainer of the
+two. **Carved** lights the board from one corner and gives the pieces a top and a side,
+so a wall that has been played is a solid thing and a wall you are only pointing at is a
+flat bar lying in the groove. It is the same board and the same markup either way.
+
 ## Running it
 
 ```bash
 dotnet run --project src/Quoridor.App -c Release      # the Windows app
 dotnet run --project src/Quoridor.Web -c Release      # the browser build, on localhost
 dotnet run --project tests/Quoridor.Selftest -c Release   # rules and engine checks
-dotnet run --project tests/Quoridor.Bench -c Release -- depth|fixed|duel|ablate
+dotnet run --project tests/Quoridor.Bench -c Release -- depth|ladder|smp|fixed|trace|tune|ablate|race|duel|pickups|holes|portals|smpduel
 ```
 
 A single self-contained `Quoridor.exe` that needs no .NET installed:
