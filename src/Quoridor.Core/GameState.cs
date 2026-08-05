@@ -3,10 +3,20 @@ using System.Runtime.CompilerServices;
 namespace Quoridor.Core;
 
 /// <summary>
-/// A complete Quoridor position. Deliberately a mutable struct of 160 bytes: the
-/// search copies it (<c>var next = state; next.Apply(move);</c>) instead of
-/// implementing undo, which removes a whole class of bugs and still costs less
-/// than a cache line pair per node.
+/// A complete Quoridor position. Deliberately a mutable struct: the search copies it
+/// (<c>var next = state; next.Apply(move);</c>) instead of implementing undo, which
+/// removes a whole class of bugs — no unmake to get wrong, and no path by which a
+/// mis-ordered undo can leave a corrupted position behind for the rest of the search.
+///
+/// The copy is not free and this comment used to claim it was. Measured,
+/// <c>Unsafe.SizeOf&lt;GameState&gt;()</c> is 160 bytes: two and a half 64-byte cache
+/// lines, not under two. What makes it worth paying is that 160 bytes is ten branch-free
+/// vector moves the compiler emits inline, against an unmake path that would have to
+/// undo a wall, two blocked-direction bitboards, a pickup, a hash and a turn in the right
+/// order every time. With one copy at every node, a single-threaded fixed-depth search
+/// over the five bench boards still measured about 1,030 ns per node — and the whole of
+/// that node is a move generation, two flood fills per candidate wall and an evaluation,
+/// with the copy a small part of it.
 ///
 /// The four <c>Blocked*</c> bitboards answer "may a pawn on this cell step in
 /// this direction" in one AND. Board edges are baked into them at construction,
@@ -473,6 +483,35 @@ public struct GameState
             ? IsPawnMoveLegal(move.Row, move.Col)
             : IsWallLegal(move.Kind, move.Row, move.Col);
 
+    /// <summary>
+    /// Whether the side to move has anything at all to play. The pawn steps are asked for
+    /// first because they answer yes in every position but a handful, and a wall search is
+    /// eighty-odd slots of <see cref="IsWallLegal"/> — two flood fills each. So the
+    /// expensive half only ever runs in the position it exists for, one where the pawn is
+    /// boxed in, and that position is the one <see cref="Apply"/> turns into a forfeited
+    /// turn.
+    /// </summary>
+    public readonly bool HasLegalMove()
+    {
+        Span<Move> buffer = stackalloc Move[10];
+        if (GeneratePawnMoves(buffer) > 0) return true;
+
+        // A wall in hand is not a move: the board can be full, and on a boxed-in position
+        // it very nearly is. Ask.
+        if (WallsOf(SideToMove) == 0) return false;
+
+        for (int row = 0; row < Board.SlotSize; row++)
+        {
+            for (int col = 0; col < Board.SlotSize; col++)
+            {
+                if (IsWallLegal(MoveKind.HorizontalWall, row, col)) return true;
+                if (IsWallLegal(MoveKind.VerticalWall, row, col)) return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Every legal move for the side to move, pawn steps first.</summary>
     public readonly List<Move> LegalMoves()
     {
@@ -548,6 +587,122 @@ public struct GameState
         }
 
         Ply++;
+
+        ForfeitTurnIfNothingToPlay();
+    }
+
+    /// <summary>
+    /// A player who has no legal move forfeits the turn, and it comes straight back to
+    /// the player who just moved.
+    ///
+    /// ---- why the rules need this at all ----
+    ///
+    /// Before portals, "the side to move always has a move" was a theorem rather than a
+    /// rule, and <see cref="IsWallLegal"/> was its proof. If a mover had no pawn move then
+    /// every direction out of their square was walled or led to the opponent with the jump
+    /// and both side steps closed, so the flood fill's component was exactly the two pawn
+    /// squares — and two adjacent squares cannot hold both goal rows, which are at least
+    /// two rows apart on every board size. One of the two <c>HasPath</c> calls therefore
+    /// failed and the wall was refused. A portal is a fifth edge out of a square, and it
+    /// breaks that proof in two independent places. Both were reproduced before this was
+    /// written, on positions built only from moves <c>IsLegal</c> accepted at the time:
+    ///
+    ///   pawns b8/b7 with a portal mouth under the opponent on b7, then H c7, V a8, V b8,
+    ///   H b9 — the mover's own route leaves the pocket through the opponent's mouth, a
+    ///   square no pawn may ever stand on. Erase the portal and both routes are gone.
+    ///
+    ///   pawns b8/b9 with a portal mouth under the opponent on b9, which is the mover's
+    ///   goal row, then V a9, V b9, H b8 — here the mover's route is honest by the
+    ///   ordinary rule that pawns are transparent, because the goal row is one step away
+    ///   and merely occupied. It is the *opponent* who would have been sealed in, and
+    ///   their own portal is what saves them. Erase the portal and HasPath(1) is false.
+    ///
+    /// In both, both HasPath calls return true, the wall is accepted, and once the mover's
+    /// wall supply drains <c>LegalMoves()</c> is empty and every agent throws.
+    ///
+    /// ---- why not make the liveness test in IsWallLegal a real one ----
+    ///
+    /// Because the second family says it cannot be done there. "A route through a square
+    /// the mover cannot enter is not a route" repairs the first family — suppressing a
+    /// portal mouth the opponent is standing on costs one AND per fill, not per step, so
+    /// the price would have been acceptable — and does nothing whatever for the second,
+    /// where the mover's route is the one the standard rule already blesses. Repairing
+    /// that one means making pawns opaque to the fill, which is a different game: the
+    /// no-sealing rule ignores pawns precisely because pawns move, and an opaque fill
+    /// would also hand the evaluation distances that are wrong by however long the
+    /// opponent stands in a doorway.
+    ///
+    /// And a liveness test on walls is not closed even against family one, because a
+    /// wall is not the only way in. A pawn that arrives on a square by portal can be the
+    /// body that seals the opponent's last exit, so the test would have to cover pawn
+    /// moves too — and forbidding a pawn move can remove the mover's own last move, at
+    /// which point the rule is asking a player with one legal move not to play it.
+    ///
+    /// ---- what this costs instead ----
+    ///
+    /// Nothing on the flood fill, which is untouched: wall legality still runs the same
+    /// two fills for each of the ~128 candidates at every node. The cost is one
+    /// <see cref="GeneratePawnMoves"/> per <c>Apply</c>, against a node that already pays
+    /// two 81-cell distance fills in the candidate generator. Measured over five fixed
+    /// boards at depth 7, 178,808 nodes: 1,056 and 1,060 ns/node over two runs before,
+    /// 1,057 and 1,061 after — inside the run-to-run spread, and the node counts are
+    /// identical to the last node, because no forfeit happens in any of them.
+    ///
+    /// ---- and why it is invisible above Core ----
+    ///
+    /// A forfeit is deliberately not a Move. There is no <c>MoveKind.Pass</c>, so nothing
+    /// changes in <see cref="Notation"/>, on the network wire, in the move list either
+    /// front end renders, or in the search's negation — <c>SearchEngine.Child</c> already
+    /// declines to negate a child whose side to move did not change, because a free move
+    /// picked up off the board does exactly that, and a forfeited turn is that same shape
+    /// seen from the other side. Both sessions already compute <c>LastMoveWentAgain</c>
+    /// from <c>SideToMove == mover</c> for the same reason. Zobrist needs nothing new: the
+    /// turn is the only thing that moves, and it is already hashed.
+    ///
+    /// It cannot loop, because two forfeits in a row are unreachable — and this is the
+    /// part of the rule most worth reading before changing anything, because it is the
+    /// only thing standing between a forfeit and a deadlock. A pawn with no step has every
+    /// one of its four neighbours blocked or occupied by the opponent, and if it stands on
+    /// a mouth then the far mouth must be the opponent too, or the portal step is a move.
+    /// So there are exactly three ways both pawns can be stuck at once, and all three are
+    /// already impossible:
+    ///
+    ///   * Each alone in its own component. Then <c>HasPath</c> needs that one square to
+    ///     be the player's goal row, which is a won game, so the wall or hole that closed
+    ///     the second one would have been refused.
+    ///
+    ///   * The two adjacent, the component being just the two squares. Neither can be a
+    ///     mouth, since a square and its half-turn image are never neighbours on a grid of
+    ///     odd cell count. Two adjacent squares cannot hold both goal rows, which are four
+    ///     apart on the smallest board this plays, so again one <c>HasPath</c> fails.
+    ///
+    ///   * The two standing on the two mouths of one portal, not adjacent, the portal
+    ///     being the whole of the component. This is the one the other two arguments do
+    ///     not cover, and the only thing that rules it out is where mouths are allowed to
+    ///     be. The two mouths are a half-turn pair, so if either is on a goal row the other
+    ///     is on the opposite goal row, both <c>HasPath</c> calls pass, and the position is
+    ///     legal with nobody able to move. <c>GameSetup.PlacePortals</c> keeps every mouth
+    ///     off the goal rows and the rows beside them, which is what makes it unreachable
+    ///     — a rule written for the balance of the game and now load-bearing for its
+    ///     termination. The selftest asserts it ("avoids the goal rows and the rows beside
+    ///     them"); anything that relaxes it, or any caller that reaches
+    ///     <see cref="PlacePortal"/> directly with a goal-row square, brings this shape
+    ///     back. Verified by construction over 480 generated boards and every adjacent,
+    ///     portal-paired and isolated placement on each — no survivors — and by building
+    ///     the goal-row mouth by hand, where both pawns really do end up with nothing.
+    ///
+    /// So the player who receives a forfeited turn always has something to play, and
+    /// <see cref="Ply"/> keeps advancing. A game can still shuffle forever, exactly as it
+    /// could before, and repetition is scored against the shuffler by the search.
+    /// </summary>
+    private void ForfeitTurnIfNothingToPlay()
+    {
+        // A finished game is never handed on: reaching the goal row ends it, and the
+        // search reads "the side to move is the loser" out of that.
+        if (IsGameOver || HasLegalMove()) return;
+
+        SideToMove = (byte)(SideToMove ^ 1);
+        Hash ^= Zobrist.SideToMove;
     }
 
     /// <summary>

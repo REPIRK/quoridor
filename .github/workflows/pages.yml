@@ -26,6 +26,16 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # Nothing reaches the public site that has not passed the rules and engine checks,
+      # which is the rule release.yml has always followed for the .exe. This runs here
+      # rather than as a dependency on the build workflow because a `workflow_run`
+      # trigger reads its definition from the default branch and hands the job a commit
+      # it then has to go and check out by hand — two moving parts in place of one step.
+      # It also runs before the toolchain and the publish rather than after: a failure
+      # then costs seconds instead of the several minutes AOT takes.
+      - name: Rules and engine checks
+        run: dotnet run --project tests/Quoridor.Selftest -c Release
+
       # Ahead-of-time compilation. Interpreted WebAssembly costs the engine three
       # plies, which is the difference between a sparring partner and a pushover.
       # This step is why the job takes minutes rather than seconds.

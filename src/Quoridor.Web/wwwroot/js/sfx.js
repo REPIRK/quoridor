@@ -8,7 +8,6 @@
 let audio = null;
 let master = null;
 let musicBus = null;
-let musicGain = null;
 let musicStop = null;
 
 // Remembered across a context that does not exist yet, so the sliders work before the
@@ -199,10 +198,17 @@ export function music(on, track = 0) {
 
     const piece = TRACKS[Math.max(0, Math.min(TRACKS.length - 1, track | 0))];
 
-    musicGain = audio.createGain();
-    musicGain.gain.value = 0.0001;
-    musicGain.gain.exponentialRampToValueAtTime(0.9, audio.currentTime + 3);
-    musicGain.connect(musicBus);
+    // This track's own output, and a local one deliberately. It used to be a module-level
+    // variable, which the stop closure below read free inside its 1400ms timeout — so the
+    // name resolved when the timer fired rather than when the track was stopped. Changing
+    // track calls music(false) and music(true) within one interop round trip of each other,
+    // far inside that window, so the timer belonging to the old track disconnected the new
+    // track's gain from the bus and the music went silent about a second and a half after
+    // the player chose it. Every reference below is this track's, for the whole of its life.
+    const gain = audio.createGain();
+    gain.gain.value = 0.0001;
+    gain.gain.exponentialRampToValueAtTime(0.9, audio.currentTime + 3);
+    gain.connect(musicBus);
 
     // The pad: detuned saws kept dark by a lowpass that breathes.
     const pad = audio.createGain();
@@ -231,7 +237,7 @@ export function music(on, track = 0) {
     });
 
     pad.connect(filter);
-    filter.connect(musicGain);
+    filter.connect(gain);
 
     // A note every few seconds, from a scale that cannot land on a sour interval.
     const scale = piece.scale;
@@ -252,7 +258,7 @@ export function music(on, track = 0) {
         env.gain.exponentialRampToValueAtTime(0.0001, at + 3.4);
 
         osc.connect(env);
-        env.connect(musicGain);
+        env.connect(gain);
         osc.start(at);
         osc.stop(at + 3.6);
 
@@ -265,12 +271,12 @@ export function music(on, track = 0) {
         alive = false;
 
         const end = audio.currentTime + 1.2;
-        musicGain.gain.exponentialRampToValueAtTime(0.0001, end);
+        gain.gain.exponentialRampToValueAtTime(0.0001, end);
 
         setTimeout(() => {
             drones.forEach(osc => osc.stop());
             sweep.stop();
-            musicGain.disconnect();
+            gain.disconnect();
         }, 1400);
     };
 }

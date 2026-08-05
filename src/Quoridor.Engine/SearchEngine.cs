@@ -86,8 +86,23 @@ public sealed class SearchEngine
         Span<Move> rootMoves = MoveSlice(0);
         int rootCount = MoveCandidates.Generate(root, rootMoves, MoveCandidates.MaxWalls, scoreWalls: true);
 
-        if (rootCount == 0) return new SearchResult(HeuristicAgent.Fallback(root), 0, 0, 0);
-        if (rootCount == 1) return new SearchResult(rootMoves[0], 0, 1, 1);
+        // Nothing to choose between, so nothing is searched — and the result says exactly
+        // that rather than claiming a one-node search that came out level. Depth 0 and
+        // zero nodes is what happened, it agrees with CompletedDepth, and both front ends
+        // already read Depth 0 as "there is no engine line to show", which is the truth
+        // here. The score is the position's static worth, so a caller that does read it
+        // gets a forced loss reported as a forced loss: the position that named this
+        // reported Score 0 while Evaluation.RaceScore on the same board said -999,999.
+        //
+        // Zero candidates is not the same claim as "no legal move": MoveCandidates keeps
+        // only the walls near a route or beside an existing one, so a boxed-in pawn with
+        // every nearby slot taken comes back empty while legal walls remain elsewhere.
+        // HeuristicAgent.Fallback asks the rules rather than the generator.
+        if (rootCount <= 1)
+        {
+            Move only = rootCount == 1 ? rootMoves[0] : HeuristicAgent.Fallback(root);
+            return new SearchResult(only, StaticScore(root), 0, 0);
+        }
 
         Move best = rootMoves[0];
         int score = 0;
@@ -109,6 +124,30 @@ public sealed class SearchEngine
         }
 
         return new SearchResult(best, score, CompletedDepth, Nodes);
+    }
+
+    /// <summary>
+    /// What the position is worth with no search at all: the ladder <see cref="Negamax"/>
+    /// reaches at a leaf, minus the two terms that only mean anything part-way down a
+    /// search — a repetition against the path above it, and the ply cap.
+    ///
+    /// Deliberately not shared with Negamax's copy. Negamax tests repetition between the
+    /// finished-game test and the race verdict, so folding the two into one method would
+    /// move the verdict ahead of the repetition test and change what a repeated wall-less
+    /// position scores. That is a search change wearing a refactor.
+    /// </summary>
+    private int StaticScore(in GameState state)
+    {
+        if (state.IsGameOver)
+            return state.Winner == state.SideToMove ? Evaluation.Mate : -Evaluation.Mate;
+
+        if (state.WallsOf(0) == 0 && state.WallsOf(1) == 0 && !state.HasPickups && !state.HasPortals)
+        {
+            int race = Evaluation.RaceScore(state, 0);
+            if (race != Evaluation.Unknown) return race;
+        }
+
+        return Evaluation.Evaluate(state, state.SideToMove, _weights);
     }
 
     // =================================================================== root ==

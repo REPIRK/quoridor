@@ -46,6 +46,7 @@ public partial class GameView : UserControl
     {
         _host = host;
         _session = new GameSession(options);
+        _session.PositionChanged += ResumeEngine;
         _peer = peer;
 
         InitializeComponent();
@@ -161,6 +162,31 @@ public partial class GameView : UserControl
     }
 
     /// <summary>
+    /// Sets the engine going again after the game has been moved somewhere nobody played
+    /// to. This is what the session's <see cref="GameSession.PositionChanged"/> is wired
+    /// to: whoever is on move after a rewind or a reset is not who was on move before, and
+    /// leaving each of those paths to remember is how undoing a won game came to leave the
+    /// engine on move with nothing to run it.
+    ///
+    /// Queued rather than answered on the spot, because the caller has not finished yet:
+    /// it still has the board to rebuild, the log to redraw and the clock to restart, and
+    /// its status line would otherwise land on top of the engine's "Thinking".
+    /// </summary>
+    private void ResumeEngine() => Dispatcher.InvokeAsync(StartEngineIfItsTurn);
+
+    /// <summary>
+    /// Takes over from the session this view was watching. Changing places builds a whole
+    /// new one, and a new session nobody is listening to is exactly the silence this event
+    /// exists to prevent.
+    /// </summary>
+    private void ReplaceSession(GameSession session)
+    {
+        _session.PositionChanged -= ResumeEngine;
+        _session = session;
+        _session.PositionChanged += ResumeEngine;
+    }
+
+    /// <summary>
     /// Kicks the engine off when it is on move — the far seat, or both in spectate.
     /// Does nothing while a loop is already in the air, even though the position it was
     /// started on has just changed: the loop re-reads the session between searches, so
@@ -197,6 +223,19 @@ public partial class GameView : UserControl
             : _session.LastMoveCrossedPortal ? Sound.Portal
             : move.Kind == MoveKind.Pawn ? Sound.Move
             : Sound.Wall);
+
+        // A move can still arrive from the other player while the game is being read back,
+        // and the board on screen is a position from earlier in it. Animating onto that
+        // board drew the reviewed walls plus the new one and snapped the pawns to where
+        // they stand now, under a status line still saying play is paused. The move is
+        // kept — both copies have to agree — and the panels and the move list follow it;
+        // the board is left where the reader put it and catches up on Live. A game that
+        // ends here is announced on the way back, not over a position from earlier in it.
+        if (_reviewPly is not null)
+        {
+            UpdateUi();
+            return;
+        }
 
         _busy = true;
         UpdateUi();
@@ -405,12 +444,17 @@ public partial class GameView : UserControl
         {
             // A different seat changes the board's orientation and who the engine plays,
             // which is the whole session — so it is built again rather than reset.
-            _session = new GameSession(_session.Options with
+            ReplaceSession(new GameSession(_session.Options with
             {
                 HumanMovesFirst = !_session.Options.HumanMovesFirst,
-            });
+            }));
 
             ApplySeating();
+
+            // A session that has only just been built has never been anywhere else, so it
+            // has no change to announce and the first engine turn is started from here.
+            // Restarting in place goes the other way, through PositionChanged.
+            ResumeEngine();
         }
         else
         {
@@ -421,7 +465,6 @@ public partial class GameView : UserControl
         _board.Reset(_session.State, LastMove);
         UpdateUi();
         StartClock();
-        StartEngineIfItsTurn();
         StartPonderingIfItIsYourMove();
     }
 
@@ -547,6 +590,13 @@ public partial class GameView : UserControl
 
         UpdateUi();
         StartClock();
+
+        // The other player may have finished the game while it was being read back, in
+        // which case the result was held over until there was a live position to show it
+        // across. Guarded on the overlay because reading a finished game back is allowed,
+        // and coming out of that must not sound the fanfare a second time.
+        if (_session.IsOver && ResultOverlay.Visibility != Visibility.Visible) Finish();
+
         StartEngineIfItsTurn();
         StartPonderingIfItIsYourMove();
     }
@@ -765,6 +815,8 @@ public partial class GameView : UserControl
         // the other player.
         string advice = _session.LastMoveWentAgain
             ? "Free move — the turn does not pass. Go again."
+            : _session.LastTurnForfeited
+            ? "Your opponent has no legal move. The turn is forfeited — play again."
             : _session.LastMoveTookAWall
                 ? "Two spare walls picked up, on top of what you started with."
                 : _session.LastMoveCrossedPortal

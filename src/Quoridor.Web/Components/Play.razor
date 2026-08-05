@@ -72,6 +72,19 @@
         </aside>
 
         <div class="board-wrap">
+            @* AllowPremove below: not your turn and reading the game back are two different
+               things, and Interactive is false for both. Only the first of them is a turn
+               that is coming, so only the first may be moved for in advance — a click on a
+               position from ten plies ago is a player looking, not a player queueing.
+
+               Said here and not among the attributes, which is where it was first written.
+               A Razor comment inside an element's attribute list is not removed: the
+               compiler emits it as a component parameter whose *name* is the whole of the
+               comment text, and Blazor then throws "does not have a property matching the
+               name" the first time the board is rendered — so the game screen never draws
+               at all. It compiles either way, which is the trap: nothing but running it
+               says so. Reproduced by handing the emitted name to
+               ParameterView.SetParameterProperties against a real BoardView. *@
             <BoardView State="Shown"
                        Interactive="@(_session.IsHumanTurn && !_thinking && !_session.IsOver && _reviewPly is null)"
                        Reading="_reading"
@@ -83,6 +96,7 @@
                        Carved="_carved"
                        ConfirmMoves="_confirm"
                        LastMove="ShownLastMove"
+                       AllowPremove="@(_reviewPly is null)"
                        Premove="_premove"
                        OnPremove="move => _premove = move"
                        OnMove="OnMove"
@@ -335,10 +349,13 @@
                             </select>
                         </div>
 
+                        @* Every one of these lists is the chosen size's own, straight out of
+                           Core. A nine's numbers on a five are not a longer game there, they
+                           are a board that cannot carry them: 20 walls against 16 slots, and
+                           10 pickups against the 4 squares the holes leave. *@
                         <div class="row">
                             <span class="label">Walls each</span>
-                            <select class="pick" value="@_walls"
-                                    @onchange="e => _walls = Number(e, Board.WallsPerPlayer)">
+                            <select class="pick" value="@_walls" @onchange="PickWalls">
                                 @foreach (int option in WallChoices)
                                 {
                                     <option value="@option">@option</option>
@@ -348,24 +365,31 @@
 
                         <div class="row">
                             <span class="label">Holes</span>
-                            <select class="pick" value="@_holes" @onchange="e => _holes = Number(e, 0)">
-                                <option value="0">None</option>
-                                <option value="2">2 — scattered at random</option>
-                                <option value="4">4 — scattered at random</option>
-                                <option value="6">6 — scattered at random</option>
-                                <option value="10">10 — scattered at random</option>
+                            <select class="pick" value="@_holes" @onchange="PickHoles">
+                                @foreach (int option in HoleChoices)
+                                {
+                                    <option value="@option">@ScatterLabel(option, "scattered at random")</option>
+                                }
                             </select>
                         </div>
 
                         <div class="row">
                             <span class="label">Pickups</span>
-                            <select class="pick" value="@_pickups" @onchange="e => _pickups = Number(e, 0)">
-                                <option value="0">None</option>
-                                <option value="4">4 — a spare wall or a free move</option>
-                                <option value="6">6 — a spare wall or a free move</option>
-                                <option value="10">10 — a spare wall or a free move</option>
+                            <select class="pick" value="@_pickups" @onchange="PickPickups">
+                                @foreach (int option in PickupChoices)
+                                {
+                                    <option value="@option">@ScatterLabel(option, "a spare wall or a free move")</option>
+                                }
                             </select>
                         </div>
+
+                        @* Said for the same reason the portal note is said: a size that offers
+                           fewer is following a rule of the game, and a rule nobody states reads
+                           as a list that has lost its options. *@
+                        @if (SizeNote.Length > 0)
+                        {
+                            <p class="fine why">@SizeNote</p>
+                        }
 
                         @* Counted in portals, not in squares: a portal's two mouths are one
                            object, unlike a pair of holes or of pickups. The list is the
@@ -585,22 +609,79 @@
         _ => "Nine by nine, ten walls each. The game as it is normally played.",
     };
 
-    // ================================================================ portals ==
+    // ========================================================= what a size carries ==
+
+    /// <summary>The wall supplies the chosen size can actually be played with.</summary>
+    private int[] WallChoices => GameSetup.WallOptions(_size);
+
+    /// <summary>The hole counts the chosen size has squares for.</summary>
+    private int[] HoleChoices => GameSetup.HoleOptions(_size);
+
+    /// <summary>The pickup counts left over once the holes have taken theirs.</summary>
+    private int[] PickupChoices => GameSetup.PickupOptions(_size);
 
     /// <summary>The portal counts the chosen size can actually carry.</summary>
     private int[] PortalChoices => GameSetup.PortalOptions(_size);
 
     /// <summary>
-    /// The board size, with the portal count brought back inside what that size can carry.
+    /// The board size, with every count brought back inside what that size can carry.
     /// A two chosen on a nine cannot be left standing on the control after the board has
     /// become a five: the game would be built without it, and a number shown but not
     /// honoured reads as the generator being unreliable rather than as a rule of the size.
+    ///
+    /// The same was true of the walls, the holes and the pickups, which kept the nine's
+    /// numbers on every board — a five with Holes=10 and Pickups=10 starts as
+    /// "5×5 · 0 walls · 10 holes · 4 pickups" while the card still says ten of each,
+    /// because Core caps them against its 14 drawable cells.
     /// </summary>
     private void PickSize(ChangeEventArgs e)
     {
         _size = Number(e, Board.Size);
-        _portals = Math.Min(_portals, PortalChoices[^1]);
+
+        _walls = Clamped(_walls, WallChoices);
+        _holes = Clamped(_holes, HoleChoices);
+        _pickups = Clamped(_pickups, PickupChoices);
+        _portals = Clamped(_portals, PortalChoices);
     }
+
+    private void PickWalls(ChangeEventArgs e) =>
+        _walls = Clamped(Number(e, Board.WallsPerPlayer), WallChoices);
+
+    private void PickHoles(ChangeEventArgs e) => _holes = Clamped(Number(e, 0), HoleChoices);
+
+    private void PickPickups(ChangeEventArgs e) => _pickups = Clamped(Number(e, 0), PickupChoices);
+
+    /// <summary>
+    /// A count brought inside what a size offers: the largest option that size carries
+    /// which is no bigger than the one asked for. Not a plain minimum, because the result
+    /// has to be one of the options the list draws — a value no option carries leaves the
+    /// control showing a blank, which reads as the setting having been lost.
+    /// </summary>
+    private static int Clamped(int count, int[] options)
+    {
+        int best = options[0];
+
+        foreach (int option in options)
+        {
+            if (option <= count && option > best) best = option;
+        }
+
+        return best;
+    }
+
+    /// <summary>The two scattered counts, which read the same way apart from what is
+    /// scattered. Zero is "None" rather than "0 — scattered at random".</summary>
+    private static string ScatterLabel(int count, string what) =>
+        count == 0 ? "None" : $"{count} — {what}";
+
+    /// <summary>
+    /// Why a smaller board is offered less of everything. Said only for the five, where
+    /// all three lists shorten at once; the seven only loses the top of the wall list,
+    /// which is a smaller claim than a paragraph under the controls is worth.
+    /// </summary>
+    private string SizeNote => _size == 5
+        ? "A five has 16 wall slots to the nine's 64, and 14 squares that a hole or a pickup may stand on — so the counts a nine offers are not on this board to give."
+        : string.Empty;
 
     /// <summary>Said in pairs of squares, because that is the unit the count is in.</summary>
     private static string PortalLabel(int count) => count switch
@@ -851,12 +932,18 @@
 
     /// <summary>
     /// Steps back and forth through the game. Null returns to the live position.
+    ///
+    /// A game with nothing played has no past to step into, and the keyboard could reach
+    /// one that the buttons could not: ArrowLeft asked for ply -1, which is not >= 0 and
+    /// so fell through to a clamp that produced ply 0 — the live position, marked as
+    /// history. The board went non-interactive and the first move of the game could not
+    /// be played at all.
     /// </summary>
     private void Review(int? ply)
     {
         int played = _session.Moves.Count;
 
-        if (ply is null || ply >= played)
+        if (ply is null || played == 0 || ply >= played)
         {
             _reviewPly = null;
             return;
@@ -864,6 +951,13 @@
 
         _reviewPly = Math.Clamp(ply.Value, 0, played);
         _preview = null;
+
+        // Reading the game back is not waiting for a turn, and a click on the historic
+        // board must not be banked as a move to play in the live one. The board stops
+        // offering premoves while this is set (AllowPremove below); anything banked
+        // before we got here goes now, because it was chosen against a position the
+        // player has since stepped away from.
+        _premove = null;
     }
 
     private string ShareLink => $"{Nav.BaseUri}?join={_net.Code}";
@@ -912,6 +1006,11 @@
             // ignored the other player.
             if (_session.LastMoveWentAgain)
                 return "Free move — the turn does not pass. Go again.";
+
+            // The other shape a turn that comes straight back can have, and the one no
+            // pickup explains: the rules forfeit a turn nobody can play.
+            if (_session.LastTurnForfeited)
+                return "Your opponent has no legal move. The turn is forfeited — play again.";
 
             if (_session.LastMoveTookAWall)
                 return "Two spare walls picked up, on top of what you started with.";
@@ -1108,14 +1207,13 @@
         if (mode != WebMode.Online) ResetNet();
     }
 
-    private async Task StartGame()
+    private void StartGame()
     {
         // A rolled game rolls the order of play too.
         if (_flavour == GameFlavour.Random) _seat = Random.Shared.Next(2);
 
         _session = new WebSession(_mode, _strength, _seat, BuildSetup(), _flavour);
         _showSetup = false;
-        ResetPlayState();
 
         // The game just set up is the one a returning player almost always wants next, so
         // it is written down here — where it has been settled — rather than on every
@@ -1127,8 +1225,9 @@
         // there is, so a piece that was playing last time picks up here.
         if (_music) _ = StartMusic();
 
-        // Taking the second seat means the engine opens.
-        await OpenGame();
+        // Last, because it is what hands the board to the engine when the engine opens,
+        // and a fast bot answers inside this call.
+        ResetPlayState();
     }
 
     /// <summary>
@@ -1157,8 +1256,6 @@
         _seat = seat;
         _session = new WebSession(_session.Mode, _session.Strength, _seat, setup, _session.Flavour);
         ResetPlayState();
-
-        await OpenGame();
     }
 
     /// <summary>
@@ -1183,9 +1280,13 @@
         // A plain board has nothing to arrive, so it has nothing to wait for. The portals
         // count here as the holes and the pickups do: their mouths are drawn with the rest
         // of what the generator laid out, and a search starting mid-entrance freezes them
-        // half-arrived.
-        if (_session.Setup.Holes > 0 || _session.Setup.Pickups > 0 || _session.Setup.ActualPortals > 0)
+        // half-arrived. Only at the start of a game: an undo back onto an engine turn also
+        // comes through here, and there the board has been on screen all along.
+        if (_session.Moves.Count == 0 &&
+            (_session.Setup.Holes > 0 || _session.Setup.Pickups > 0 || _session.Setup.ActualPortals > 0))
+        {
             await Task.Delay(BoardEntranceMs);
+        }
 
         await RunEngine();
     }
@@ -1193,6 +1294,9 @@
     private void Undo()
     {
         _session.Undo();
+
+        // Which also starts the engine again, if the position we came back to is one it
+        // has to answer — taking back the move that won the game is exactly that.
         ResetPlayState();
     }
 
@@ -1354,10 +1458,6 @@
     /// <summary>The board sizes the list offers, which is what a stored one has to be.</summary>
     private static readonly int[] BoardSizes = { 9, 7, 5 };
 
-    private static readonly int[] WallChoices = { 0, 3, 5, 7, 10, 14, 20 };
-    private static readonly int[] HoleChoices = { 0, 2, 4, 6, 10 };
-    private static readonly int[] PickupChoices = { 0, 4, 6, 10 };
-
     /// <summary>
     /// Everything worth carrying to the next visit, as the single line it is stored as.
     /// Named terms rather than a fixed order, so that a setting added later is simply not
@@ -1424,17 +1524,22 @@
                 case "game": _flavour = Flavour(value); break;
 
                 case "size": _size = Offered(value, BoardSizes, Board.Size); break;
-                case "walls": _walls = Offered(value, WallChoices, Board.WallsPerPlayer); break;
-                case "holes": _holes = Offered(value, HoleChoices, 0); break;
-                case "pickups": _pickups = Offered(value, PickupChoices, 0); break;
-                case "portals": _portals = Offered(value, PortalChoices, 0); break;
+                case "walls": _walls = Ranged(value, _walls, Board.MaxWalls); break;
+                case "holes": _holes = Ranged(value, _holes, Board.CellCount); break;
+                case "pickups": _pickups = Ranged(value, _pickups, Board.CellCount); break;
+                case "portals": _portals = Ranged(value, _portals, GameSetup.MaxPortals); break;
             }
         }
 
-        // The size and the portal count are stored as two terms and read in whatever order
-        // they arrive in, so what the size will carry is settled once both are in — the
-        // same rule the control itself applies, and for the same reason.
-        _portals = Math.Min(_portals, PortalChoices[^1]);
+        // The size and the four counts are stored as separate terms and read in whatever
+        // order they arrive in, so what the size will carry is only settled once the whole
+        // line is in — the same rule the controls themselves apply, and for the same
+        // reason. Every count is checked here rather than as it is read, because until the
+        // size is known there is no list to check it against.
+        _walls = Clamped(_walls, WallChoices);
+        _holes = Clamped(_holes, HoleChoices);
+        _pickups = Clamped(_pickups, PickupChoices);
+        _portals = Clamped(_portals, PortalChoices);
     }
 
     /// <summary>A stored number inside the range its control has, or the default. Written
@@ -1516,7 +1621,16 @@
         }
     }
 
-    /// <summary>Anything that only made sense for the position we just left.</summary>
+    /// <summary>
+    /// Anything that only made sense for the position we just left — and then handing the
+    /// board back to whoever is on move in the new one.
+    ///
+    /// Restarting the engine used to be each caller's own business, and Undo was the one
+    /// caller that did not do it: take a move back onto an engine turn and the game simply
+    /// stopped, with the status line saying the engine was to move and nothing ever
+    /// happening. Every path that changes the position already comes through here, so this
+    /// is the one place that has to remember, and the only one that can forget.
+    /// </summary>
     private void ResetPlayState()
     {
         _preview = null;
@@ -1529,6 +1643,12 @@
         // one: the full engine is worth announcing, and the two handicapped bots answer
         // faster than the word could be read.
         _lastThinkMs = _session.Strength == BotStrength.Hard ? SlowSearchMs : 0;
+
+        // Not awaited: this is called from Undo and from two network callbacks, none of
+        // which is waiting for the engine's reply, and RunEngine repaints for itself. It
+        // releases _engineRunning in a finally, so a search that throws leaves the loop
+        // startable rather than wedged.
+        _ = OpenGame();
     }
 
     // ================================================================ the finish ==
@@ -1769,8 +1889,14 @@
 
         try
         {
-            while (_session.IsBotTurn)
+            while (true)
             {
+                // Read once per turn, and re-read at the top of every one: a restart
+                // replaces the session outright, and the loop has to end up driving
+                // whichever game is now in play rather than the one it started on.
+                WebSession session = _session;
+                if (!session.IsBotTurn) break;
+
                 _thinking = true;
                 _saidThinking = _lastThinkMs >= SlowSearchMs;
 
@@ -1783,17 +1909,26 @@
                 {
                     StateHasChanged();
                     await Task.Delay(40);
+
+                    // That yield hands the browser back the thread, and a Restart pressed
+                    // inside it is processed before we get it again. Think() only asks
+                    // that there be an engine, not that it be the engine's turn, so
+                    // pressing on regardless had the engine play the human's opening
+                    // move on the new board. Going round again rather than breaking out:
+                    // the new game may be one the engine opens, and this loop is the one
+                    // holding _engineRunning, so it is the one that has to play it.
+                    if (!ReferenceEquals(session, _session) || !session.IsBotTurn) continue;
                 }
 
                 // How long the last search took is the only honest guide to how long
                 // this one will take, and it costs nothing to keep.
                 long started = System.Diagnostics.Stopwatch.GetTimestamp();
 
-                Move move = _session.Think();
+                Move move = session.Think();
 
                 _lastThinkMs = (int)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
-                _session.Apply(move);
+                session.Apply(move);
                 _ = SoundFor(move);
 
                 _thinking = false;

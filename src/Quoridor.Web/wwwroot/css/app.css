@@ -889,14 +889,30 @@ input.slider::-moz-range-thumb {
 
 /* Taking one should be worth watching. A ring opening outward and fading, once, on
    the square it came from — short enough to finish inside the pause the engine waits
-   out, so it never freezes half-drawn. */
-.board .pickup-burst {
-    pointer-events: none;
-    transform-origin: 0 0;
+   out, so it never freezes half-drawn.
+
+   The group carries the square and the ring inside it carries the growing, and the two
+   must not be the same element: a `transform` from a keyframe replaces the `transform`
+   presentation attribute outright rather than composing with it, so while the animation
+   ran the group's translate to the square was simply gone and the ring opened at the SVG
+   origin. A smaller game is a centred square of the same grid, so the view starts at 76
+   on a 7x7 and at 152 on a 5x5 and that origin is outside it: on those two boards the
+   ring was not merely in the wrong place, it was never seen at all. */
+.board .pickup-burst { pointer-events: none; }
+
+.board .pickup-burst .halo {
+    fill: none;
+    stroke-width: 3;
+
+    /* The ring's own centre, which is the (0,0) the group has already put on the square.
+       Stated as a box rather than as a length: `transform-origin` on an SVG element is
+       resolved against the view box by default, and that is the origin of a different
+       coordinate system from the one this ring is drawn in. */
+    transform-box: fill-box;
+    transform-origin: center;
     animation: pickup-taken var(--t-place) cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 
-.board .pickup-burst .halo { fill: none; stroke-width: 3; }
 .board .pickup-burst.wall .halo { stroke: var(--text); }
 .board .pickup-burst.skip .halo { stroke: var(--p0); }
 
@@ -1374,8 +1390,14 @@ input.slider::-moz-range-thumb {
     from { opacity: 0; transform: translateY(-6px); }
 }
 
+/* The shadow arrives from further away from the lamp than it settles, so its offset is
+   signed the same way the resting one in the markup is: on the turned board the whole
+   group is rotated a half turn, and an offset that was not negated brought the shadow in
+   from the lit side and slid it toward the light. --flip is the same sign the two arcs
+   above are written against. Nothing of this reaches the flat board, where `cast` is
+   `fill: none` and there is no shadow to move. */
 @keyframes wall-cast-in {
-    from { opacity: 0; transform: translate(4px, 5px); }
+    from { opacity: 0; transform: translate(calc(var(--flip) * 4px), calc(var(--flip) * 5px)); }
 }
 
 /* A rolled board is a different board every time, and its gaps and prizes are the whole
@@ -1417,9 +1439,18 @@ input.slider::-moz-range-thumb {
    that sets the delays; changing one without the other leaves a board that arrives
    half-drawn and stays that way until the search returns. */
 /* Its own curve rather than --ease-pop: a prize is the one thing on this board that is
-   meant to feel light, so it overshoots further than a hint dot or a ring does. */
-.board .pickup-holder {
-    animation: pickup-laid var(--t-quick) cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+   meant to feel light, so it overshoots further than a hint dot or a ring does.
+
+   On the inner group and not on the holder that carries the translate, for the reason the
+   burst above states: a keyframe's `transform` replaces the presentation attribute rather
+   than composing with it, and a prize animated on the holder itself grew from the SVG
+   origin and slid diagonally to its square — off the board entirely on the small ones.
+   The delay comes down from the holder as a custom property, as the gaps' and the mouths'
+   do, since animation-delay does not inherit and a custom property does. */
+.board .pickup-holder > .pickup {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pickup-laid var(--t-quick) cubic-bezier(0.2, 0.9, 0.3, 1.3) var(--delay, 0ms) both;
 }
 
 /* Walls picked up off the board land in this row. The pips run left to right as the
@@ -1440,7 +1471,8 @@ input.slider::-moz-range-thumb {
 }
 
 /* Scaled about the square's own centre, which the outer group has already translated
-   to — the reason the mark is drawn around the origin in the first place. */
+   to — the reason the mark is drawn around the origin in the first place, and the reason
+   the rule above puts this on the inner group rather than on that outer one. */
 @keyframes pickup-laid {
     from { opacity: 0; transform: scale(0.3); }
 }
@@ -1486,7 +1518,7 @@ input.slider::-moz-range-thumb {
 .board.past .pit > rect,
 .board.past .portal > circle,
 .board.past .hint-dot,
-.board.past .pickup-holder,
+.board.past .pickup-holder > .pickup,
 .board.past .front,
 .board.past .finish.won,
 .board.past .pawn-holder.active .ring,
@@ -1515,7 +1547,7 @@ input.slider::-moz-range-thumb {
     .board .pawn-holder .ring,
     .board .wall .top, .board .wall .side, .board .wall .cast,
     .board .pit > rect, .board .portal > circle, .board .hint-dot,
-    .board .pickup-holder,
+    .board .pickup-holder > .pickup,
     .board .front, .board .detour.now, .board .finish,
     .walls.gained i, .walls.gained .count, .tape .wedge, .turn,
     .player, .ask, .moves li, button.ghost,

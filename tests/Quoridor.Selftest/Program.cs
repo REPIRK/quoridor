@@ -25,6 +25,10 @@ internal static class Program
         Run("win detection", WinDetection);
         Run("hash is order independent", HashConsistency);
         Run("bot games terminate legally", BotPlayouts);
+        // Before anything else that runs a SearchAgent, so its first replay is the cold
+        // one — see AuditIsReplayable.
+        Run("the wall audit plays the same game every time", AuditIsReplayable);
+        Run("a player with no legal move forfeits the turn", ForfeitedTurns);
         Run("alternative boards, holes and pickups", BlockedSquares);
         Run("a rolled game reaches every board and is always playable", RolledBoards);
         Run("every board the setup offers carries the numbers it names", BoardCapacity);
@@ -232,6 +236,40 @@ internal static class Program
         c.Apply(new Move(MoveKind.VerticalWall, 5, 6));
 
         Check(a.Hash == c.Hash, "the same move order hashes the same");
+
+        // A real transposition, which is what this check is named after and what the
+        // table's whole existence rests on. Replaying one order twice, which used to
+        // stand here, is a claim about Apply being a function and no state can fail it.
+        //
+        // Player 1 walks the same two steps in both lines; player 2 places the same two
+        // walls in the opposite order. Same position, two routes to it — so if the hash
+        // carried anything about the route rather than the position, the transposition
+        // table would answer one game with another's analysis.
+        GameState oneWay = GameState.CreateInitial();
+        oneWay.Apply(Move.Pawn(7, 4));
+        oneWay.Apply(new Move(MoveKind.HorizontalWall, 2, 2));
+        oneWay.Apply(Move.Pawn(6, 4));
+        oneWay.Apply(new Move(MoveKind.VerticalWall, 5, 6));
+
+        GameState theOther = GameState.CreateInitial();
+        theOther.Apply(Move.Pawn(7, 4));
+        theOther.Apply(new Move(MoveKind.VerticalWall, 5, 6));
+        theOther.Apply(Move.Pawn(6, 4));
+        theOther.Apply(new Move(MoveKind.HorizontalWall, 2, 2));
+
+        Check(oneWay.Hash == theOther.Hash,
+            $"two orders reaching one position hash the same (0x{oneWay.Hash:X16} and 0x{theOther.Hash:X16})");
+
+        // And the hash agreeing is only interesting if the positions really are the same
+        // one, so say so out loud rather than leaving a collision to look like success.
+        Check(oneWay.PawnOf(0) == theOther.PawnOf(0) && oneWay.PawnOf(1) == theOther.PawnOf(1) &&
+              oneWay.SideToMove == theOther.SideToMove &&
+              oneWay.WallsOf(0) == theOther.WallsOf(0) && oneWay.WallsOf(1) == theOther.WallsOf(1) &&
+              oneWay.HorizontalWalls == theOther.HorizontalWalls &&
+              oneWay.VerticalWalls == theOther.VerticalWalls &&
+              oneWay.BlockedNorth == theOther.BlockedNorth && oneWay.BlockedSouth == theOther.BlockedSouth &&
+              oneWay.BlockedWest == theOther.BlockedWest && oneWay.BlockedEast == theOther.BlockedEast,
+            "and the two orders really did reach the same position, not merely the same hash");
     }
 
     private static void BotPlayouts()
@@ -269,6 +307,236 @@ internal static class Program
         }
 
         Check(finished == games, $"all {games} bot games reached a result ({finished} did)");
+    }
+
+    /// <summary>
+    /// The rule portals made necessary, and the two positions that made it necessary.
+    ///
+    /// Before portals, "the side to move always has a move" was a theorem and
+    /// <c>IsWallLegal</c> was its proof: a mover with no pawn step had a flood-fill
+    /// component of exactly the two pawn squares, which cannot hold both goal rows, so one
+    /// of the two <c>HasPath</c> calls failed and the wall was refused. A portal is a fifth
+    /// edge out of a square and it breaks that proof twice over, in two different places —
+    /// which is the whole reason the fix is a rule and not a stricter legality test.
+    ///
+    /// Both positions below are built out of walls <c>IsWallLegal</c> accepts, checked one
+    /// at a time on the way in, and both are then rebuilt with <c>PlaceWallUnchecked</c> so
+    /// the position underneath the rule can be looked at with the turn still on the player
+    /// who has nothing to play.
+    /// </summary>
+    private static void ForfeitedTurns()
+    {
+        // A pocket whose only exit is the opponent's square, and the opponent is standing
+        // on a portal mouth. The mover's own route out is the fake one: it leaves through
+        // a square no pawn may ever stand on.
+        (MoveKind Kind, int Row, int Col)[] pocket =
+        {
+            (MoveKind.HorizontalWall, 2, 1),
+            (MoveKind.VerticalWall, 1, 0),
+            (MoveKind.VerticalWall, 1, 1),
+            (MoveKind.HorizontalWall, 0, 1),
+        };
+
+        CheckForfeit("the mover's route leaves through the opponent's mouth",
+            Board.Index(1, 1), Board.Index(2, 1), Board.Index(2, 1), pocket);
+
+        // The opponent standing on the mover's goal row, one step away and unpassable.
+        // Here the mover's route is honest by the ordinary rule that pawns are transparent
+        // — the goal row really is one step away — and it is the opponent who would have
+        // been sealed in. Their own portal is what keeps the wall legal. Nothing done to
+        // the mover's route could ever have caught this one.
+        (MoveKind Kind, int Row, int Col)[] doorway =
+        {
+            (MoveKind.VerticalWall, 0, 0),
+            (MoveKind.VerticalWall, 0, 1),
+            (MoveKind.HorizontalWall, 1, 1),
+            (MoveKind.HorizontalWall, 6, 6),
+        };
+
+        CheckForfeit("the opponent stands on the mover's goal row",
+            Board.Index(1, 1), Board.Index(0, 1), Board.Index(0, 1), doorway);
+
+        // A wall in hand is a move. The same pocket with the supply not yet drained is an
+        // ordinary position that the boxed-in player answers with a wall, and the turn must
+        // not be forfeited out from under them.
+        GameState holding = Boxed(Board.Index(1, 1), Board.Index(2, 1), Board.Index(2, 1), 5);
+        foreach ((MoveKind kind, int row, int col) in pocket) holding.Apply(new Move(kind, row, col));
+
+        Span<Move> steps = stackalloc Move[10];
+
+        Check(holding.SideToMove == 0, "a boxed-in player with walls left keeps their turn");
+        Check(holding.GeneratePawnMoves(steps) == 0, "and really has no pawn step");
+        Check(holding.HasLegalMove() && holding.LegalMoves().Count > 0, "but does have moves");
+
+        foreach (IQuoridorAgent agent in new IQuoridorAgent[]
+                 {
+                     new HeuristicAgent(BotStrength.Easy, seed: 1),
+                     new HeuristicAgent(BotStrength.Normal, seed: 1),
+                     new SearchAgent(maxDepth: 4, moveTime: TimeSpan.FromMilliseconds(40), threads: 1, tableMegabytes: 4),
+                 })
+        {
+            Move answer = agent.ChooseMove(holding);
+            Check(holding.IsLegal(answer), $"{agent.Name} answers a boxed-in pawn with the legal {answer}");
+        }
+
+        // And the claim the rule rests on: two forfeits in a row are unreachable, so the
+        // player who receives a forfeited turn always has something to play and Ply keeps
+        // advancing. Argued in GameState, counted here.
+        int forfeits = 0, games = 0;
+        long plies = 0;
+        var random = new Random(20260805);
+
+        for (int seed = 0; seed < 400; seed++)
+        {
+            GameState state = new GameSetup { Portals = 2, Seed = seed }.Build().State;
+            if (!state.HasPortals) continue;
+
+            games++;
+
+            for (int ply = 0; ply < 300 && !state.IsGameOver; ply++)
+            {
+                Check(state.HasLegalMove(), $"seed {seed} ply {ply}: nothing to play and no forfeit either");
+
+                List<Move> legal = state.LegalMoves();
+                if (legal.Count == 0) return;
+
+                plies++;
+                int mover = state.SideToMove;
+
+                // Lean hard on walls: the trap needs a boxed-in pawn, and a random walk
+                // almost never builds one.
+                List<Move> walls = legal.FindAll(move => move.IsWall);
+                state.Apply(walls.Count > 0 && random.Next(100) < 80
+                    ? walls[random.Next(walls.Count)]
+                    : legal[random.Next(legal.Count)]);
+
+                // No pickups on these boards, so the only way the turn comes back is a
+                // forfeit.
+                if (!state.IsGameOver && state.SideToMove == mover) forfeits++;
+            }
+        }
+
+        Report($"{games} portal games, {plies:N0} plies, {forfeits} forfeited turns");
+    }
+
+    /// <summary>
+    /// A position with the two pawns placed, one portal, and a wall supply. Built through
+    /// <see cref="GameState.Create"/> rather than a setup so the pocket can be put exactly
+    /// where it is wanted.
+    /// </summary>
+    private static GameState Boxed(int pawn0, int pawn1, int mouth, int walls)
+    {
+        GameState state = GameState.Create(pawn0, pawn1, walls, walls, sideToMove: 0);
+        state.PlacePortal(mouth);
+        return state;
+    }
+
+    /// <summary>
+    /// Builds one of the two trap positions twice — once through <c>Apply</c>, which is the
+    /// rules, and once through <c>PlaceWallUnchecked</c>, which is not — and checks the
+    /// same four things about each: every wall was legal, the old no-sealing rule is
+    /// satisfied, the side to move genuinely has nothing, and the portal is what made it
+    /// possible.
+    /// </summary>
+    private static void CheckForfeit(
+        string name, int pawn0, int pawn1, int mouth, (MoveKind Kind, int Row, int Col)[] walls)
+    {
+        // Two walls each, so the mover's supply is empty by the time the box closes.
+        GameState played = Boxed(pawn0, pawn1, mouth, walls: 2);
+
+        foreach ((MoveKind kind, int row, int col) in walls)
+        {
+            Check(played.IsWallLegal(kind, row, col),
+                $"{name}: the rules accept {new Move(kind, row, col)} from player {played.SideToMove + 1}");
+
+            played.Apply(new Move(kind, row, col));
+        }
+
+        Check(played.SideToMove == 1, $"{name}: the turn is handed straight back");
+        Check(played.HasLegalMove(), $"{name}: and it goes to a player who has something to play");
+        Check(!played.IsGameOver, $"{name}: with the game still live");
+
+        // The same board with the turn left where the rules put it before the forfeit.
+        GameState frozen = Boxed(pawn0, pawn1, mouth, walls: 0);
+        foreach ((MoveKind kind, int row, int col) in walls) frozen.PlaceWallUnchecked(kind, row, col);
+
+        Check(PathFinder.HasPath(frozen, 0) && PathFinder.HasPath(frozen, 1),
+            $"{name}: both players still have a route, which is all the old rule ever asked");
+        Check(!frozen.IsGameOver && !frozen.HasLegalMove(),
+            $"{name}: and the side to move has no move of any kind");
+        Check(frozen.LegalMoves().Count == 0, $"{name}: the move list agrees");
+
+        GameState plain = frozen;
+        plain.Portals = 0;
+
+        Check(!PathFinder.HasPath(plain, 0) || !PathFinder.HasPath(plain, 1),
+            $"{name}: and without the portal it is a position IsWallLegal would never have allowed");
+    }
+
+    /// <summary>
+    /// The two agents the wall audit below is played out with.
+    ///
+    /// The budget is out of reach on purpose. It used to be 40 ms, and then which game got
+    /// audited depended on how fast the machine was and how warm the JIT was:
+    /// <c>SearchEngine</c> refuses to start an iteration once half the budget is gone and
+    /// breaks the deepening loop with <c>best</c> possibly already updated part-way through
+    /// one, so a slow search returns a different move from the identical search run fast.
+    /// Replaying this playout five times in one process at a tenth of that budget produced
+    /// three different games from the same seeds — 50, 58, 58, 54 and 58 plies — which is
+    /// what a machine ten times slower than this one sees at the configured 40 ms.
+    ///
+    /// A depth bound with a budget nothing can reach is deterministic by construction: the
+    /// deepening loop runs every one of its four iterations to the end and no wall clock
+    /// changes the answer. It is also not slower, because 40 ms was never the binding
+    /// constraint on a warm run — the same playout took 105 ms either way.
+    ///
+    /// The two checks that are about the clock, <see cref="SearchAgentStrength"/> and
+    /// <see cref="PonderLeavesNothingBehind"/>, keep their real budgets: a deadline is the
+    /// thing they exist to test.
+    /// </summary>
+    private static IQuoridorAgent[] AuditAgents() => new IQuoridorAgent[]
+    {
+        new HeuristicAgent(BotStrength.Normal, seed: 4),
+        new SearchAgent(maxDepth: 4, moveTime: TimeSpan.FromHours(1), threads: 1, tableMegabytes: 4),
+    };
+
+    /// <summary>
+    /// The audit is only worth having if it audits the same game every time, so replay one
+    /// of its playouts three times in one process and insist on the same move list.
+    ///
+    /// Placed before the audit itself on purpose: this is the first search of the process,
+    /// so run 0 is the cold one, which is exactly the condition that used to make the first
+    /// game differ from every later one.
+    /// </summary>
+    private static void AuditIsReplayable()
+    {
+        string first = string.Empty;
+
+        for (int run = 0; run < 3; run++)
+        {
+            GameState state = new GameSetup { Holes = 10, Seed = 12 }.Build().State;
+            IQuoridorAgent[] agents = AuditAgents();
+
+            var moves = new List<string>();
+
+            for (int ply = 0; ply < 400 && !state.IsGameOver; ply++)
+            {
+                Move move = agents[state.SideToMove].ChooseMove(state);
+                moves.Add(Notation.Format(move, state));
+                state.Apply(move);
+            }
+
+            string played = string.Join(' ', moves);
+
+            if (run == 0)
+            {
+                first = played;
+                Report($"{moves.Count} plies, cold");
+                continue;
+            }
+
+            Check(played == first, $"run {run} played a different game from the cold run 0");
+        }
     }
 
     /// <summary>
@@ -381,11 +649,7 @@ internal static class Program
             }
 
             // Play the board out, auditing every geometrically legal wall as we go.
-            var agents = new IQuoridorAgent[]
-            {
-                new HeuristicAgent(BotStrength.Normal, seed: 4),
-                new SearchAgent(maxDepth: 4, moveTime: TimeSpan.FromMilliseconds(40), threads: 1, tableMegabytes: 4),
-            };
+            IQuoridorAgent[] agents = AuditAgents();
 
             GameState state = start;
             bool sawPickup = false;
@@ -527,12 +791,34 @@ internal static class Program
         Check(portals.Count == setup.ActualPortals,
             $"{name}: {setup.ActualPortals} portals asked for and {portals.Count} placed");
 
-        Check(state.HasPortals == (portals.Count > 0), $"{name}: the board knows whether it has portals");
+        // Where "the board knows whether it has portals" used to be asserted against the
+        // popcount of the very word HasPortals is computed from, which no state could fail.
+        // The claim worth making crosses the two readers instead: IsPortalMouth normalises
+        // either end of a pair to its lower cell and is what the move generator asks, while
+        // PortalMouths builds the bitboard the flood fill starts its portal step from. They
+        // have to agree about all 81 squares — including the 79 that are not mouths, which
+        // is the half a per-pair loop can never reach.
+        UInt128 mouths = state.PortalMouths();
+        int disagreements = 0;
+
+        for (int cell = 0; cell < Board.CellCount; cell++)
+            if (state.IsPortalMouth(cell) != ((mouths & Board.Bit(cell)) != 0)) disagreements++;
+
+        Check(disagreements == 0,
+            $"{name}: {disagreements} squares where IsPortalMouth and PortalMouths disagree");
+
+        Check(state.HasPortals == (mouths != 0),
+            $"{name}: the flag every portal-aware path is guarded by agrees with the mouths on the board");
 
         if (setup.Size == 5)
             Check(portals.Count == 0, $"{name}: a five carries no portal however many are asked for");
 
-        if (portals.Count == 0) return;
+        if (portals.Count == 0)
+        {
+            Check(mouths == 0 && !state.HasPortals,
+                $"{name}: a board with no portals carries no mouth and says so");
+            return;
+        }
 
         Check(Board.PopCount(state.PortalMouths()) == 2 * portals.Count,
             $"{name}: no square carries two mouths");
@@ -555,7 +841,25 @@ internal static class Program
             // Asserted per portal rather than through a symmetric-mask test: a mask can be
             // symmetric while the pairing inside it is wrong, and the pairing is what the
             // move generator and the flood fill both read.
-            Check(b == Board.CellCount - 1 - a, $"{name}: {pair} are each other's half-turn image");
+            //
+            // Which is why this asks those two and not the arithmetic. What used to stand
+            // here was `b == Board.CellCount - 1 - a`, and PortalPairs above builds b that
+            // way, so the check restated its own construction and no state could fail it.
+            // GameState.PortalPartner is the function the move generator steps through and
+            // the fill fires; IsPortalMouth is the guard in front of both.
+            Check(GameState.PortalPartner(a) == b && GameState.PortalPartner(b) == a,
+                $"{name}: {pair} are each other's partner by the function the move generator uses");
+
+            Check(state.IsPortalMouth(a) && state.IsPortalMouth(b),
+                $"{name}: {pair} answers to IsPortalMouth from either end");
+
+            // And the pairing as the flood fill sees it: a portal is one edge, so the two
+            // mouths are one step apart in both distance maps. Four squares apart on the
+            // board by the separation rule below, so this fails by a wide margin if the
+            // fill ever stops following the edge.
+            Check(Math.Abs(toGoal0[a] - toGoal0[b]) <= 1 && Math.Abs(toGoal1[a] - toGoal1[b]) <= 1,
+                $"{name}: {pair} is one step apart in both distance maps " +
+                $"({toGoal0[a]}/{toGoal0[b]} and {toGoal1[a]}/{toGoal1[b]})");
 
             Check(Math.Abs(Board.RowOf(a) - Board.RowOf(b)) +
                   Math.Abs(Board.ColOf(a) - Board.ColOf(b)) >= 4,
@@ -565,6 +869,12 @@ internal static class Program
             {
                 int row = Board.RowOf(mouth);
 
+                // Written for the balance of the game and now load-bearing for its
+                // termination as well. A portal's two mouths are a half-turn pair, so a
+                // mouth on one goal row puts its partner on the other — and two pawns
+                // sealed onto those two squares would both have nothing to play while both
+                // HasPath calls still passed, which is the one shape that could forfeit a
+                // turn twice running. See GameState.ForfeitTurnIfNothingToPlay.
                 Check(row > goal0 + 1 && row < goal1 - 1,
                     $"{name}: {pair} avoids the goal rows and the rows beside them");
                 Check(row != centre, $"{name}: {pair} avoids the centre row");
@@ -604,15 +914,22 @@ internal static class Program
     /// buffers rest on: the two expensive shapes are mutually exclusive, because there is
     /// only one opponent. Standing on a mouth with the opponent on the far one gives four
     /// plain steps and up to four landing squares around them; the opponent beside you
-    /// instead gives at most five plain moves and the one portal step. One is the audit
-    /// that says a null-move rule is not needed — a pawn with a route but no move is a
-    /// shape the code tolerates but has never been seen.
+    /// instead gives at most five plain moves and the one portal step.
+    ///
+    /// The lower bound used to be one, on the argument that a pawn with a route always has
+    /// a step. Portals took that away: a pawn can be boxed into a pocket whose only exit is
+    /// the opponent's square while the flood fill leaves through the opponent's portal, and
+    /// then zero pawn moves is an ordinary position that the player answers with a wall.
+    /// What survives is the claim the rules actually make, so that is what is asserted here
+    /// — there is always something to play, and only when there is not does
+    /// <c>GameState.Apply</c> forfeit the turn.
     /// </summary>
     private static void CheckPawnMoves(in GameState state, string where)
     {
         List<Move> moves = Collect(state);
 
-        Check(moves.Count is >= 1 and <= 8, $"{where}: {moves.Count} pawn moves, which is outside 1..8");
+        Check(moves.Count <= 8, $"{where}: {moves.Count} pawn moves, which is more than 8");
+        Check(state.HasLegalMove(), $"{where}: the side to move has nothing to play");
 
         var destinations = new HashSet<int>();
         foreach (Move step in moves)

@@ -30,6 +30,7 @@ public partial class MenuView : UserControl
 
     private CancellationTokenSource? _demoCancellation;
     private NetPeer? _peer;
+    private Action? _peerChanged;
     private bool _handedOver;
     private bool _rulesOpen;
     private bool _settingsOpen;
@@ -95,8 +96,8 @@ public partial class MenuView : UserControl
             StopDemo();
 
             // The peer is handed to the game view once a game starts; anything still
-            // sitting here was abandoned.
-            if (!_handedOver) _peer?.Dispose();
+            // sitting here was abandoned. Either way this screen stops listening to it.
+            ReleasePeer(dispose: !_handedOver);
         };
 
         KeyDown += (_, e) =>
@@ -156,23 +157,21 @@ public partial class MenuView : UserControl
         switch (SelectedFlavour())
         {
             case GameFlavour.Custom:
-                int[] walls = { 0, 3, 5, 7, 10, 14, 20 };
-                int[] holes = { 0, 2, 4, 6, 10 };
-                int[] pickups = { 0, 4, 6, 10 };
                 int size = SelectedSize();
 
-                // Counted in portals rather than in squares, because a portal's two mouths
-                // are one object. Read off the size's own list rather than a copy of it, so
-                // a number this board cannot carry is never the one sent over a link.
-                int[] portals = GameSetup.PortalOptions(size);
-
+                // Every one of these is read off the size's own list in Core rather than a
+                // copy kept here, so a number this board cannot carry is never the one sent
+                // over a link — and a number offered by one build and not the other is not
+                // a game that fails to start. The portals were already read that way; the
+                // other three were hardcoded nines, which is how a five could be asked for
+                // ten pickups and built with four.
                 return new GameSetup
                 {
                     Size = size,
-                    Walls = walls[Math.Clamp(WallsPick.SelectedIndex, 0, walls.Length - 1)],
-                    Holes = holes[Math.Clamp(HolesPick.SelectedIndex, 0, holes.Length - 1)],
-                    Pickups = pickups[Math.Clamp(PickupsPick.SelectedIndex, 0, pickups.Length - 1)],
-                    Portals = portals[Math.Clamp(PortalsPick.SelectedIndex, 0, portals.Length - 1)],
+                    Walls = Chosen(WallsPick, GameSetup.WallOptions(size)),
+                    Holes = Chosen(HolesPick, GameSetup.HoleOptions(size)),
+                    Pickups = Chosen(PickupsPick, GameSetup.PickupOptions(size)),
+                    Portals = Chosen(PortalsPick, GameSetup.PortalOptions(size)),
                     Seed = seed,
                 };
 
@@ -205,34 +204,58 @@ public partial class MenuView : UserControl
     private int SelectedSize() => SizePick.SelectedIndex switch { 1 => 7, 2 => 5, _ => Board.Size };
 
     /// <summary>
-    /// Stops the portal control offering a number the chosen board cannot carry, and says
-    /// why. A five has nowhere at all to put a mouth, and a seven has one usable pairing,
-    /// so a second portal there would share it and the two would be one objective rather
-    /// than two. Leaving the number selectable and quietly building fewer would read as the
-    /// generator being unreliable rather than as a rule of the size.
+    /// What the four setup dropdowns currently stand for. Kept because a dropdown knows
+    /// only which row is selected, and a change of size has to re-choose the number that
+    /// was picked rather than the row it happened to sit in.
+    /// </summary>
+    private int[] _wallsOffered = GameSetup.WallOptions(Board.Size);
+    private int[] _holesOffered = GameSetup.HoleOptions(Board.Size);
+    private int[] _pickupsOffered = GameSetup.PickupOptions(Board.Size);
+    private int[] _portalsOffered = GameSetup.PortalOptions(Board.Size);
+
+    /// <summary>The number a setup dropdown is currently naming.</summary>
+    private static int Chosen(ComboBox pick, int[] offered) =>
+        offered[Math.Clamp(pick.SelectedIndex, 0, offered.Length - 1)];
+
+    /// <summary>
+    /// Refits the four setup dropdowns to the chosen board, from the lists Core publishes
+    /// for that size. Core keeps them precisely so that the setup screens do not each hold
+    /// their own idea of what a board can carry: a number offered by one build and not the
+    /// other is a game that cannot be started from a link.
+    ///
+    /// The nine's numbers are not a five's. A five has a quarter of the wall slots, and only
+    /// 14 of its 25 squares may take a hole or a pickup at all — the two goal rows are
+    /// reserved and the centre is its own mirror — so a five asked for ten pickups was built
+    /// with four and said nothing. Portals are harder still: a five can carry none, because
+    /// its goal rows and the rows beside them are the whole board, and a seven can carry one,
+    /// because its two usable rows are a single mirrored pair and two portals sharing that
+    /// pair would be one objective rather than two.
+    ///
+    /// A pick that survives the change keeps its number, and where the new size does not
+    /// offer that number the nearest one below it is taken instead. Leaving the row where it
+    /// stood would change the number under the player without saying so.
     /// </summary>
     private void ApplySize()
     {
-        int[] offered = GameSetup.PortalOptions(SelectedSize());
+        int size = SelectedSize();
 
-        // Taken out of the list rather than merely disabled: the dropdown's rows are drawn
-        // by one template with no disabled state, so a row left in place would look exactly
-        // like one that can be picked.
-        for (int i = 0; i < PortalsPick.Items.Count; i++)
+        Offer(WallsPick, ref _wallsOffered, GameSetup.WallOptions(size),
+            walls => walls.ToString());
+
+        Offer(HolesPick, ref _holesOffered, GameSetup.HoleOptions(size),
+            holes => holes == 0 ? "None" : $"{holes} — scattered at random");
+
+        Offer(PickupsPick, ref _pickupsOffered, GameSetup.PickupOptions(size),
+            pickups => pickups == 0 ? "None" : $"{pickups} — a spare wall or a free move");
+
+        int[] offered = GameSetup.PortalOptions(size);
+
+        Offer(PortalsPick, ref _portalsOffered, offered, portals => portals switch
         {
-            var row = (ComboBoxItem)PortalsPick.Items[i];
-
-            row.IsEnabled = i < offered.Length;
-            row.Visibility = i < offered.Length ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        if (PortalsPick.SelectedIndex >= offered.Length)
-            PortalsPick.SelectedIndex = offered.Length - 1;
-
-        // Nothing to choose between is not a choice, so the whole control goes quiet — and
-        // visibly so, since the pick's own template does not draw a disabled state either.
-        PortalsPick.IsEnabled = offered.Length > 1;
-        PortalsPick.Opacity = offered.Length > 1 ? 1 : 0.45;
+            0 => "None",
+            1 => "1 — one pair of linked squares",
+            _ => "2 — two pairs of linked squares",
+        });
 
         PortalNote.Text = offered.Length switch
         {
@@ -242,6 +265,49 @@ public partial class MenuView : UserControl
         };
 
         PortalNote.Visibility = PortalNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Relabels one setup dropdown to the numbers a size offers, and keeps the choice that
+    /// was made across the change.
+    /// </summary>
+    private static void Offer(ComboBox pick, ref int[] shown, int[] offered, Func<int, string> label)
+    {
+        int wanted = shown[Math.Clamp(pick.SelectedIndex, 0, shown.Length - 1)];
+        shown = offered;
+
+        // The screen is built for the largest list a size can ask for, so rows are only
+        // ever added if Core grows one — but a list that quietly lost its top entry here
+        // would be the same divergence this whole change is undoing.
+        while (pick.Items.Count < offered.Length) pick.Items.Add(new ComboBoxItem());
+
+        // Rows this size cannot use are taken out of the list rather than merely disabled:
+        // the dropdown's rows are drawn by one template with no disabled state, so a row
+        // left in place would look exactly like one that can be picked.
+        for (int i = 0; i < pick.Items.Count; i++)
+        {
+            var row = (ComboBoxItem)pick.Items[i];
+            bool usable = i < offered.Length;
+
+            if (usable) row.Content = label(offered[i]);
+
+            row.IsEnabled = usable;
+            row.Visibility = usable ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        // The number that was picked where the new size still offers it, and the nearest one
+        // below it where it does not — never a bigger board's number on a smaller board.
+        int index = 0;
+        for (int i = 0; i < offered.Length; i++)
+            if (offered[i] <= wanted)
+                index = i;
+
+        pick.SelectedIndex = index;
+
+        // Nothing to choose between is not a choice, so the whole control goes quiet — and
+        // visibly so, since the pick's own template does not draw a disabled state either.
+        pick.IsEnabled = offered.Length > 1;
+        pick.Opacity = offered.Length > 1 ? 1 : 0.45;
     }
 
     private void UpdateThemeButton() =>
@@ -459,14 +525,37 @@ public partial class MenuView : UserControl
 
     private NetPeer FreshPeer()
     {
-        _peer?.Dispose();
+        ReleasePeer(dispose: true);
         _handedOver = false;
 
         var peer = new NetPeer();
-        peer.Changed += () => Dispatcher.Invoke(() => OnPeerChanged(peer));
+
+        // Kept rather than left anonymous so it can be taken off again. The closure holds
+        // this view, and once the peer has been handed to the game the peer outlives the
+        // view — see ReleasePeer.
+        _peerChanged = () => Dispatcher.Invoke(() => OnPeerChanged(peer));
+        peer.Changed += _peerChanged;
 
         _peer = peer;
         return peer;
+    }
+
+    /// <summary>
+    /// Lets go of the peer this screen was holding. The subscription comes off whether or
+    /// not the connection is closed with it: <see cref="NetPeer.Dispose"/> leaves its
+    /// events alone, so a peer handed to the game went on holding this menu — and with it
+    /// two 4 MB engine tables — for the whole of the network game, and a link that failed
+    /// mid-game wrote its trouble into a status bar nobody was looking at.
+    /// </summary>
+    private void ReleasePeer(bool dispose)
+    {
+        if (_peer is null) return;
+
+        if (_peerChanged is not null) _peer.Changed -= _peerChanged;
+        _peerChanged = null;
+
+        if (dispose) _peer.Dispose();
+        _peer = null;
     }
 
     private void OnPeerChanged(NetPeer peer)
@@ -501,8 +590,7 @@ public partial class MenuView : UserControl
         }
         else
         {
-            _peer?.Dispose();
-            _peer = null;
+            ReleasePeer(dispose: true);
         }
 
         Fade(NetworkOverlay, NetworkScale, visible);

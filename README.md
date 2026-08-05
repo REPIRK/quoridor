@@ -43,8 +43,15 @@ A portal is a pair of linked squares. Stepping between them is one move like any
 and it passes the turn, which is the whole of the rule: no charge, no cooldown, and it
 never runs out. It is worth what the trip to reach it costs, so the skill in it is
 deciding whose route it shortens more — and a wall on the approach adds two to a journey
-that was about to be short. There are at most two pairs, never on a goal row or the row
-beside one, and never on a 5×5, where two of the five rows are already goal rows.
+that was about to be short.
+
+Where a mouth may stand is a stricter rule than it looks. Not a goal row, not the row
+beside one — a 9×9 portal from row 1 to row 7 would save six rows of a seven-row journey,
+permanently, in every game played on that board — and not the centre row either, where a
+mouth's mirror lands in the same row and the portal only moves you sideways. That leaves
+`size - 5` rows: four on a 9×9, two on a 7×7, none at all on a 5×5. So a nine offers up
+to two pairs, a seven exactly one — its two rows are a single mirrored pair, and two
+portals sharing a pairing are one objective rather than two — and a five none.
 
 Holes, pickups and portals are always placed in pairs that map onto each other under a
 half turn of the board, the same turn that maps one player's half onto the other's. So a
@@ -53,9 +60,10 @@ random board is still a fair one: whatever the roll does to your route, it does 
 There is no 11×11. The core is compiled around a nine-wide grid, and a smaller game is
 played on a centred square of it — which costs nothing and is why 7×7 and 5×5 are here.
 Going the other way would mean making the board size a runtime value: every index,
-shift and mask stops being a constant, and 121 wall slots no longer fit the 64-bit word
-they are packed into. That is a real cost to the engine, which is the thing this project
-is actually about.
+shift and mask stops being a constant, and the wall slots stop fitting the 64-bit word
+they are packed into. A board of *n* has `(n-1)²` slots, so a nine has 64 — exactly the
+word, with nothing spare — and an eleven would want 100. That is a real cost to the
+engine, which is the thing this project is actually about.
 
 | | |
 | --- | --- |
@@ -71,24 +79,43 @@ The browser build answers to the same keys where it has the same thing to do: `S
 board under the `?`, which is also what brings back the line explaining how to move once
 it has retired itself.
 
-It can also be played without a mouse at all. `Tab` reaches the board, the arrow keys
-move a cursor, `Enter` plays the square under it, `W` goes to the grooves to place a wall
-and `R` turns it. The cursor moves in the directions you see rather than the board's own,
-so it does not invert when the board turns around for the second seat.
+The browser build can also be played without a mouse at all. `Tab` reaches the board and
+the arrow keys move a cursor over it; `Enter` or `Space` plays whatever the cursor is on.
+`W` and `R` are the same key — either one takes the cursor from the squares into the
+grooves, and each press after that turns the wall over, because which slot and which way
+it lies are one question asked twice. `Home` puts the cursor back on your own piece and
+`Esc` backs it out of the grooves. The cursor moves in the directions you see rather than
+the board's own, so it does not invert when the board turns around for the second seat.
 
-Two looks are offered under Settings. **Flat** is the default and is the plainer of the
-two. **Carved** lights the board from one corner and gives the pieces a top and a side,
-so a wall that has been played is a solid thing and a wall you are only pointing at is a
-flat bar lying in the groove. It is the same board and the same markup either way.
+A key belongs to whatever is holding focus, so the same key does two things. `Space`
+draws the routes with nothing focused and plays the cursor's move once the board is; the
+arrows step through the game so far unless the board has focus, where they move the
+cursor instead. `Ctrl+Z` is the page's undo wherever it is pressed — the board ignores
+anything with a modifier held — and a key pressed into a text field is the field's, which
+is what stops `Ctrl+Z` in the invite box undoing the game instead of the typing.
+
+Two looks are offered under the browser build's Settings. **Flat** is the default and is
+the plainer of the two. **Carved** lights the board from one corner and gives the pieces
+a top and a side, so a wall that has been played is a solid thing and a wall you are only
+pointing at is a flat bar lying in the groove. It is the same board and the same markup
+either way.
 
 ## Running it
+
+The .NET 9 SDK or anything newer. `global.json` names 9 as a floor and rolls forward
+across a major version, so a machine carrying only .NET 10 builds this too — the projects
+target `net9.0` and a newer SDK builds that from the reference packs.
 
 ```bash
 dotnet run --project src/Quoridor.App -c Release      # the Windows app
 dotnet run --project src/Quoridor.Web -c Release      # the browser build, on localhost
 dotnet run --project tests/Quoridor.Selftest -c Release   # rules and engine checks
-dotnet run --project tests/Quoridor.Bench -c Release -- depth|ladder|smp|fixed|trace|tune|ablate|race|duel|pickups|holes|portals|smpduel
+dotnet run --project tests/Quoridor.Bench -c Release -- <mode>   # engine measurement
 ```
+
+The bench modes are `all`, `depth`, `ladder`, `smp`, `fixed`, `trace`, `tune`, `ablate`,
+`race`, `duel`, `pickups`, `holes`, `portals`, `smpduel`, and four that measure the bot
+thinking on your turn — `ponder`, `ponderhit`, `pondermiss`, `ponderduel`.
 
 A single self-contained `Quoridor.exe` that needs no .NET installed:
 
@@ -113,8 +140,13 @@ only the view is written twice.
 
 ### The core
 
-A position is a mutable 100-byte struct. The search copies it rather than implementing
-undo: cheaper than a pair of cache lines, and it removes a whole class of bugs.
+A position is a mutable struct of **160 bytes** — measured with `Unsafe.SizeOf`, not
+counted off the fields. The search copies it rather than implementing undo. That is two
+and a half cache lines a node, so the copy is not free and the honest defence is not that
+it is cheap: it is ten vector moves with no branches and no bookkeeping, it cannot be got
+wrong, and it removes a whole class of bugs an undo stack invites. The engine turns over
+1.16M nodes a second with one of those copies at every one of them, which is the number
+that settles whether the trade was worth taking.
 
 Squares are a bitboard in a `UInt128` — 81 bits, `index = row * 9 + col`. Four
 `Blocked*` boards answer "may a pawn step this way" in one AND, with the board edges
@@ -169,15 +201,56 @@ restores the argument, because the chain still has to enter the new wall at one 
 points and leave at another whatever it is tied to at the far end. The test is "sealed on
 all four sides", which also catches a square walled in on every side — not a hole, but
 just as impassable, and counting it only ever asks for more full checks, never fewer.
-Boards with holes now skip half to three-quarters of their wall checks instead of none,
-worth about 7% more nodes a second, and the self-tests audit every legal placement
-through a whole game on each layout.
+
+Boards with holes now skip a good part of their wall checks instead of none, worth about
+7% more nodes a second. How good a part depends on the board, so the self-test prints the
+rate for every layout it plays rather than naming one number here; the current run gives
+
+```
+6 holes                                    62%
+10 holes                                   29%
+7×7 · 6 walls · 4 holes                    59%
+7×7 · 6 walls · 4 holes · 4 pickups        44%
+5×5 · 3 walls · 2 holes · 4 pickups        28%
+6 holes · 2 portals                        43%
+7×7 · 6 walls · 4 holes · 1 portal         37%
+```
+
+— the suite's own labels, so the two tables can be read side by side — against 97–100% on
+the boards with no holes on them at all. So: a quarter to two thirds, and the direction is
+the one the argument above predicts. **More holes skip fewer checks**, because every hole
+is another anchor, and a wall with two anchored points has to be checked properly. The
+self-tests audit every legal placement through a whole game on each layout, so a change
+that quietly switched the shortcut back off would show up here as a rate falling to zero
+rather than as a lost game.
 
 Pickups break a different assumption: that the two players alternate. A free move does
 not pass the turn, so the child of that move is scored from the same side and must not
 be negated — every recursion goes through one helper that checks which it is. The exact
 race verdict also stops being exact while pickups are on the board, since one can hand
 out a wall in a position that had none, so it is switched off until they are gone.
+
+The hard bot also **thinks while you do**, on the desktop, where there is a second core
+to think on — the browser build has one thread and never asks. It runs on its own engine
+object sharing the one lock-free table, so a ponder can only ever leave entries behind;
+it can return no move and writes nothing to the result, the clock or the game history.
+What it searches was chosen by measurement rather than by argument, as three arms off the
+same positions and budgets against the same unpondered search (`bench ponderhit`):
+
+```
+                              heuristic opponent   engine opponent
+  ponder nothing                    0.00 ply           0.00 ply
+  ponder the parent position       +0.54              +0.71
+  ponder the predicted reply       +0.99              +1.56
+  ponder the right position        +1.81              +1.73   (unreachable)
+                                   n=105              n=209
+```
+
+Believe the left-hand column: a person plays less predictably than an engine, and the
+guess landed 48% of the time against a heuristic where it landed 83% against another
+engine. Misses are therefore common and they do cost — 0.18 ± 0.06 ply behind the parent
+arm on the plies where the guess was wrong — and the hits pay that back several times
+over. It is on by default, with a switch for it under the desktop's Settings.
 
 ```
                      depth reached, one thread
@@ -259,7 +332,10 @@ Then turn on Pages for the repository with **GitHub Actions** as the source. Aft
 
 - `.github/workflows/ci.yml` builds the solution and runs the checks on every push.
 - `.github/workflows/pages.yml` publishes the browser build on every push to `main`. It
-  installs the WebAssembly AOT toolchain, so expect the job to take a few minutes.
+  runs the same checks first, so nothing reaches the public site that has not passed
+  them, and it installs the WebAssembly AOT toolchain, so expect a few minutes.
+- `.github/workflows/release.yml` runs the checks and then builds the single `.exe`,
+  on a `v*` tag.
 
 The play link at the top of this file assumes the repository is named `quoridor`; the
 Pages workflow picks the name up on its own.

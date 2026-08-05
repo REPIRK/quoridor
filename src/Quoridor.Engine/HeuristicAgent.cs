@@ -88,15 +88,28 @@ public sealed class HeuristicAgent : IQuoridorAgent
     }
 
     /// <summary>
-    /// Last resort: any legal pawn step. A Quoridor position always has one, since
-    /// walls may never remove every route.
+    /// Last resort: any legal move at all. The pawn steps are asked for first because
+    /// they are one generation rather than eighty-odd wall placements, not because they
+    /// are the only kind that counts.
+    ///
+    /// It used to stop there and throw, on the argument that walls may never remove every
+    /// route so a pawn always has a step. Portals broke that: a pawn can be boxed in with
+    /// its escape route running through the opponent's portal mouth, and having no step is
+    /// then a perfectly ordinary position that the player answers with a wall. The rules
+    /// forfeit a turn only when there is no move of either kind
+    /// (<c>GameState.Apply</c>), so reaching the throw below means a position was built
+    /// past the rules rather than played into — which is worth saying out loud, since
+    /// every agent funnels through here.
     /// </summary>
     internal static Move Fallback(in GameState state)
     {
         Span<Move> buffer = stackalloc Move[10];
-        int count = state.GeneratePawnMoves(buffer);
-        if (count > 0) return buffer[0];
+        if (state.GeneratePawnMoves(buffer) > 0) return buffer[0];
 
-        throw new InvalidOperationException("Position has no legal pawn move, which the rules make impossible.");
+        List<Move> everything = state.LegalMoves();
+        if (everything.Count > 0) return everything[0];
+
+        throw new InvalidOperationException(
+            "Position has no legal move of any kind, which GameState.Apply forfeits the turn to avoid.");
     }
 }

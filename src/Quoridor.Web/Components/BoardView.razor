@@ -239,7 +239,11 @@
        explanation. The shadow falls away from the lamp, the side face fills the slot the
        preview would occupy, and the top face is lifted toward the lamp by Lift. Offsets
        do the whole of the extrusion: a blur here would be re-rasterised on every redraw
-       of the board, and there are up to twenty of these. *@
+       of the board, and there are up to twenty of these.
+
+       Every one of those offsets carries the sign in Lamp, which is what keeps the light
+       above and to the left of the piece on the board that has been turned around — see
+       there for why a negation is the whole of the correction. *@
     @foreach ((MoveKind kind, int row, int col, int owner) in PlacedWalls())
     {
         bool flat = kind == MoveKind.HorizontalWall;
@@ -250,9 +254,9 @@
         int height = flat ? Gap : WallLength;
 
         <g class="wall @(owner == 0 ? "p0" : "p1")">
-            <rect class="cast" rx="2" x="@(x + Lift)" y="@(y + Lift + 1)" width="@width" height="@height" />
+            <rect class="cast" rx="2" x="@(x + Lift * Lamp)" y="@(y + (Lift + 1) * Lamp)" width="@width" height="@height" />
             <rect class="side" rx="2" x="@x" y="@y" width="@width" height="@height" />
-            <rect class="top" rx="2" x="@(x - Lift)" y="@(y - Lift)" width="@width" height="@height" />
+            <rect class="top" rx="2" x="@(x - Lift * Lamp)" y="@(y - Lift * Lamp)" width="@width" height="@height" />
         </g>
     }
 
@@ -267,9 +271,15 @@
         @* Positioned by the outer group so the inner one is free to be scaled about its
            own origin — everything inside is drawn around (0,0). Keyed on the game so a
            new board lays them out again; they follow the gaps rather than joining them,
-           since a prize is worth reading after the hazard. *@
+           since a prize is worth reading after the hazard.
+
+           The entrance is on the inner group, and the delay rides down to it as a custom
+           property the way the gaps' and the mouths' do: animation-delay does not inherit
+           and a custom property does. The holder cannot carry the entrance itself, because
+           a keyframe's transform replaces this translate rather than composing with it —
+           the prize would grow from the SVG origin, which on a 5x5 is off the board. *@
         <g @key="(Generation, cell)" class="pickup-holder"
-           style="animation-delay: @(Stagger(laid++, lying.Count, 60, 110))ms"
+           style="--delay: @(Stagger(laid++, lying.Count, 60, 110))ms"
            transform="translate(@cx @cy)">
             @if (isWall)
             {
@@ -277,9 +287,9 @@
                    same Lift — a spare wall lying loose on the square, which is exactly
                    what it is. Nothing about it has to be explained twice. *@
                 <g class="pickup wall">
-                    <rect class="cast" rx="2" x="@(-13 + Lift)" y="@(-4 + Lift + 1)" width="26" height="8" />
+                    <rect class="cast" rx="2" x="@(-13 + Lift * Lamp)" y="@(-4 + (Lift + 1) * Lamp)" width="26" height="8" />
                     <rect class="side" rx="2" x="-13" y="-4" width="26" height="8" />
-                    <rect class="top" rx="2" x="@(-13 - Lift)" y="@(-4 - Lift)" width="26" height="8" />
+                    <rect class="top" rx="2" x="@(-13 - Lift * Lamp)" y="@(-4 - Lift * Lamp)" width="26" height="8" />
                 </g>
             }
             else
@@ -288,7 +298,7 @@
                    at the end of it. It says "go again" without a word on it — now stamped
                    on a token sitting on the square rather than drawn onto the square. *@
                 <g class="pickup skip">
-                    <ellipse class="contact" cx="3" cy="5" rx="12" ry="5" />
+                    <ellipse class="contact" cx="@(3 * Lamp)" cy="@(5 * Lamp)" rx="12" ry="5" />
                     <circle class="token" r="13" />
                     <circle class="dome" r="13" />
                     <path class="arc" d="M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36" />
@@ -300,7 +310,11 @@
 
     @* The one taken on the last move, still drawn for a moment while it leaves. Keyed
        on the ply so each collection plays its own burst rather than reviving the last
-       one; it is removed from the render as soon as the next move arrives. *@
+       one; it is removed from the render as soon as the next move arrives.
+
+       As with the prizes above, the group carries the square and the ring inside it does
+       the opening: an animated transform replaces this one instead of composing with it,
+       and a ring that opened at the SVG origin was off the view entirely on a 7x7. *@
     @if (Collected is { } taken)
     {
         <g @key="@($"taken-{State.Ply}")" class="pickup-burst @(taken.IsWall ? "wall" : "skip")"
@@ -450,8 +464,9 @@
                     <g @key="(player, _hopAt[player])" class="lift @(_hop[player])" style="@WarpFrom(player)">
 
                         @* Contact first, because it is what the piece is standing on. It
-                           spreads while the piece travels and tightens as it lands. *@
-                        <ellipse class="contact" cx="3" cy="6" rx="19" ry="7" />
+                           spreads while the piece travels and tightens as it lands. It lies
+                           away from the light, so it carries Lamp like the walls above. *@
+                        <ellipse class="contact" cx="@(3 * Lamp)" cy="@(6 * Lamp)" rx="19" ry="7" />
 
                         @* Whose turn it is should be legible from the board, not only from
                            the panel beside it. A ring is a clearer answer than a
@@ -624,6 +639,25 @@
     /// </summary>
     private string? TurnedPaint => Flipped ? "rotate(180 0.5 0.5)" : null;
 
+    /// <summary>
+    /// The sign every offset that says where the lamp is has to be drawn with. The gradients
+    /// above cancel the group's half turn in the paint; the cues that are geometry rather
+    /// than paint — the face of a wall lifted toward the lamp, the shadow it throws away
+    /// from it, the ellipse a piece stands on — had no such cancellation and turned with the
+    /// board. Measured on screen in board units at the second seat, the lit top face sat 4
+    /// down and 4 right of the bar it belongs to and the shadow 4 up and 5 left of it: a
+    /// wall lit from underneath, throwing its shadow up into the light — every cue exactly
+    /// inverted from the first seat. Negating the offset in board space puts it back
+    /// where the screen wants it, because a half turn about the board's centre is exactly a
+    /// negation of every offset inside it.
+    ///
+    /// None of it reaches the flat board. Every shape this signs — a wall's `cast` and
+    /// `top`, a spare wall's, and the `contact` under a piece and under a token — is
+    /// `fill: none` in the stylesheet until `carved` is on, so what moves here is a handful
+    /// of rects and ellipses that board never paints.
+    /// </summary>
+    private int Lamp => Flipped ? -1 : 1;
+
     // What the pointer is over, recorded whether or not it is our turn. Dropping it
     // when the turn passes is what made a resting cursor go dead: you would have to
     // move off the square and back before the click would take.
@@ -746,6 +780,17 @@
     [Parameter] public Move? LastMove { get; set; }
 
     [Parameter] public EventCallback<Move> OnMove { get; set; }
+
+    /// <summary>
+    /// Whether a press on a board that is not taking moves should be banked for the moment
+    /// the turn arrives. It is not the negation of <see cref="Interactive"/>, which folds two
+    /// unrelated reasons together: it is not your turn, and you are reading the game back.
+    /// Only the first of those is a reason to queue anything — a press on a position that is
+    /// forty plies old is a player reading, and a move banked there is played later without
+    /// ever having been asked for. Whoever owns the game says which of the two it is; the
+    /// board cannot tell them apart from <see cref="Interactive"/> alone.
+    /// </summary>
+    [Parameter] public bool AllowPremove { get; set; }
 
     /// <summary>A move queued for the moment the turn arrives, or null for none.</summary>
     [Parameter] public Move? Premove { get; set; }
@@ -1051,8 +1096,15 @@
         // Not our turn: remember it and play it the moment the turn arrives. Whether it
         // will still be legal is unknowable now, so it is checked then and dropped if
         // the opponent's move ruined it.
+        //
+        // Asked of AllowPremove and not of !Interactive, which is also false while the game
+        // is being read back — and a press on a forty-ply-old position is a player reading,
+        // not a player queueing. Banked there it survived the return to the live board and
+        // was played after the engine's next reply, a move nobody had asked for.
         if (!Interactive)
         {
+            if (!AllowPremove) return;
+
             if (Premove is null || Premove != move) await OnPremove.InvokeAsync(move);
             else await OnPremove.InvokeAsync(null);
 

@@ -170,23 +170,31 @@ public sealed class GameSession
     /// Whether the person at this keyboard may move. In a network game only one seat is
     /// theirs; in a local match both are.
     /// </summary>
-    public bool IsHumanTurn => !IsOver && _agents[State.SideToMove] is null &&
-        (Options.Mode != GameMode.Online || State.SideToMove == Options.HumanSeat);
+    public bool IsHumanTurn => !IsOver && IsHumanSeat(State.SideToMove);
+
+    /// <summary>Whether the person at this keyboard is the one who plays this seat.</summary>
+    private bool IsHumanSeat(int seat) => _agents[seat] is null &&
+        (Options.Mode != GameMode.Online || seat == Options.HumanSeat);
 
     /// <summary>
-    /// In a bot game an undo rewinds a full round, so the human moves again. Over the
-    /// network it would need the other player's agreement, which there is no way to ask
-    /// for, so it is not offered.
+    /// An undo hands the board back to the player, so it is offered exactly when there is
+    /// a turn of theirs to go back to. Over the network it would need the other player's
+    /// agreement, which there is no way to ask for, so it is not offered at all.
     /// </summary>
-    public bool CanUndo => Options.Mode switch
-    {
-        GameMode.Hotseat => _moves.Count > 0,
-        GameMode.VersusBot => _moves.Count >= 2,
-        _ => false,
-    };
+    public bool CanUndo => PreviousHumanTurn() >= 0;
 
     /// <summary>Whether the move just played kept the turn, having found a free move.</summary>
     public bool LastMoveWentAgain { get; private set; }
+
+    /// <summary>
+    /// Whether the turn came back because the other player had nothing legal to play and
+    /// forfeited it (<c>GameState.Apply</c>). It looks exactly like a free move from here
+    /// — the same player is on move twice running — and it is not one: nothing was picked
+    /// up, and on a board carrying no skip pickups at all there is nothing it could have
+    /// been picked up from. Told apart by what the move landed on, because a free move
+    /// only ever comes off a skip square.
+    /// </summary>
+    public bool LastTurnForfeited { get; private set; }
 
     /// <summary>Whether the move just played picked a spare wall up off the board.</summary>
     public bool LastMoveTookAWall { get; private set; }
@@ -214,6 +222,12 @@ public sealed class GameSession
             State.IsPortalMouth(State.PawnOf(mover)) &&
             GameState.PortalPartner(State.PawnOf(mover)) == move.Cell;
 
+        // Also asked before the move, and for the same reason: stepping on a skip pickup
+        // is what takes it off the board. This is the whole difference between the two
+        // ways the turn can come straight back — a free move was taken here, or the other
+        // player had nothing to play and forfeited theirs.
+        bool tookFreeMove = move.Kind == MoveKind.Pawn && (State.SkipPickups & Board.Bit(move.Cell)) != 0;
+
         _positions.Add(State);
         _moves.Add(move);
 
@@ -222,7 +236,10 @@ public sealed class GameSession
         State = next;
 
         // Placing a wall spends one, so a supply that went up can only mean a pickup.
-        LastMoveWentAgain = !IsOver && State.SideToMove == mover;
+        bool cameStraightBack = !IsOver && State.SideToMove == mover;
+
+        LastMoveWentAgain = cameStraightBack && tookFreeMove;
+        LastTurnForfeited = cameStraightBack && !tookFreeMove;
         LastMoveTookAWall = State.WallsOf(mover) > wallsBefore;
         LastMoveCrossedPortal = crossedPortal;
 
@@ -249,19 +266,45 @@ public sealed class GameSession
         return true;
     }
 
+    /// <summary>
+    /// The ply the board should fall back to when the player asks to take a move back:
+    /// the last position it was their turn in. -1 when there is none, which is what makes
+    /// taking a move back unavailable.
+    ///
+    /// Searched for rather than counted. A fixed rewind of two plies assumes the turn
+    /// alternates, and it does not: a skip pickup gives a free move that keeps the turn,
+    /// so on a board carrying one the count lands on the wrong seat. It is wrong again at
+    /// the end of every game the human won, where the last ply is theirs and two plies
+    /// back is the engine's turn — which is how undoing a won game used to leave the
+    /// engine on move with nobody to run it.
+    /// </summary>
+    private int PreviousHumanTurn()
+    {
+        // Both seats are the player's in a local match, one is theirs against the engine,
+        // and neither is in a watched game. A network undo would need the other player's
+        // agreement, which there is no way to ask for.
+        if (Options.Mode is not (GameMode.Hotseat or GameMode.VersusBot)) return -1;
+
+        for (int ply = _positions.Count - 1; ply >= 0; ply--)
+            if (IsHumanSeat(_positions[ply].SideToMove)) return ply;
+
+        return -1;
+    }
+
     public bool Undo()
     {
-        if (!CanUndo) return false;
+        int target = PreviousHumanTurn();
+        if (target < 0) return false;
 
         StopPondering();
 
-        int rewind = Options.Mode == GameMode.Hotseat ? 1 : 2;
-        int target = _positions.Count - rewind;
-
         State = _positions[target];
-        _positions.RemoveRange(target, rewind);
-        _moves.RemoveRange(target, rewind);
+        _positions.RemoveRange(target, _positions.Count - target);
+        _moves.RemoveRange(target, _moves.Count - target);
         _flagged = -1;
+
+        ForgetLastMove();
+        PositionChanged?.Invoke();
 
         return true;
     }
@@ -278,6 +321,34 @@ public sealed class GameSession
         // just played on rather than a fresh roll of the dice.
         State = Options.Setup.Build().State;
         ResetClocks();
+
+        ForgetLastMove();
+        PositionChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Raised when the session has moved the game somewhere nobody played to — an undo or
+    /// a restart. Whoever is on move afterwards is not who was on move before, and if that
+    /// is an engine then something has to set it going: this says so once, here, rather
+    /// than leaving every caller to remember. Undo was the one that did not.
+    ///
+    /// <see cref="Apply"/> deliberately does not raise it. The view is mid-animation there
+    /// and owns what happens next.
+    /// </summary>
+    public event Action? PositionChanged;
+
+    /// <summary>
+    /// Drops what the last move did. The three flags below describe the move just played,
+    /// and after a rewind or a restart no move was just played — without this the panel
+    /// went on announcing the pickup or the portal from the game that has been taken off
+    /// the board.
+    /// </summary>
+    private void ForgetLastMove()
+    {
+        LastMoveWentAgain = false;
+        LastTurnForfeited = false;
+        LastMoveTookAWall = false;
+        LastMoveCrossedPortal = false;
     }
 
     /// <summary>

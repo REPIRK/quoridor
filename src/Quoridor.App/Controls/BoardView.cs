@@ -517,8 +517,14 @@ public sealed class BoardView : UserControl
             walls &= ~bit;
             skips &= ~bit;
 
-            double x = CellCentreOf(ViewIndex(Board.ColOf(cell)));
-            double y = CellCentreOf(ViewIndex(Board.RowOf(cell)));
+            // The raw model index, as every other caller passes: CellCentreOf turns it
+            // round by itself, and ViewIndex is its own inverse, so turning it round here
+            // as well cancelled the flip and drew each pickup on the half-turn image of
+            // its own square. Invisible at the start of a game, because the pickups are
+            // placed in half-turn pairs and the set is therefore flip-invariant — and
+            // wrong from the moment one of them is taken.
+            double x = CellCentreOf(Board.ColOf(cell));
+            double y = CellCentreOf(Board.RowOf(cell));
 
             Brush ink = Palette.BrushOf(Palette.Text);
 

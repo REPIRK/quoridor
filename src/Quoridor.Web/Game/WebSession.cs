@@ -111,6 +111,16 @@ public sealed class WebSession
     /// <summary>Whether the move just played kept the turn, having found a free move.</summary>
     public bool LastMoveWentAgain { get; private set; }
 
+    /// <summary>
+    /// Whether the turn came back because the other player had nothing legal to play and
+    /// forfeited it (<c>GameState.Apply</c>). It looks exactly like a free move from here
+    /// — the same player is on move twice running — and it is not one: nothing was picked
+    /// up, and on a board carrying no skip pickups at all there is nothing it could have
+    /// been picked up from. Told apart by what the move landed on, because a free move
+    /// only ever comes off a skip square.
+    /// </summary>
+    public bool LastTurnForfeited { get; private set; }
+
     /// <summary>Whether the move just played picked a spare wall up off the board.</summary>
     public bool LastMoveTookAWall { get; private set; }
 
@@ -162,7 +172,16 @@ public sealed class WebSession
         State = next;
 
         // Placing a wall spends one, so a supply that went up can only mean a pickup.
-        LastMoveWentAgain = !IsOver && State.SideToMove == mover;
+        //
+        // The turn coming straight back has two causes and they read quite differently to
+        // the player: a free move was taken off a skip square, or the other player had
+        // nothing legal and forfeited. LastPickup was noted above and is what tells them
+        // apart, since a free move only ever comes off a skip square.
+        bool cameStraightBack = !IsOver && State.SideToMove == mover;
+        bool tookFreeMove = LastPickup is { IsWall: false };
+
+        LastMoveWentAgain = cameStraightBack && tookFreeMove;
+        LastTurnForfeited = cameStraightBack && !tookFreeMove;
         LastMoveTookAWall = State.WallsOf(mover) > wallsBefore;
         LastMover = mover;
 
@@ -172,12 +191,34 @@ public sealed class WebSession
     /// <summary>The pickup the last move took and where, for the board to see it off.</summary>
     public (int Cell, bool IsWall)? LastPickup { get; private set; }
 
+    /// <summary>
+    /// Takes the game back to the last position this keyboard could move from, which is
+    /// what "undo" means to the person pressing it — not a fixed number of plies.
+    ///
+    /// It used to rewind exactly two against the engine, which is only right while the
+    /// turn alternates. It does not alternate when the human delivered the winning move
+    /// (the game ends on their ply, so two back is the engine's turn), and it does not
+    /// alternate on a board with Skip pickups, where a free move keeps the turn. Both
+    /// landed on an engine turn on a board the engine was never restarted for, so the
+    /// game simply stopped.
+    ///
+    /// Measured: a game the human wins on seat 0 rewound two plies to
+    /// <c>SideToMove = 1</c> and now rewinds one, to 0. Over 400 pickup games and 6,551
+    /// undos taken where the button is really live, the old rule handed the board to the
+    /// engine 164 times and this one never does.
+    /// </summary>
     public bool Undo()
     {
         if (!CanUndo) return false;
 
-        int rewind = _bot is null ? 1 : 2;
-        int target = _positions.Count - rewind;
+        int target = _positions.Count - 1;
+
+        // Hotseat plays both seats, so any position is one this keyboard may move from
+        // and a single ply is always the answer there.
+        if (LocalSeat >= 0)
+            while (target > 0 && _positions[target].SideToMove != LocalSeat) target--;
+
+        int rewind = _positions.Count - target;
 
         State = _positions[target];
         _positions.RemoveRange(target, rewind);
@@ -187,6 +228,7 @@ public sealed class WebSession
         // announcing a free move that has been taken back, and the board would see the
         // collected pickup off a second time as the position it was keyed on changed.
         LastMoveWentAgain = false;
+        LastTurnForfeited = false;
         LastMoveTookAWall = false;
         LastMoveCrossedPortal = false;
         LastPickup = null;
