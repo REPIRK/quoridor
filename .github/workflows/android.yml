@@ -1,0 +1,57 @@
+name: android
+
+# The phone build, kept honest. It is deliberately its own workflow rather than a job in
+# the build one: it is the only part of the repository that needs a Java SDK and an Android
+# SDK, and the checks everything else depends on should not wait for them to be installed.
+#
+# The APK this produces is signed with the debug key, which is what a sideloaded build is
+# signed with and is enough to install one. Putting it on Play would need a real key, which
+# is not something a workflow should hold without being asked to.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '9.0.x'
+
+      # .NET for Android runs the Android tooling under Java, and finds it through
+      # JAVA_HOME. 17 is what the Android SDK build tools want.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Workloads
+        run: dotnet workload restore src/Quoridor.Droid/Quoridor.Droid.csproj
+
+      # The runner comes with an Android SDK, but not necessarily with the platform and
+      # build tools this project asks for. This target installs whatever is missing and
+      # does nothing when nothing is.
+      - name: Android SDK pieces
+        run: >
+          dotnet build src/Quoridor.Droid -f net9.0-android
+          -t:InstallAndroidDependencies
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+          -p:AcceptAndroidSDKLicenses=True
+
+      - name: Build
+        run: >
+          dotnet build src/Quoridor.Droid -c Release -f net9.0-android --nologo
+          -p:AndroidSdkDirectory="$ANDROID_HOME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Quoridor-android
+          path: src/Quoridor.Droid/bin/Release/net9.0-android/*-Signed.apk
+          if-no-files-found: error

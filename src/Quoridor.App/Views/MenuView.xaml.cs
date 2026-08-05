@@ -47,11 +47,15 @@ public partial class MenuView : UserControl
         _demo.IsHitTestVisible = false;
         DemoHost.Children.Add(_demo);
 
-        LocalButton.Click += (_, _) => _host.StartGame(GameOptions.Hotseat(SelectedClock(), SelectedBoard()));
+        // The flavour travels with the game, not just with the board it produced: a
+        // rematch has to know whether it is repeating a setting or throwing the dice
+        // again, and only the menu knows which of the three was chosen.
+        LocalButton.Click += (_, _) => _host.StartGame(
+            GameOptions.Hotseat(SelectedClock(), SelectedBoard(), SelectedFlavour()));
         BotButton.Click += (_, _) => _host.StartGame(GameOptions.VersusBot(
-            SelectedStrength(), SelectedClock(), SelectedMovesFirst(), SelectedBoard()));
+            SelectedStrength(), SelectedClock(), SelectedMovesFirst(), SelectedBoard(), SelectedFlavour()));
         SpectateButton.Click += (_, _) => _host.StartGame(
-            GameOptions.Spectate(SelectedStrength(), SelectedBoard()));
+            GameOptions.Spectate(SelectedStrength(), SelectedBoard(), SelectedFlavour()));
 
         foreach (RadioButton option in new[] { FlavourStandardOption, FlavourRandomOption, FlavourCustomOption })
             option.Checked += (_, _) => ApplyFlavour();

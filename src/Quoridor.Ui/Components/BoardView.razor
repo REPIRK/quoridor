@@ -6,6 +6,23 @@
     Hover works without a mode switch, as on the desktop: every groove between two
     squares is its own target, so which way the wall lies follows from where the
     cursor is rather than from a toggle.
+
+    A finger is the same pointer with the press held down. The whole board is driven by
+    pointer events rather than by mouse events and clicks, which is what lets one set of
+    rules serve both: pressing aims, moving the pointer re-aims, and lifting plays what is
+    aimed at. With a mouse that is exactly the hover-and-click it always was — the aim
+    follows the cursor and the release commits it. With a finger the press is the hover:
+    the wall appears under the thumb with what it costs written under the board, the aim
+    follows the thumb as it slides, and the move is not played until the thumb comes off.
+    Sliding off the board and lifting there plays nothing, which is how a press is taken
+    back. Nothing is a mode and nothing is a second gesture: placing a wall is press, look,
+    lift, and moving a pawn is the same press, look, lift.
+
+    Two things make that work rather than merely describe it. The board asks the page to
+    let go of the implicit pointer capture a touch press takes (see `freeTheBoard` in
+    page.js), or the elements the thumb slides onto would never hear about it; and on a
+    coarse pointer the grooves are given a fair share of the pitch instead of the sliver
+    that is enough for a mouse — see `Bleed`.
 *@
 
 @* A smaller game is played on a centred square of the same grid, so the geometry below
@@ -31,8 +48,16 @@
    this class in the stylesheet so that a viewer with the switch off gets none of it.
 
    The keydown is on the board itself rather than on the document, because by the time it
-   fires something inside the board is focused and the keys are the board's own. *@
-<svg class="board @(Carved ? "carved" : "") @(Flipped ? "turned" : "") @(Reading ? "reading" : "") @(Reviewing ? "past" : "")" viewBox="@ViewBox" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Quoridor board" @onmouseleave="ClearHover" @onkeydown="OnKeyDown">
+   fires something inside the board is focused and the keys are the board's own.
+
+   The press and the release are on the board and not on the two hundred targets inside it.
+   By the time either arrives the aim is already right — a pointer reports the target it is
+   over before it reports being pressed there, and it goes on reporting as it moves — so
+   the targets only have to say where the pointer is, and the board says what to do about
+   it. That is one handler per target instead of three, and it is also what makes a press
+   that starts on one square and lifts on another play the one it lifted on. *@
+<svg class="board @(Carved ? "carved" : "") @(Flipped ? "turned" : "") @(Reading ? "reading" : "") @(Reviewing ? "past" : "")" viewBox="@ViewBox" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Quoridor board"
+     @onpointerdown="Press" @onpointerup="Release" @onpointercancel="Abandon" @onpointerleave="LeaveBoard" @onkeydown="OnKeyDown">
 
     @* A board is a physical thing; a flat rectangle of one colour is not. Every gradient
        here is painted once — no animation, nothing per frame. *@
@@ -486,7 +511,8 @@
     }
 
     @* Hit targets last so they sit above everything they select. Squares first,
-       grooves after, so a groove wins the few pixels where they overlap. Like the
+       grooves after, so a groove wins the pixels where they overlap — and how many that
+       is depends on what is pointing at them, which is what Bleed answers. Like the
        squares, they stop at the edge of the game: a groove outside it would offer a
        wall nobody could ever be stopped by. *@
     @for (int row = From; row <= Last; row++)
@@ -497,7 +523,7 @@
             int c = col;
 
             <rect class="hit" x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell"
-                  @onmouseover="e => HoverCell(e, r, c)" @onclick="() => ClickCell(r, c)" />
+                  @onpointerover="e => Over(e, MoveKind.Pawn, r, c)" />
         }
     }
 
@@ -508,9 +534,8 @@
             int r = row;
             int c = Math.Min(col, Last - 1);
 
-            <rect class="hit" x="@Origin(col)" y="@(Origin(row) + Cell - 4)" width="@Cell" height="@(Gap + 8)"
-                  @onmouseover="e => HoverWall(e, MoveKind.HorizontalWall, r, c)"
-                  @onclick="() => ClickWall(MoveKind.HorizontalWall, r, c)" />
+            <rect class="hit" x="@Origin(col)" y="@(Origin(row) + Cell - Bleed)" width="@Cell" height="@GrooveReach"
+                  @onpointerover="e => Over(e, MoveKind.HorizontalWall, r, c)" />
         }
     }
 
@@ -521,9 +546,8 @@
             int r = Math.Min(row, Last - 1);
             int c = col;
 
-            <rect class="hit" x="@(Origin(col) + Cell - 4)" y="@Origin(row)" width="@(Gap + 8)" height="@Cell"
-                  @onmouseover="e => HoverWall(e, MoveKind.VerticalWall, r, c)"
-                  @onclick="() => ClickWall(MoveKind.VerticalWall, r, c)" />
+            <rect class="hit" x="@(Origin(col) + Cell - Bleed)" y="@Origin(row)" width="@GrooveReach" height="@Cell"
+                  @onpointerover="e => Over(e, MoveKind.VerticalWall, r, c)" />
         }
     }
 
@@ -536,8 +560,8 @@
        renaming it. A reader is told the name of what it has just been given and not
        reliably told that the name of what it already had has changed — so the cursor is
        handed over anew each time it moves, and focus is put back on it after the render.
-       The mouse deliberately does not change the key: a tap on a phone is a mouseover
-       followed by a click, and an element replaced in between is a tap that never lands.
+       The pointer deliberately does not change the key: a press is a pointerover followed
+       by a pointerdown, and an element replaced in between is a press that never lands.
 
        Drawn while the game is being read back as well as while it is being played. It is
        the only thing here that can hold focus, and a cursor that went out when the arrows
@@ -546,7 +570,7 @@
     <rect @key="_cursorKey" @ref="_cursor" class="hit cursor" tabindex="0" role="button"
           aria-label="@AimLabel" aria-disabled="@AimBlocked"
           x="@AimX" y="@AimY" width="@AimWidth" height="@AimHeight"
-          @onmouseover="AimByMouse" @onclick="Commit" />
+          @onpointerover="e => Over(e, _aimKind, _aimRow, _aimCol)" @onclick="Activate" />
 
     </g>
 </svg>
@@ -676,11 +700,20 @@
     // board cannot quietly take the cursor back off a player who is using the keys.
     private bool _byKeys;
 
-    // Where the pointer was the last time it reported. A browser dispatches mouseover
+    // Where the pointer was the last time it reported. A browser dispatches pointerover
     // when an element moves under a still cursor as well as when the cursor moves onto
-    // one, and the first of those is not the mouse asking for anything.
-    private double _mouseX = double.NaN;
-    private double _mouseY = double.NaN;
+    // one, and the first of those is not the pointer asking for anything.
+    private double _pointerX = double.NaN;
+    private double _pointerY = double.NaN;
+
+    // Whether a press that began on this board is still in progress. It is the whole of
+    // what a finger has instead of a hover: while it is set the player is looking at a
+    // move without having played it, and the release is what plays it.
+    private bool _pressed;
+
+    // When the last press was released, so that the click a browser raises afterwards can
+    // be told from one an assistive technology raised on its own. See Activate.
+    private long _releasedAt = -GhostClickMs;
 
     // Set when a move is waiting to be confirmed. On a phone there is no hover, so a
     // first tap should choose and a second commit, rather than one stray tap moving.
@@ -776,6 +809,35 @@
 
     /// <summary>Require a second tap on the same target before the move is played.</summary>
     [Parameter] public bool ConfirmMoves { get; set; }
+
+    /// <summary>
+    /// Whether the thing pointing at this board is a finger rather than a mouse. It changes
+    /// one number — how far a groove reaches into the squares beside it — and nothing else,
+    /// because everything else about the interaction is already the same for both.
+    /// </summary>
+    [Parameter] public bool Coarse { get; set; }
+
+    /// <summary>
+    /// How far a groove's hit target reaches into the square on either side of it, in the
+    /// board's own units. A mouse lands where it is pointed and needs almost none: four
+    /// units either side of a twelve-unit groove is twenty of the seventy-six a square and
+    /// its groove share, and the other fifty-six belong to the square.
+    ///
+    /// A finger does not land where it is pointed. On a phone-sized board a square is about
+    /// forty screen pixels across, so twenty units is five pixels of groove — a target
+    /// nobody can hit, and walls are half the game. Twelve either side splits the pitch
+    /// roughly in half, which is where the split belongs when the pointer is a blunt one:
+    /// the nearest feature wins, and the nearest feature to the top of a square is the
+    /// square while the nearest to its edge is the groove.
+    ///
+    /// The board does not have to be right first time for this to work. The press aims and
+    /// the release plays, so a finger that lands one groove out slides onto the right one
+    /// before it lifts.
+    /// </summary>
+    private int Bleed => Coarse ? 12 : 4;
+
+    /// <summary>How thick a groove's hit target is, across the groove.</summary>
+    private int GrooveReach => Gap + 2 * Bleed;
 
     [Parameter] public Move? LastMove { get; set; }
 
@@ -1004,62 +1066,47 @@
         OnPreview.InvokeAsync(Interactive ? Describe(candidate, State.IsWallLegal(kind, row, col)) : null);
     }
 
-    private void HoverCell(MouseEventArgs e, int row, int col)
-    {
-        if (MouseAsked(e)) AimAt(MoveKind.Pawn, row, col);
-    }
-
-    private void HoverWall(MouseEventArgs e, MoveKind kind, int row, int col)
-    {
-        if (MouseAsked(e)) AimAt(kind, row, col);
-    }
-
     /// <summary>
-    /// A press plays what was pressed. The hover above can decline a target — a pointer
-    /// lying still on the board reports one every time the cursor moves out from under it,
-    /// and none of those are the mouse asking for anything — but a press always is, and a
-    /// square that played the caret's move instead of its own would be unusable.
+    /// The pointer is over a target: a mouse hovering it, or a finger pressed on it and
+    /// sliding across it. The two are the same event and mean the same thing here — this
+    /// is where the aim is, and nothing is played until the pointer is lifted off.
     /// </summary>
-    private async Task ClickCell(int row, int col)
+    private void Over(PointerEventArgs e, MoveKind kind, int row, int col)
     {
-        MouseTakesOver();
-        AimAt(MoveKind.Pawn, row, col);
-
-        await Commit();
-    }
-
-    private async Task ClickWall(MoveKind kind, int row, int col)
-    {
-        MouseTakesOver();
-        AimAt(kind, row, col);
-
-        await Commit();
+        if (PointerAsked(e)) AimAt(kind, row, col);
     }
 
     /// <summary>
-    /// Whether the mouse is actually asking for the target it has just reported, and with
-    /// it hands the aim back from the keys. A browser raises mouseover when an element
+    /// Whether the pointer is actually asking for the target it has just reported, and with
+    /// it hands the aim back from the keys. A browser raises pointerover when an element
     /// arrives under a still pointer as well as when the pointer arrives on an element,
     /// and the cursor moving on the keys does exactly that — so a hand resting anywhere on
     /// the board would pull every press straight back to where the hand was. The pointer's
     /// own coordinates are the only thing that can tell the two apart.
+    ///
+    /// Only a pointer that can hover is asked. A finger cannot be anywhere without being
+    /// pressed there, so every report from one is a contact that has just been made and is
+    /// unambiguously somebody asking for something — including the second tap on the square
+    /// the first one was on, which arrives at coordinates identical to the last and which
+    /// the arithmetic here would otherwise read as a caret sliding out from underneath a
+    /// hand that is not there.
     /// </summary>
-    private bool MouseAsked(MouseEventArgs e)
+    private bool PointerAsked(PointerEventArgs e)
     {
-        bool moved = e.ClientX != _mouseX || e.ClientY != _mouseY;
+        bool moved = e.ClientX != _pointerX || e.ClientY != _pointerY;
 
-        _mouseX = e.ClientX;
-        _mouseY = e.ClientY;
+        _pointerX = e.ClientX;
+        _pointerY = e.ClientY;
 
-        if (_byKeys && !moved) return false;
+        if (_byKeys && !moved && e.PointerType is "mouse" or "pen") return false;
 
-        MouseTakesOver();
+        PointerTakesOver();
         return true;
     }
 
-    /// <summary>The mouse has the aim now, and the caret on the board is no longer what
+    /// <summary>The pointer has the aim now, and the caret on the board is no longer what
     /// the player is steering by.</summary>
-    private void MouseTakesOver()
+    private void PointerTakesOver()
     {
         if (!_byKeys) return;
 
@@ -1067,16 +1114,93 @@
         _needsRender = true;
     }
 
-    /// <summary>The mouse arriving on the cursor's own square, which is a handover and
-    /// not a move: the aim is already there, and only who owns it changes.</summary>
-    private void AimByMouse(MouseEventArgs e)
+    /// <summary>
+    /// The pointer has gone down on the board. Nothing is played here: what a press does is
+    /// aim, and a finger that has just landed on the wrong groove has until it lifts to
+    /// slide onto the right one. The aim itself is already correct — the pointerover that
+    /// precedes every press set it — so this only records that a press is in progress and
+    /// asks for a repaint, which is what puts the wall and its cost on the screen under a
+    /// thumb that has not committed to anything yet.
+    /// </summary>
+    private void Press(PointerEventArgs e)
     {
-        MouseAsked(e);
+        // The primary button only. A right or middle press is the browser's business, and
+        // a context menu that also placed a wall would be a wall nobody asked for.
+        if (e.Button != 0) return;
+
+        _pressed = true;
+        PointerTakesOver();
+        _needsRender = true;
+    }
+
+    /// <summary>
+    /// Lifting plays what is aimed at. Only after a press that started on this board: a
+    /// release that arrives having begun somewhere else — a button in the panel, a drag
+    /// from outside the page — is not a move being asked for.
+    /// </summary>
+    private async Task Release(PointerEventArgs e)
+    {
+        if (e.Button != 0) return;
+        if (!_pressed) return;
+
+        _pressed = false;
+        _releasedAt = Environment.TickCount64;
+
+        await Commit();
+    }
+
+    /// <summary>
+    /// The cursor being activated as the button it says it is. A physical keyboard never
+    /// arrives here — Enter and Space are answered as keys, above — and neither does a
+    /// pointer, which is answered by the press and the release. What is left is an
+    /// assistive technology activating the element on the player's behalf, which is a
+    /// synthetic click and nothing else, and without this it would be the one way of
+    /// playing a move that this board does not answer.
+    ///
+    /// A pointer does raise a click as well, after the release that has already played the
+    /// move — so a click that follows one is dropped. By the clock rather than by a flag: a
+    /// release that produced no click at all would leave a flag standing, and the next
+    /// genuine activation would be the one it swallowed.
+    /// </summary>
+    private async Task Activate()
+    {
+        if (Environment.TickCount64 - _releasedAt < GhostClickMs) return;
+
+        await Commit();
+    }
+
+    /// <summary>
+    /// How long after a release a click is still that release's own. Generous: the cost of
+    /// being wrong one way is a move played twice, and the other way is an activation
+    /// ignored by somebody who can simply do it again.
+    /// </summary>
+    private const int GhostClickMs = 700;
+
+    /// <summary>
+    /// The press has been taken away rather than finished — the system claiming the gesture
+    /// as a scroll or a back swipe, a call arriving. Nothing is played, and the aim goes
+    /// with it, because there is no pointer left on the board to own one.
+    /// </summary>
+    private void Abandon()
+    {
+        _pressed = false;
+        ClearHover();
+    }
+
+    /// <summary>
+    /// The pointer has left the board. That ends a press as well as clearing the aim, which
+    /// is what makes sliding off the board and lifting there the way to take a press back —
+    /// the one cancelling gesture a finger has, since it cannot simply stop hovering.
+    /// </summary>
+    private void LeaveBoard()
+    {
+        _pressed = false;
+        ClearHover();
     }
 
     private void ClearHover()
     {
-        // Leaving the board takes the mouse's aim with it and leaves the keys' alone.
+        // Leaving the board takes the pointer's aim with it and leaves the keys' alone.
         // A cursor that vanished because a hand brushed past the board on its way
         // somewhere else would be a cursor nobody could rely on.
         if (_byKeys) return;
@@ -1113,8 +1237,10 @@
 
         if (!State.IsLegal(move)) return;
 
-        // With confirmation on, the first tap chooses and the second plays — a phone has
-        // no hover, so without it one stray tap would move.
+        // With confirmation on, the first press chooses and the second plays. It is no
+        // longer what a touch screen needs — holding the press is the look now, and lifting
+        // is the commit — but it is still what somebody who wants a move to take two
+        // deliberate acts asked for, on either kind of pointer.
         if (ConfirmMoves && _selected != move)
         {
             _selected = move;
@@ -1341,15 +1467,17 @@
     /// <summary>What the cursor is standing on, as the move playing it would be.</summary>
     private Move AimMove => new(_aimKind, _aimRow, _aimCol);
 
-    // Laid exactly over the hit target underneath it. Anything wider would take mouse
-    // presses away from the targets on either side of the one it is standing on.
-    private int AimX => _aimKind == MoveKind.VerticalWall ? Origin(_aimCol) + Cell - 4 : Origin(_aimCol);
+    // Laid exactly over the hit target underneath it, which is why it is written in Bleed
+    // rather than in a number: the target is a different size under a finger, and a caret
+    // drawn to the mouse's size there would take presses away from the targets on either
+    // side of the one it is standing on.
+    private int AimX => _aimKind == MoveKind.VerticalWall ? Origin(_aimCol) + Cell - Bleed : Origin(_aimCol);
 
-    private int AimY => _aimKind == MoveKind.HorizontalWall ? Origin(_aimRow) + Cell - 4 : Origin(_aimRow);
+    private int AimY => _aimKind == MoveKind.HorizontalWall ? Origin(_aimRow) + Cell - Bleed : Origin(_aimRow);
 
-    private int AimWidth => _aimKind == MoveKind.VerticalWall ? Gap + 8 : Cell;
+    private int AimWidth => _aimKind == MoveKind.VerticalWall ? GrooveReach : Cell;
 
-    private int AimHeight => _aimKind == MoveKind.HorizontalWall ? Gap + 8 : Cell;
+    private int AimHeight => _aimKind == MoveKind.HorizontalWall ? GrooveReach : Cell;
 
     /// <summary>Said of a target that cannot be played from here, so a reader is told
     /// before pressing rather than by the press doing nothing.</summary>

@@ -1,4 +1,9 @@
 @using Quoridor.Engine
+@* Two enums of this name now reach this file. Quoridor.Session brings its own with the
+   desktop's socket peer, and this screen has never used that one — the link here is
+   WebRTC through NetLink, which owns the other. Named rather than reordered, because
+   which of the two is meant is worth being told rather than inferred from an order. *@
+@using NetState = Quoridor.Ui.Game.NetState
 @implements IAsyncDisposable
 @inject IJSRuntime Js
 @inject NavigationManager Nav
@@ -29,7 +34,19 @@
                 <div class="player @(onMove ? "on-move" : "")">
                     <span class="turn @(player == 0 ? "p0" : "p1")"></span>
                     <div class="who">
-                        <div class="name">@_session.PlayerName(player)</div>
+                        @* The clock sits on the name's own line, at the far end of it. It is
+                           the other half of the answer to "whose move is it and how are they
+                           doing", which is what this row is for, and a figure that ticks
+                           needs to be found once and then only glanced at. *@
+                        <div class="line">
+                            <div class="name">@_session.PlayerName(player)</div>
+                            @if (_session.HasClock)
+                            {
+                                <div class="clock @(player == 0 ? "p0" : "p1") @(_session.FlaggedPlayer == player ? "flagged" : "")">
+                                    @TimeControl.Format(_session.RemainingOf(player))
+                                </div>
+                            }
+                        </div>
                         @* Two spare walls land in this row and nowhere else. The board
                            sees the pickup off where it was taken, but the thing it was
                            taken for arrives here, and arriving in silence is how a prize
@@ -75,7 +92,9 @@
             @* AllowPremove below: not your turn and reading the game back are two different
                things, and Interactive is false for both. Only the first of them is a turn
                that is coming, so only the first may be moved for in advance — a click on a
-               position from ten plies ago is a player looking, not a player queueing.
+               position from ten plies ago is a player looking, not a player queueing. A
+               watched game is the third case and it is neither: no turn of theirs is coming
+               at all, so a move banked in one would sit on the board and never be played.
 
                Said here and not among the attributes, which is where it was first written.
                A Razor comment inside an element's attribute list is not removed: the
@@ -85,18 +104,24 @@
                at all. It compiles either way, which is the trap: nothing but running it
                says so. Reproduced by handing the emitted name to
                ParameterView.SetParameterProperties against a real BoardView. *@
+            @* Reading below: a watched game is drawn with both routes on whatever the
+               player's own preference is. Nobody is being helped — neither seat is theirs
+               — and the routes are the only thing that makes two engines pushing each
+               other about legible from outside. The desktop does exactly this. It is
+               computed rather than stored, so the preference itself is left alone. *@
             <BoardView State="Shown"
                        Interactive="@(_session.IsHumanTurn && !_thinking && !_session.IsOver && _reviewPly is null)"
-                       Reading="_reading"
+                       Reading="@(_reading || _session.Options.Mode == GameMode.Spectate)"
                        Reviewing="@(_reviewPly is not null)"
                        Flipped="@(_session.LocalSeat == 1)"
                        Holes="_session.Holes"
                        Generation="_session.Setup.GetHashCode()"
                        Collected="@(_reviewPly is null ? _session.LastPickup : null)"
                        Carved="_carved"
+                       Coarse="_touch"
                        ConfirmMoves="_confirm"
                        LastMove="ShownLastMove"
-                       AllowPremove="@(_reviewPly is null)"
+                       AllowPremove="@(_reviewPly is null && _session.Options.Mode != GameMode.Spectate)"
                        Premove="_premove"
                        OnPremove="move => _premove = move"
                        OnMove="OnMove"
@@ -155,24 +180,33 @@
                 }
             </ol>
 
-            @* A greyed-out button that will not say why is a button you press twice and
-               then distrust. The reason is on the button itself, where the pointer already
-               is when the question comes up. *@
-            <div class="actions review">
-                <button class="ghost" disabled="@(_session.Moves.Count == 0)" title="@BackNote"
-                        @onclick="() => Review((_reviewPly ?? _session.Moves.Count) - 1)">&#x25C0;</button>
-                <button class="ghost" disabled="@(_reviewPly is null)" title="@LiveNote"
-                        @onclick="() => Review((_reviewPly ?? 0) + 1)">&#x25B6;</button>
-                <button class="ghost" disabled="@(_reviewPly is null)" title="@LiveNote"
-                        @onclick="() => Review(null)">Live</button>
-            </div>
+            @* The five things a player reaches for while a game is on, gathered into one
+               element that has no styling of its own. On a wide screen it is invisible —
+               the rows inside it sit at the foot of the panel exactly where they were
+               written — and on a phone it is the strip along the bottom of the screen,
+               under the thumb that is holding the phone rather than at the top edge it
+               cannot reach. One group and one set of buttons; only where they are drawn
+               differs, which is why this is a wrapper and not a second layout. *@
+            <div class="tools">
+                @* A greyed-out button that will not say why is a button you press twice and
+                   then distrust. The reason is on the button itself, where the pointer
+                   already is when the question comes up. *@
+                <div class="actions review">
+                    <button class="ghost" disabled="@(_session.Moves.Count == 0)" title="@BackNote"
+                            @onclick="() => Review((_reviewPly ?? _session.Moves.Count) - 1)">&#x25C0;</button>
+                    <button class="ghost" disabled="@(_reviewPly is null)" title="@LiveNote"
+                            @onclick="() => Review((_reviewPly ?? 0) + 1)">&#x25B6;</button>
+                    <button class="ghost" disabled="@(_reviewPly is null)" title="@LiveNote"
+                            @onclick="() => Review(null)">Live</button>
+                </div>
 
-            <hr />
+                <hr />
 
-            <div class="actions">
-                <button class="ghost" disabled="@(!_session.CanUndo || _thinking)" title="@UndoNote"
-                        @onclick="Undo">Undo</button>
-                <button class="ghost" @onclick="() => Restart(false)">Restart</button>
+                <div class="actions">
+                    <button class="ghost" disabled="@(!_session.CanUndo || _thinking)" title="@UndoNote"
+                            @onclick="Undo">Undo</button>
+                    <button class="ghost" @onclick="() => Restart(false)">Restart</button>
+                </div>
             </div>
         </aside>
     </main>
@@ -187,6 +221,54 @@
                     <span class="label">Board</span>
                     <button class="seg @(_reading ? "on" : "")" @onclick="() => Choose(() => _reading = !_reading)">Read the position</button>
                     <button class="seg @(_confirm ? "on" : "")" @onclick="() => Choose(() => _confirm = !_confirm)">Confirm moves</button>
+                </div>
+
+                @* How long the engine may think, in the desktop build's words and with the
+                   desktop build's own numbers. What the list stops at is not this screen's
+                   decision — the host says, because the host is what knows whether the
+                   search has a thread of its own or is borrowing the one drawing the page. *@
+                <div class="row">
+                    <span class="label">Engine thinks for</span>
+                    @foreach (int option in HostProfile.Current.MoveTimes)
+                    {
+                        int choice = option;
+                        <button class="seg @(_moveTimeMs == choice ? "on" : "")"
+                                @onclick="() => Choose(() => _moveTimeMs = choice)">@HostProfile.Label(choice)</button>
+                    }
+                </div>
+                @if (HostProfile.Current.IsLimited)
+                {
+                    <p class="fine why">@HostProfile.Current.LimitNote</p>
+                }
+
+                @* Only where there is a spare thread to search on, which is the whole of what
+                   the question is about: in a browser the answer is forced and a control that
+                   cannot be moved is worse than no control. Where it is offered it is the
+                   player's, in the desktop's words — the engine's answer arrives no slower
+                   either way, so what this is really choosing is whether a core runs while
+                   somebody thinks, and on a phone that is battery and heat in a hand rather
+                   than a fan nobody hears. *@
+                @if (HostProfile.Current.MayPonder)
+                {
+                    <div class="row">
+                        <span class="label">While you think</span>
+                        <button class="seg @(_ponder ? "on" : "")" @onclick="() => Choose(() => _ponder = true)">Keeps searching</button>
+                        <button class="seg @(!_ponder ? "on" : "")" @onclick="() => Choose(() => _ponder = false)">Idles</button>
+                    </div>
+                }
+
+                @* How fast two engines play each other. The desktop's three, under the
+                   desktop's names and with the desktop's own numbers: a watched game is the
+                   one game on this screen whose pace is nobody's but the viewer's, because
+                   neither side is waiting for anybody. *@
+                <div class="row">
+                    <span class="label">Watched games</span>
+                    @foreach ((string name, int pace) in PaceChoices)
+                    {
+                        int choice = pace;
+                        <button class="seg @(_paceMs == choice ? "on" : "")"
+                                @onclick="() => Choose(() => _paceMs = choice)">@name</button>
+                    }
                 </div>
 
                 <div class="row">
@@ -264,7 +346,9 @@
                 <p>@_session.Moves.Count moves played</p>
                 <div class="actions">
                     <button class="ghost" @onclick="() => Restart(false)">Rematch</button>
-                    @if (_session.Mode != WebMode.Hotseat)
+                    @* Only where there are sides to swap. Both seats are this keyboard's in
+                       a local match and neither of them is in a watched game. *@
+                    @if (_session.LocalSeat >= 0)
                     {
                         <button class="ghost" @onclick="() => Restart(true)">Swap sides</button>
                     }
@@ -283,14 +367,20 @@
                     Cross the board first. Ten walls each to make the other route longer.
                 </p>
 
+                @* The fourth is the odd one out and is last for that reason: it is the only
+                   one that is not an opponent, because in it nobody at this screen plays at
+                   all. It is the desktop's "Watch two engines", and it is here now for the
+                   same reason the clock is — the game behind the screen could always do it. *@
                 <div class="row">
                     <span class="label">Opponent</span>
-                    <button class="seg @(_mode == WebMode.VersusBot ? "on" : "")"
-                            @onclick="() => SelectMode(WebMode.VersusBot)">The engine</button>
-                    <button class="seg @(_mode == WebMode.Hotseat ? "on" : "")"
-                            @onclick="() => SelectMode(WebMode.Hotseat)">A friend, here</button>
-                    <button class="seg @(_mode == WebMode.Online ? "on" : "")"
-                            @onclick="() => SelectMode(WebMode.Online)">A friend, online</button>
+                    <button class="seg @(_mode == GameMode.VersusBot ? "on" : "")"
+                            @onclick="() => SelectMode(GameMode.VersusBot)">The engine</button>
+                    <button class="seg @(_mode == GameMode.Hotseat ? "on" : "")"
+                            @onclick="() => SelectMode(GameMode.Hotseat)">A friend, here</button>
+                    <button class="seg @(_mode == GameMode.Online ? "on" : "")"
+                            @onclick="() => SelectMode(GameMode.Online)">A friend, online</button>
+                    <button class="seg @(_mode == GameMode.Spectate ? "on" : "")"
+                            @onclick="() => SelectMode(GameMode.Spectate)">Two engines</button>
                 </div>
 
                 @* The three ways in. Most people want the first one and should not have
@@ -306,7 +396,10 @@
                 </div>
                 <p class="fine">@FlavourNote</p>
 
-                @if (_mode == WebMode.VersusBot)
+                @* Also asked of a watched game, where it is the second engine's strength:
+                   the first is always the full search, so what the strength picks is who it
+                   is playing. The desktop asks the same question in the same place. *@
+                @if (_mode is GameMode.VersusBot or GameMode.Spectate)
                 {
                     <div class="row">
                         <span class="label">Strength</span>
@@ -319,9 +412,27 @@
                     </div>
                 }
 
+                @* Offered where it can be kept: a network game would have to agree the clock
+                   and keep the two of them in step, and there is no message for either — so
+                   rather than show a control that quietly does nothing, it is not shown. A
+                   watched game has no clock for the same reason the desktop's has none:
+                   nobody is being kept waiting. *@
+                @if (_mode is GameMode.VersusBot or GameMode.Hotseat)
+                {
+                    <div class="row">
+                        <span class="label">Clock</span>
+                        @foreach (TimeControl option in ClockChoices)
+                        {
+                            TimeControl choice = option;
+                            <button class="seg @(_clock == choice ? "on" : "")"
+                                    @onclick="() => _clock = choice">@ClockLabel(choice)</button>
+                        }
+                    </div>
+                }
+
                 @if (_flavour == GameFlavour.Custom)
                 {
-                    @if (_mode != WebMode.Hotseat)
+                    @if (_mode is GameMode.VersusBot or GameMode.Online)
                     {
                         <div class="row">
                             <span class="label">You play</span>
@@ -433,7 +544,7 @@
                     @PortalGuide
                 }
 
-                @if (_mode == WebMode.Online)
+                @if (_mode == GameMode.Online)
                 {
                     <div class="online">
                         @if (_net.State == NetState.Idle)
@@ -490,13 +601,20 @@
                 @if (_flavour != GameFlavour.Custom)
                 {
                     <p class="fine">
-                        @if (_mode == WebMode.Online)
+                        @if (_mode == GameMode.Online)
                         {
                             <text>
                                 The two browsers talk directly to each other over WebRTC — there is no
                                 server of ours in the middle. A free public service is used once, only to
                                 introduce them; after that the moves never touch a third party. Strict
                                 networks sometimes block the direct connection.
+                            </text>
+                        }
+                        else if (_mode == GameMode.Spectate)
+                        {
+                            <text>
+                                Both sides are played by the engine. Routes are drawn for each. The first
+                                seat is always the full search; the strength above is what it is playing.
                             </text>
                         }
                         else
@@ -509,17 +627,23 @@
                         }
                     </p>
 
+                    @* What the desktop build is still worth downloading for. It used to say
+                       clocks, engine against engine and game review, all three of which are
+                       on this page now — a line offering what the reader is already looking
+                       at is worse than no line. What is left is the thread: over there the
+                       search has one of its own, so it can be given longer and can go on
+                       running while you decide. *@
                     <p class="fine">
                         Prefer it on your desktop?
                         <a href="https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe">
                             Download the Windows app
                         </a>
-                        — it adds clocks, engine against engine, game review and play over your
-                        own network.
+                        — the search gets a thread of its own there, so it can be given longer,
+                        it keeps thinking while you do, and games run over your own network.
                     </p>
                 }
 
-                @if (_mode != WebMode.Online)
+                @if (_mode != GameMode.Online)
                 {
                     <div class="actions">
                         <button class="ghost primary" @onclick="StartGame">Play</button>
@@ -528,15 +652,83 @@
             </div>
         </div>
     }
+
+    @* The last step down. Only a shell that can be left ever asks for this — a browser tab
+       has no gesture that means "close the app" and never reaches it — and it is asked
+       because the gesture that gets here is the same one-finger sweep that goes back a
+       screen, so it arrives by accident about as often as on purpose. Written last so it
+       is over everything, including the setup card: a press that lands here is answering
+       this question and nothing behind it. *@
+    @if (_showLeave)
+    {
+        <div class="overlay">
+            <div class="result">
+                <h1>Leave the game?</h1>
+                <p>@_session.Moves.Count moves played · not saved to a file, but it will be here when you come back</p>
+                <div class="actions">
+                    <button class="ghost primary" @onclick="() => _showLeave = false">Keep playing</button>
+                    <button class="ghost" @onclick="Leave">Leave</button>
+                </div>
+            </div>
+        </div>
+    }
 </div>
 
 @code {
-    // The full engine is the default; the two heuristic bots are the handicap.
-    private WebSession _session = new(WebMode.VersusBot, BotStrength.Hard);
+    /// <summary>
+    /// The game itself, which is the same class the desktop build has always run: the
+    /// position and its history, the clocks, and whichever seats an engine plays. This
+    /// screen used to keep a thinner copy of its own, and everything that copy could not
+    /// do — a clock, two engines, a budget worth setting — was missing from this build for
+    /// no reason but that.
+    ///
+    /// A plain local game until the setup card is answered, because it is only standing in
+    /// for one: an engine built here would be built before the preferences are read.
+    /// </summary>
+    private GameSession _session = new(GameOptions.Hotseat(TimeControl.None, GameSetup.Standard, GameFlavour.Standard));
+
     private NetLink _net = default!;
 
-    private WebMode _mode = WebMode.VersusBot;
+    private GameMode _mode = GameMode.VersusBot;
+
+    // The full engine is the default; the two heuristic bots are the handicap.
     private BotStrength _strength = BotStrength.Hard;
+
+    /// <summary>The clock the game being set up will be played on.</summary>
+    private TimeControl _clock = TimeControl.None;
+
+    /// <summary>
+    /// How long the engine may think about one move. Started at whatever this host allows,
+    /// which is the desktop's own default where there is a thread to spare and the
+    /// browser's long-standing 0.6 s where there is not.
+    /// </summary>
+    private int _moveTimeMs = HostProfile.Current.DefaultMoveTime;
+
+    /// <summary>
+    /// Whether the engine goes on searching while the human is deciding. On, which is the
+    /// desktop's own default, and never asked at all where the host says there is no thread
+    /// to spare — a browser reads this as false however it is set, because the search there
+    /// would be running on the thread that draws the page.
+    ///
+    /// Kept as the player's answer rather than the host's because it is one: the engine
+    /// replies no slower with it off, so what it costs is a core for as long as somebody
+    /// takes over a move, and whether that is worth paying is a question about the machine
+    /// in the player's hand and not about the game.
+    /// </summary>
+    private bool _ponder = true;
+
+    /// <summary>
+    /// The least time one move takes in a watched game, so that two engines pushing each
+    /// other about can be followed. The desktop's three settings and the desktop's three
+    /// numbers; the middle one is what this build has always used.
+    /// </summary>
+    private int _paceMs = 1400;
+
+    private static readonly (string Name, int Pace)[] PaceChoices =
+        { ("Brisk", 500), ("Steady", 1400), ("Calm", 2800) };
+
+    /// <summary>The three above without their names, for checking a stored one against.</summary>
+    private static readonly int[] PaceMilliseconds = { 500, 1400, 2800 };
 
     /// <summary>The seat this browser takes in the game being set up. Seat 0 moves first.</summary>
     private int _seat;
@@ -573,7 +765,11 @@
     /// the tab order and out of hit testing at once, which is what an opaque sheet already
     /// means everywhere except the keyboard.
     /// </summary>
-    private bool Covered => _showSetup || _showSettings || _showResult;
+    private bool Covered => _showSetup || _showSettings || _showResult || _showLeave;
+
+    /// <summary>Whether the "leave the game?" card is up. Only a back gesture raises it,
+    /// so in a browser it is never seen at all.</summary>
+    private bool _showLeave;
 
     private bool _touch;
     private bool _showHelp;
@@ -608,6 +804,119 @@
         GameFlavour.Custom => "Everything is yours to set.",
         _ => "Nine by nine, ten walls each. The game as it is normally played.",
     };
+
+    // ==================================================================== clock ==
+
+    /// <summary>
+    /// The three the desktop build offers, and no others. Two are enough for anyone who
+    /// wants a clock at all, and a fourth would be a number to choose between rather than a
+    /// game to play.
+    /// </summary>
+    private static readonly TimeControl[] ClockChoices = { TimeControl.None, TimeControl.Blitz, TimeControl.Rapid };
+
+    /// <summary>Written out in full, as the desktop's menu writes it. "5+3" is the header's
+    /// shorthand, which reads once you already know what it is short for.</summary>
+    private static string ClockLabel(TimeControl clock) =>
+        clock == TimeControl.Blitz ? "5 min + 3 sec"
+        : clock == TimeControl.Rapid ? "3 min + 2 sec"
+        : "No clock";
+
+    /// <summary>
+    /// How often the clocks are charged and redrawn. Ten times a second, which is what the
+    /// desktop uses and what the last ten seconds need: under that the display shows tenths,
+    /// and a tenth that only changes every third of a second is a clock that stutters.
+    /// </summary>
+    private const int ClockTickMs = 100;
+
+    /// <summary>
+    /// Which run of the clock is the live one. A game can be handed back a clock it had
+    /// already stopped — an undo after a flag has fallen does exactly that — and without
+    /// this the new loop would run alongside the old one and charge every tick twice.
+    /// </summary>
+    private int _clockRun;
+
+    private void StartClock()
+    {
+        if (_session.HasClock) _ = RunClock(_session, ++_clockRun);
+    }
+
+    /// <summary>
+    /// Charges the player on move for the time that really passed, rather than for the
+    /// number of ticks that arrived. In a browser the engine's search holds the only thread
+    /// there is, so ticks do not arrive at all while it runs — and the time it spent is the
+    /// engine's own and has to be charged to it. Measuring the interval instead of counting
+    /// it makes that come out right by itself, on either host.
+    /// </summary>
+    private async Task RunClock(GameSession session, int run)
+    {
+        long last = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        while (run == _clockRun && ReferenceEquals(session, _session) && !session.IsOver)
+        {
+            await Task.Delay(ClockTickMs);
+
+            // A restart or a new game replaces the session outright, and this loop belongs
+            // to the one it was started for. The new one starts a loop of its own.
+            if (run != _clockRun || !ReferenceEquals(session, _session)) return;
+
+            TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(last);
+            last = System.Diagnostics.Stopwatch.GetTimestamp();
+
+            // A card over the board is a board that cannot be played, and charging someone
+            // for the seconds they spent in the settings panel is charging them for time
+            // they were not given. The interval is thrown away rather than banked.
+            if (Covered) continue;
+
+            bool flagged = session.ChargeClock(elapsed);
+
+            // Through InvokeAsync rather than called outright. Everything else on this page
+            // repaints from inside an event the renderer itself raised, and is therefore
+            // already on the renderer's thread; this loop is the one thing that runs on
+            // nobody's behalf, for as long as the game lasts, and a native host has a real
+            // dispatcher that will refuse a repaint arriving from anywhere else.
+            await InvokeAsync(StateHasChanged);
+
+            if (!flagged) continue;
+
+            // Losing on time ends a game without a move being played, so nothing else on
+            // the page is going to make a sound about it.
+            await Sfx(Ours(session) ? "win" : "lose");
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Whether the result belongs to the person at this screen. In a local match and a
+    /// watched game nobody here lost, so it is a fanfare either way — which is exactly what
+    /// a seat of -1 means.
+    /// </summary>
+    private static bool Ours(GameSession session) =>
+        session.LocalSeat < 0 || session.Winner == session.LocalSeat;
+
+    // ================================================================== options ==
+
+    /// <summary>
+    /// The game this card describes, as the session wants it. Every argument is passed in
+    /// rather than read off the fields, because a rematch has to repeat the game that was
+    /// played and not the one the card is currently showing.
+    /// </summary>
+    private static GameOptions OptionsFor(
+        GameMode mode, BotStrength strength, TimeControl clock, int seat, GameSetup setup, GameFlavour flavour) =>
+        mode switch
+        {
+            GameMode.Hotseat => GameOptions.Hotseat(clock, setup, flavour),
+            GameMode.Spectate => GameOptions.Spectate(strength, setup, flavour),
+
+            // Built by hand rather than through GameOptions.Online, which decides the seat
+            // from who is hosting: here the host may have chosen to play second, and the
+            // other side is told which seat it has rather than inferring one. The flavour
+            // travels too, so a rematch on a rolled board rolls again for both of them.
+            GameMode.Online => new GameOptions(
+                GameMode.Online, BotStrength.Normal, TimeControl.None,
+                HumanMovesFirst: seat == 0, Board: setup, Flavour: flavour),
+
+            _ => GameOptions.VersusBot(strength, clock, humanMovesFirst: seat == 0, setup, flavour),
+        };
 
     // ========================================================= what a size carries ==
 
@@ -786,6 +1095,27 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Where a session gets the two numbers it cannot decide for itself. It is a
+        // function and not a value on purpose, and asked afresh every time: the budget is
+        // read when an engine is built, so the setting made here reaches the next game
+        // rather than the one on the board — which is exactly how the desktop's own
+        // picker behaves.
+        //
+        // Pondering is two answers and needs both: the host says whether there is a thread
+        // to search on at all, and where there is, the player says whether it should be
+        // used. A browser forces it off however the switch is set, which is why the switch
+        // is not shown there; a phone offers it, because a core running for as long as
+        // somebody takes over a move is battery out of their hand.
+        //
+        // Installed before anything with an engine in it is built.
+        GameSession.Preferences = () => new EnginePreferences(
+            TimeSpan.FromMilliseconds(_moveTimeMs), HostProfile.Current.MayPonder && _ponder);
+
+        // What the system's back gesture does, where there is a system that has one. Set
+        // this early: the shell can be asked before the first render — a sweep during the
+        // splash — and an unanswered press there closes the app.
+        HostShell.BackPressed = OnBackPressed;
+
         // Before anything is drawn, so that what is drawn is already the player's own.
         await LoadSettings();
 
@@ -797,11 +1127,19 @@
         var uri = new Uri(Nav.Uri);
         string? invite = System.Web.HttpUtility.ParseQueryString(uri.Query).Get("join");
 
-        if (string.IsNullOrWhiteSpace(invite)) return;
+        if (!string.IsNullOrWhiteSpace(invite))
+        {
+            _mode = GameMode.Online;
+            _joinCode = invite;
+            await _net.JoinAsync(invite);
+            return;
+        }
 
-        _mode = WebMode.Online;
-        _joinCode = invite;
-        await _net.JoinAsync(invite);
+        // Otherwise, whatever was on the board when this was last open. Asked after the
+        // invite because an invite is somebody being asked to play now, and before
+        // anything is drawn so that a resumed game is what the first frame shows rather
+        // than a setup card that flashes past.
+        await LoadGame();
     }
 
     /// <summary>What the move list was last scrolled for, so it is only scrolled again
@@ -815,7 +1153,7 @@
             // Every way a game can end — a move here, the engine's reply, a move arriving
             // over the link — ends with a render, so the wait is started from here rather
             // than from each of them in turn.
-            if (_session.IsOver && !_showResult && !_resultHeld)
+            if (_session.IsOver && !_showResult && !_resultHeld && !_resultSeen)
             {
                 _resultHeld = true;
                 _ = HoldResult();
@@ -841,6 +1179,13 @@
                 }
             }
 
+            // Every position this game passes through ends in a render, which makes here
+            // the one place that cannot miss one. It writes only when the game has actually
+            // moved — a hover redraws the board a dozen times a second and none of those
+            // are a game to come back to.
+            await KeepGameAsync();
+            await KeepChromeAsync();
+
             return;
         }
 
@@ -848,9 +1193,6 @@
         // move does not find itself paying for it.
         _ = LoadSfx();
 
-        // A touch screen has no hover, so one stray tap would move a pawn. Confirmation
-        // is the right default there and the wrong one with a mouse — a default being all
-        // it is, so a player who has been to the panel and turned it off keeps it off.
         try
         {
             if (await LoadPage() is not { } page) return;
@@ -861,13 +1203,64 @@
             if (!await page.InvokeAsync<bool>("isCoarsePointer")) return;
 
             _touch = true;
-            if (!_confirmChosen) _confirm = true;
+
+            // What a finger needs from the board, and the only thing on this page that is
+            // asked for because the pointer is a blunt one: the board's own presses have to
+            // keep being delivered to whatever the thumb is over as it slides, which a
+            // browser stops doing the moment a touch goes down. Everything else about
+            // pointing at this board is already the same for both kinds of pointer.
+            //
+            // Confirmation used to be turned on here as well, on the grounds that a screen
+            // with no hover would otherwise play a move on one stray tap. That was true of
+            // a board where a tap was the whole gesture. It is not true of this one: the
+            // press is the look and the lift is the move, and a wall can be examined and
+            // slid onto the right groove before anything is played. So it is left as what
+            // it is, a preference, off unless somebody asks for it — and a wall on a phone
+            // now costs the same one gesture a pawn does, which was the point.
+            await page.InvokeVoidAsync("freeTheBoard");
 
             StateHasChanged();
         }
         catch (Exception)
         {
             // Not worth a broken page if the check is unavailable.
+        }
+    }
+
+    // ============================================================== the window ==
+
+    /// <summary>Which theme the window around the page was last told about.</summary>
+    private bool? _chromeLight;
+
+    /// <summary>
+    /// Keeps the strip of window this page does not draw in the theme the page is in.
+    ///
+    /// There is always some. In a browser on a phone it is the address bar; in the app it
+    /// is the status bar at the top and whatever the system puts at the bottom. Both are
+    /// the host's to paint and neither can know which theme is up, because the theme is a
+    /// preference this page remembers and applies after the host has already drawn itself.
+    /// A dark app under a white status bar is not a small thing on a screen this size: it
+    /// is most of what "this app is dark" was supposed to mean.
+    ///
+    /// The ink is passed rather than looked up so that the two ends cannot drift: it is the
+    /// stylesheet's own --bg for the theme in force, which is exactly the colour the page
+    /// meets the system bar with.
+    /// </summary>
+    private async Task KeepChromeAsync()
+    {
+        if (_chromeLight == _light) return;
+
+        _chromeLight = _light;
+
+        try
+        {
+            if (_page is { } page)
+                await page.InvokeVoidAsync("setSystemTheme", _light, _light ? "#e8e3d8" : "#171714");
+        }
+        catch (Exception)
+        {
+            // A host with no bars to colour, or one that will not be told. The page is
+            // drawn either way.
         }
     }
 
@@ -886,6 +1279,15 @@
     {
         // While a game is being set up the board behind is not the player's yet.
         if (_showSetup) return;
+
+        // The leaving card is only ever raised by a back gesture, which is a phone's; a
+        // keyboard is not, but a card that cannot be dismissed by the key everybody presses
+        // at a card is a card somebody is stuck at.
+        if (_showLeave)
+        {
+            if (key is "Escape") { _showLeave = false; StateHasChanged(); }
+            return;
+        }
 
         if (_showSettings)
         {
@@ -928,6 +1330,100 @@
         StateHasChanged();
     }
 
+    // ================================================================== back ==
+
+    /// <summary>
+    /// Whether a real game has been put on the board. The session that exists before the
+    /// setup card is answered is a stand-in — a plain local game nobody chose — and the
+    /// difference matters to exactly one question: whether closing the setup card would
+    /// return the player to something or to an empty board.
+    /// </summary>
+    private bool _started;
+
+    /// <summary>
+    /// The system's back gesture, which is a phone's one universal control and the only
+    /// one this page does not draw itself. It has to mean "up one level" every time it is
+    /// pressed, and it has to reach the game before it reaches the app: a sweep that leaves
+    /// a match in progress because there happened to be nothing else to close is the single
+    /// worst thing a back button can do.
+    ///
+    /// So it is answered as a ladder, from whatever is nearest the player outwards, and
+    /// every rung is one press. What is drawn in front goes first — a card over the board
+    /// is what the player is looking at and is what "back" refers to, even where the board
+    /// behind it is also in a state of its own. Then the states of the board itself, then
+    /// the game, and only when there is nothing left of any of them does the app close.
+    ///
+    /// Returns whether this page took the press. False is the shell's cue to do what back
+    /// means where there is no page left to unwind — which is why it is a question and not
+    /// a notification.
+    ///
+    /// Called on the shell's own thread. It reads the state to decide and changes nothing
+    /// itself; the change goes through the renderer like every other change on this page.
+    /// </summary>
+    private bool OnBackPressed()
+    {
+        if (NextBackStep() is not { } step) return false;
+
+        _ = InvokeAsync(() =>
+        {
+            step();
+            StateHasChanged();
+        });
+
+        return true;
+    }
+
+    /// <summary>
+    /// One rung of the ladder, or null when the page is at the bottom of it and the press
+    /// belongs to the shell. Written as the whole ladder in one place, in order, because
+    /// the requirement is about the order and a rule spread across eight handlers is a
+    /// rule nobody can check.
+    /// </summary>
+    private Action? NextBackStep()
+    {
+        // The cards, nearest first. The leaving card is over everything including the
+        // setup card, so back out of it is back to whatever asked the question.
+        if (_showLeave) return () => _showLeave = false;
+        if (_showSettings) return () => _showSettings = false;
+
+        // The result card comes off to leave the final position on the board, which is
+        // what somebody who just watched a game end wants to look at. It does not come
+        // back by itself afterwards — see _resultSeen.
+        if (_showResult) return () => { _showResult = false; _resultSeen = true; };
+
+        // The setup card, but only when there is a game behind it to go back to. Opened
+        // over a game it is a choice being reconsidered; opened on a cold start it is the
+        // first thing there is, and closing it would leave a board nobody has set up.
+        if (_showSetup && _started) return () => _showSetup = false;
+
+        // The board's own states, which are things the player switched on and can be
+        // expected to want switched off again.
+        // The board's own states — things the player switched on for this position and can
+        // be expected to want switched off again. Not the reading, which is on the same
+        // list of switches but is a preference that is written down and would then have
+        // been changed by a gesture that meant "go back".
+        if (_reviewPly is not null) return () => Review(null);
+        if (_showHelp) return () => _showHelp = false;
+
+        // A game with moves in it is worth a question. Not one that has only been set up:
+        // there is nothing there to lose, and a card asking about it would be a press for
+        // nothing. A finished game is not worth a question either — it is over.
+        if (_started && !_showSetup && !_session.IsOver && _session.Moves.Count > 0)
+            return () => _showLeave = true;
+
+        // Nothing left. The shell closes, and what was on the board is on disk — written
+        // after every move, not at the moment of leaving, because being killed without
+        // being asked is the ordinary way an app on a phone ends.
+        return null;
+    }
+
+    /// <summary>Leaves, having asked. Null in a browser, where nothing asks.</summary>
+    private void Leave()
+    {
+        _showLeave = false;
+        HostShell.Leave?.Invoke();
+    }
+
     // ================================================================= review ==
 
     /// <summary>
@@ -960,20 +1456,36 @@
         _premove = null;
     }
 
-    private string ShareLink => $"{Nav.BaseUri}?join={_net.Code}";
+    /// <summary>
+    /// The invite, as something worth sending to somebody. The page's own address is the
+    /// right base wherever that address is one the other player could open; where it is
+    /// not — inside an app, where the page is served from within the process — the host
+    /// names a place the game can be played instead. See HostProfile.InviteBase.
+    /// </summary>
+    private string ShareLink =>
+        $"{(HostProfile.Current.InviteBase is { Length: > 0 } elsewhere ? elsewhere : Nav.BaseUri)}?join={_net.Code}";
 
     private string Title
     {
         get
         {
-            string name = _session.Mode switch
+            string name = _session.Options.Mode switch
             {
-                WebMode.Hotseat => "Two players, one screen",
-                WebMode.Online => _net.IsConnected ? "Online game" : "Online game · disconnected",
-                _ => $"Versus {_session.Strength.ToString().ToLowerInvariant()} engine",
+                GameMode.Hotseat => "Two players, one screen",
+                GameMode.Spectate => "Two engines",
+                GameMode.Online => _net.IsConnected ? "Online game" : "Online game · disconnected",
+                _ => $"Versus {_session.Options.Strength.ToString().ToLowerInvariant()} engine",
             };
 
-            return _session.Setup.IsStandard ? name : $"{name} · {_session.Setup.Describe()}";
+            if (!_session.Setup.IsStandard) name += $" · {_session.Setup.Describe()}";
+
+            // The clock belongs beside the board and not beside the settings, for the same
+            // reason the board's own description does: both were settled when the game
+            // began and neither can be changed while it lasts. In the header's shorthand,
+            // which is the desktop's shorthand — the card that set it wrote it out in full.
+            if (_session.HasClock) name += $" · {_session.Options.Clock.Label}";
+
+            return name;
         }
     }
 
@@ -984,10 +1496,10 @@
             if (_session.IsOver) return WinnerLabel;
             if (_saidThinking) return "Thinking";
 
-            if (_session.Mode == WebMode.Online)
+            if (_session.Options.Mode == GameMode.Online)
                 return _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
 
-            return _session.Mode == WebMode.VersusBot && _session.IsHumanTurn
+            return _session.Options.Mode == GameMode.VersusBot && _session.IsHumanTurn
                 ? "Your move"
                 : $"{_session.PlayerName(_session.State.SideToMove)} to move";
         }
@@ -999,8 +1511,13 @@
         {
             if (_session.IsOver) return "Rematch to play again.";
 
-            if (_session.Mode == WebMode.Online && !_net.IsConnected)
+            if (_session.Options.Mode == GameMode.Online && !_net.IsConnected)
                 return _net.Trouble.Length > 0 ? _net.Trouble : "The connection is gone.";
+
+            // Nothing is asked of anyone here, so nothing the line usually says about how
+            // to move applies. The desktop says exactly this in exactly this place.
+            if (_session.Options.Mode == GameMode.Spectate)
+                return "Both sides are played by the engine. Routes are drawn for each.";
 
             // Without saying so, a turn that does not pass just looks like the game
             // ignored the other player.
@@ -1028,8 +1545,12 @@
             // reading — so it goes, and the mark by the heading brings it back.
             if (!_showHelp && _session.Moves.Count > 2) return string.Empty;
 
+            // The one sentence a phone gets, and it has to teach the whole gesture: that
+            // holding is how you look, that sliding is how you correct, and that nothing
+            // is played until the finger comes off. Said as one motion rather than as
+            // three rules, because it is one motion.
             return _touch
-                ? "Tap a square to step, or the gap between squares for a wall. Tap again to confirm."
+                ? "Press a square to step, or the gap between squares for a wall — hold to see what it costs, slide to change it, lift to play it."
                 : "Click a square to step, or hover a groove between squares to place a wall.";
         }
     }
@@ -1057,8 +1578,13 @@
             if (_thinking) return "The engine has the board for a moment.";
             if (_session.CanUndo) return null;
 
-            if (_session.Mode == WebMode.Online)
+            if (_session.Options.Mode == GameMode.Online)
                 return "Taking a move back has to be agreed, and there is no way to ask.";
+
+            // Both seats belong to the engine, so there is no move of anyone's here to
+            // take back — a rule of the mode rather than of the position, like online.
+            if (_session.Options.Mode == GameMode.Spectate)
+                return "Neither side is yours to take a move back from.";
 
             return _session.Moves.Count == 0
                 ? "Nothing has been played yet."
@@ -1080,24 +1606,50 @@
             int winner = _session.Winner;
             if (winner < 0) return string.Empty;
 
-            if (_session.Mode == WebMode.Hotseat) return $"{_session.PlayerName(winner)} wins";
-            if (winner == _session.LocalSeat) return "You win";
+            // A game decided by the clock is not the same result as a game decided on the
+            // board, and this line is the only place that can say which of the two it was.
+            string ending = _session.FlaggedPlayer >= 0 ? " on time" : string.Empty;
 
-            return _session.Mode == WebMode.VersusBot ? "The engine wins" : "Your opponent wins";
+            // Nobody at this screen played a local match or a watched game, so both are
+            // announced by name — which is also what a seat of -1 is telling us.
+            if (_session.LocalSeat < 0) return $"{_session.PlayerName(winner)} wins{ending}";
+
+            if (winner == _session.LocalSeat) return $"You win{ending}";
+
+            return (_session.Options.Mode == GameMode.VersusBot ? "The engine wins" : "Your opponent wins") + ending;
         }
     }
+
+    /// <summary>
+    /// What the engine last found, for the one seat it is worth reporting from. In a watched
+    /// game that is whichever of the two just moved — the line would otherwise always
+    /// describe the first seat and never the answer just played.
+    /// </summary>
+    private IQuoridorAgent? Reporting => _session.Options.Mode == GameMode.Spectate
+        ? _session.AgentOf(_session.LastMover >= 0 ? _session.LastMover : 0)
+        : _session.Bot;
 
     private string? EngineLine
     {
         get
         {
-            if (_session.Bot is not SearchAgent engine || engine.LastResult.Depth == 0) return null;
+            if (Reporting is not SearchAgent engine || engine.LastResult.Depth == 0) return null;
 
             SearchResult result = engine.LastResult;
+
+            // The score is from the point of view of whoever did the searching. Against a
+            // person that is the engine and the other side is "you"; in a watched game
+            // there is no "you" to be ahead, so the two are named.
+            bool watched = _session.Options.Mode == GameMode.Spectate;
+            int searcher = Math.Max(_session.LastMover, 0);
+
+            string mover = watched ? _session.PlayerName(searcher) : "engine";
+            string other = watched ? _session.PlayerName(searcher ^ 1) : "you";
+
             string verdict = result.IsForced
-                ? result.Score > 0 ? "engine has a forced win" : "engine is lost"
-                : result.Score > 250 ? "engine ahead"
-                : result.Score < -250 ? "you ahead"
+                ? result.Score > 0 ? $"{mover} has a forced win" : $"{mover} is lost"
+                : result.Score > 250 ? $"{mover} ahead"
+                : result.Score < -250 ? $"{other} ahead"
                 : "level";
 
             return $"depth {result.Depth} · {result.Nodes:N0} nodes · {verdict}";
@@ -1201,10 +1753,10 @@
         ResetNet();
     }
 
-    private void SelectMode(WebMode mode)
+    private void SelectMode(GameMode mode)
     {
         _mode = mode;
-        if (mode != WebMode.Online) ResetNet();
+        if (mode != GameMode.Online) ResetNet();
     }
 
     private void StartGame()
@@ -1212,7 +1764,7 @@
         // A rolled game rolls the order of play too.
         if (_flavour == GameFlavour.Random) _seat = Random.Shared.Next(2);
 
-        _session = new WebSession(_mode, _strength, _seat, BuildSetup(), _flavour);
+        _session = new GameSession(OptionsFor(_mode, _strength, _clock, _seat, BuildSetup(), _flavour));
         _showSetup = false;
 
         // The game just set up is the one a returning player almost always wants next, so
@@ -1236,7 +1788,11 @@
     /// </summary>
     private async Task Restart(bool swap)
     {
-        bool rolled = _session.Flavour == GameFlavour.Random;
+        // Everything the game was set up with, taken off the game itself rather than off
+        // the card behind it: the card may have been opened and fiddled with since, and a
+        // rematch is a repeat of what was played.
+        GameOptions options = _session.Options;
+        bool rolled = options.Flavour == GameFlavour.Random;
 
         // A rolled game rolls again — playing the same random board twice is not what
         // "random" was asked for. Standard and Custom are settings, so they stand.
@@ -1246,15 +1802,17 @@
 
         // Random re-rolls who starts as well — but not online, where the seats belong to
         // both players and swapping sides is the only agreed way to change them.
-        if (rolled && _session.Mode != WebMode.Online) seat = Random.Shared.Next(2);
+        if (rolled && options.Mode != GameMode.Online) seat = Random.Shared.Next(2);
 
         // Online the whole thing is a joint decision, so the other browser is told which
         // board to build and whether the sides changed.
-        if (_session.Mode == WebMode.Online)
+        if (options.Mode == GameMode.Online)
             await _net.SendAsync($"restart|{(swap ? "swap" : "keep")}|{setup.Encode()}");
 
         _seat = seat;
-        _session = new WebSession(_session.Mode, _session.Strength, _seat, setup, _session.Flavour);
+        _session = new GameSession(
+            OptionsFor(options.Mode, options.Strength, options.Clock, seat, setup, options.Flavour));
+
         ResetPlayState();
     }
 
@@ -1275,7 +1833,16 @@
     /// </summary>
     private async Task OpenGame()
     {
-        if (!_session.IsBotTurn) return;
+        if (!_session.IsBotTurn)
+        {
+            // The board is the player's, so the engine's core is free for as long as they
+            // spend over it. Nothing is played out of a ponder and no answer is kept; all
+            // it leaves behind is a warmed table. The host decides whether it happens at
+            // all, and in a browser it does not — there is only the one thread, and this
+            // would take it and never give it back.
+            _session.StartPondering();
+            return;
+        }
 
         // A plain board has nothing to arrive, so it has nothing to wait for. The portals
         // count here as the holes and the pickups do: their mouths are drawn with the rest
@@ -1315,7 +1882,7 @@
         {
             if (_sfx is not null) return _sfx;
 
-            _sfx = await Js.InvokeAsync<IJSObjectReference>("import", "./js/sfx.js");
+            _sfx = await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Quoridor.Ui/js/sfx.js");
 
             // Builds the audio graph while the browser is idle. Left to the first move,
             // it costs that move a fifth of a second and the pawn lurches instead of
@@ -1364,8 +1931,7 @@
 
         if (!_session.IsOver) return;
 
-        bool ours = _session.Mode == WebMode.Hotseat || _session.Winner == _session.LocalSeat;
-        await Sfx(ours ? "win" : "lose");
+        await Sfx(Ours(_session) ? "win" : "lose");
     }
 
     private async Task ToggleMusic()
@@ -1448,13 +2014,6 @@
 
     // ============================================================== remembered ==
 
-    /// <summary>
-    /// Whether the confirm step was chosen by hand on some earlier visit. A touch screen
-    /// turns it on by itself, and it must not turn it back on for the one player who went
-    /// looking for the switch and turned it off.
-    /// </summary>
-    private bool _confirmChosen;
-
     /// <summary>The board sizes the list offers, which is what a stored one has to be.</summary>
     private static readonly int[] BoardSizes = { 9, 7, 5 };
 
@@ -1464,7 +2023,7 @@
     /// found in what an older visit wrote — and takes its default — and one that has
     /// stopped meaning anything can be dropped without invalidating the rest.
     /// </summary>
-    private string Settings => string.Join(';', new[]
+    private string StoredSettings => string.Join(';', new[]
     {
         $"theme={(_light ? "light" : "dark")}",
         $"style={(_carved ? "carved" : "flat")}",
@@ -1476,12 +2035,26 @@
         $"musicvol={_musicVolume}",
         $"track={_track}",
 
+        // Written as the number of milliseconds and not as which button was lit: what the
+        // list offers is the host's business, and the two hosts do not offer the same list.
+        // A phone's 3 s read back in a browser is brought down to what a browser allows,
+        // rather than leaving a row with nothing lit in it.
+        $"movetime={_moveTimeMs}",
+
+        // Both are written whatever host wrote them, and both are read back on any host.
+        // A phone that was told to idle and is then opened in a browser has nothing to
+        // idle, so the setting simply has no effect there rather than being lost; the pace
+        // of a watched game means the same thing on either.
+        $"ponder={(_ponder ? 1 : 0)}",
+        $"pace={_paceMs}",
+
         // The game last set up, so that coming back to play another one is the same
         // single press it was the first time. An online game is not written down: it
         // cannot be resumed by remembering it, since the invite went with the tab, and
         // opening the card on the online panel with an empty code is a worse start than
         // the one almost everybody wants.
-        $"opponent={(_mode == WebMode.Hotseat ? "hotseat" : "engine")}",
+        $"opponent={OpponentName(_mode)}",
+        $"clock={ClockName(_clock)}",
         $"strength={(int)_strength}",
         $"game={_flavour}",
         $"size={_size}",
@@ -1512,14 +2085,22 @@
                 case "theme": _light = value == "light"; break;
                 case "style": _carved = value == "carved"; break;
                 case "reading": _reading = value == "1"; break;
-                case "confirm": _confirm = value == "1"; _confirmChosen = true; break;
+                case "confirm": _confirm = value == "1"; break;
                 case "sound": _sound = value == "1"; break;
                 case "music": _music = value == "1"; break;
                 case "soundvol": _soundVolume = Ranged(value, _soundVolume, 100); break;
                 case "musicvol": _musicVolume = Ranged(value, _musicVolume, 100); break;
                 case "track": _track = Ranged(value, _track, 2); break;
+                case "movetime": _moveTimeMs = HostProfile.Current.Allowed(Ranged(value, _moveTimeMs, 60_000)); break;
+                case "ponder": _ponder = value == "1"; break;
 
-                case "opponent": _mode = value == "hotseat" ? WebMode.Hotseat : WebMode.VersusBot; break;
+                // Only one of the three the control offers. A number no button carries
+                // would leave the row with nothing lit, which reads as the setting having
+                // been lost rather than as it never having been one of the choices.
+                case "pace": _paceMs = Offered(value, PaceMilliseconds, _paceMs); break;
+
+                case "opponent": _mode = Opponent(value); break;
+                case "clock": _clock = StoredClock(value); break;
                 case "strength": _strength = (BotStrength)Ranged(value, (int)_strength, 2); break;
                 case "game": _flavour = Flavour(value); break;
 
@@ -1564,12 +2145,67 @@
     };
 
     /// <summary>
+    /// The mode, under its own name rather than under the enum's. Online is never stored,
+    /// so an older line that has never heard of a watched game simply falls through to the
+    /// one almost everybody wants.
+    /// </summary>
+    private static GameMode Opponent(string value) => value switch
+    {
+        "hotseat" => GameMode.Hotseat,
+        "engines" => GameMode.Spectate,
+        _ => GameMode.VersusBot,
+    };
+
+    private static string OpponentName(GameMode mode) => mode switch
+    {
+        GameMode.Hotseat => "hotseat",
+        GameMode.Spectate => "engines",
+        _ => "engine",
+    };
+
+    /// <summary>The clock by name, so that adding a fourth one later cannot silently turn
+    /// somebody's stored third into it.</summary>
+    private static TimeControl StoredClock(string value) => value switch
+    {
+        "blitz" => TimeControl.Blitz,
+        "rapid" => TimeControl.Rapid,
+        _ => TimeControl.None,
+    };
+
+    private static string ClockName(TimeControl clock) =>
+        clock == TimeControl.Blitz ? "blitz"
+        : clock == TimeControl.Rapid ? "rapid"
+        : "off";
+
+    /// <summary>
     /// Reads the settings back before anything is drawn. After the first render would be
     /// simpler and would also mean a player who chose the light theme is shown the dark
     /// one for a frame on the way in. The module is a few hundred bytes and comes from the
     /// browser's own cache on every visit that has anything stored to read — the one visit
     /// that pays for the round trip is the one where it finds nothing.
     /// </summary>
+    private async Task LoadGame()
+    {
+        try
+        {
+            if (await LoadPage() is not { } page) return;
+
+            string stored = await page.InvokeAsync<string>("readResume");
+
+            // Remembered as read, whether or not it can be used. A line this build cannot
+            // make sense of then differs from the empty string the next write produces, so
+            // it is cleared off the disk rather than being re-read and re-rejected on
+            // every start from here on.
+            _storedGame = stored;
+
+            RestoreGame(stored);
+        }
+        catch (Exception)
+        {
+            // No game to come back to, which is what a first run is.
+        }
+    }
+
     private async Task LoadSettings()
     {
         try
@@ -1613,12 +2249,261 @@
     {
         try
         {
-            if (_page is { } page) await page.InvokeVoidAsync("writeSettings", Settings);
+            if (_page is { } page) await page.InvokeVoidAsync("writeSettings", StoredSettings);
         }
         catch (Exception)
         {
             // Storage is a convenience; a browser without it should still play.
         }
+    }
+
+    // ============================================================ the game itself ==
+
+    /// <summary>
+    /// The game in progress, written down after every move.
+    ///
+    /// A phone does not close apps, it forgets them. Nothing warns an app that the system
+    /// is about to reclaim it — there is no last chance to save, and the moment it happens
+    /// is chosen by whatever else the phone is doing rather than by the player — so the
+    /// only save that survives is one that has already happened. This is written after
+    /// every position the game passes through, and leaving is not a special case: leaving
+    /// deliberately, being killed in the background and the battery going flat all restore
+    /// to the same board, because none of them is what wrote it down.
+    ///
+    /// A rebuild rather than a snapshot. What is stored is the game the session was made
+    /// from and the moves played into it, and coming back replays them — so the position,
+    /// the history, the walls, the pickups still standing and everything else the rules
+    /// produce come out of the rules, and there is no second description of a board to
+    /// keep in step with the first one.
+    ///
+    /// Online games are not written down. There is a browser at the other end of a
+    /// connection that closed when the app went away; a board restored on this side alone
+    /// would be a game with nobody in the other seat.
+    /// </summary>
+    private string StoredGame
+    {
+        get
+        {
+            if (!_started || _session.Options.Mode == GameMode.Online || _session.IsOver) return string.Empty;
+
+            var terms = new List<string>
+            {
+                $"mode={OpponentName(_session.Options.Mode)}",
+                $"strength={(int)_session.Options.Strength}",
+                $"clock={ClockName(_session.Options.Clock)}",
+                $"seat={(_session.Options.HumanMovesFirst ? 0 : 1)}",
+                $"game={_session.Options.Flavour}",
+
+                // The board actually in play, which is not always the one the card asked
+                // for: a rolled game rolls again on a rematch, and it is the board with the
+                // pieces on it that has to come back.
+                $"board={_session.Setup.Encode()}",
+
+                // Kind, row and column, which is the whole of a move and needs no board to
+                // be read against — unlike the notation in the move list, which is written
+                // relative to the corner of whatever size board it was played on.
+                $"moves={string.Join(',', _session.Moves.Select(m => $"{(int)m.Kind}.{m.Row}.{m.Col}"))}",
+            };
+
+            // Where the player was reading, if they were reading. Stepping back through a
+            // game is a place to be in it, and coming back to the live position when the
+            // phone did not ask to is losing the reader's place.
+            if (_reviewPly is { } ply) terms.Add($"ply={ply}");
+
+            // Whole milliseconds. A clock is the one thing here that cannot be recomputed
+            // from the moves, because how long somebody thought is not in the move.
+            if (_session.HasClock)
+            {
+                terms.Add($"left={(long)_session.RemainingOf(0).TotalMilliseconds}," +
+                          $"{(long)_session.RemainingOf(1).TotalMilliseconds}");
+            }
+
+            return string.Join(';', terms);
+        }
+    }
+
+    /// <summary>What was last written, so a render that changed nothing writes nothing.</summary>
+    private string _storedGame = string.Empty;
+
+    /// <summary>
+    /// Writes the game down if it has moved since the last time. Called from after every
+    /// render rather than from each of the dozen places a position can change — a move, the
+    /// engine's reply, an undo, a restart, a new game, a step through the review — because
+    /// every one of them ends in a render and none of them can forget to do this.
+    /// </summary>
+    private async Task KeepGameAsync()
+    {
+        string now = StoredGame;
+        if (now == _storedGame) return;
+
+        _storedGame = now;
+
+        try
+        {
+            if (_page is { } page) await page.InvokeVoidAsync("writeResume", now);
+        }
+        catch (Exception)
+        {
+            // Coming back to a board is a kindness, not a rule. A phone that will not keep
+            // it still plays the game that is on the screen.
+        }
+    }
+
+    /// <summary>
+    /// Puts back the game that was on the board when the app was last seen, and says
+    /// whether there was one. Anything it cannot read means there was not: what is in
+    /// storage was written by some other version of this build, or by somebody with the
+    /// developer tools open, and neither is a reason to fail to start.
+    /// </summary>
+    private bool RestoreGame(string stored)
+    {
+        if (stored.Length == 0) return false;
+
+        GameMode mode = GameMode.VersusBot;
+        BotStrength strength = BotStrength.Hard;
+        TimeControl clock = TimeControl.None;
+        GameFlavour flavour = GameFlavour.Standard;
+        GameSetup setup = GameSetup.Standard;
+        int seat = 0;
+        int? ply = null;
+        string moves = string.Empty;
+        long[] left = Array.Empty<long>();
+
+        foreach (string term in stored.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int mark = term.IndexOf('=');
+            if (mark <= 0) continue;
+
+            string name = term[..mark];
+            string value = term[(mark + 1)..];
+
+            switch (name)
+            {
+                case "mode": mode = Opponent(value); break;
+                case "strength": strength = (BotStrength)Ranged(value, (int)strength, 2); break;
+                case "clock": clock = StoredClock(value); break;
+                case "seat": seat = value == "1" ? 1 : 0; break;
+                case "game": flavour = Flavour(value); break;
+                case "moves": moves = value; break;
+
+                case "board":
+                    if (!GameSetup.TryDecode(value.Split('|'), out setup)) return false;
+                    break;
+
+                case "ply":
+                    if (int.TryParse(value, out int read) && read >= 0) ply = read;
+                    break;
+
+                case "left":
+                    left = Array.ConvertAll(value.Split(','), t => long.TryParse(t, out long ms) ? ms : -1);
+                    break;
+            }
+        }
+
+        // A game that was never resumable in the first place, arriving from a store that
+        // should not have had it.
+        if (mode == GameMode.Online) return false;
+
+        List<Move> played = ReadMoves(moves);
+
+        // Which seat is on move at each ply, which the clocks below need and which cannot
+        // be counted: a free move off a skip pickup keeps the turn, so the sides do not
+        // simply alternate. Walked on a bare position rather than on a second session,
+        // because a session builds an engine and an engine is sixty-four megabytes of
+        // transposition table.
+        GameState dry = setup.Build().State;
+        var mover = new int[played.Count];
+
+        for (int i = 0; i < played.Count; i++)
+        {
+            if (!dry.IsLegal(played[i])) return false;
+
+            mover[i] = dry.SideToMove;
+            dry.Apply(played[i]);
+        }
+
+        // The last ply each side is on move for. Charging a side's whole spend at one
+        // moment is only safe there: by then they have taken every increment but the one
+        // the move itself pays, so the number being taken off is the largest their clock
+        // will ever have been asked to cover.
+        var lastTurn = new int[] { -1, -1 };
+        for (int i = 0; i < played.Count; i++) lastTurn[mover[i]] = i;
+
+        _seat = seat;
+        _session = new GameSession(OptionsFor(mode, strength, clock, seat, setup, flavour));
+
+        bool clocked = _session.HasClock && left.Length == 2 && left[0] > 0 && left[1] > 0;
+
+        for (int i = 0; i < played.Count; i++)
+        {
+            if (clocked && lastTurn[mover[i]] == i) SpendDownTo(mover[i], left[mover[i]], stillToCome: 1);
+            if (!_session.Apply(played[i])) return false;
+        }
+
+        // And the side that is on move now, who has not moved since whatever they have
+        // left was written down. Where they have moved already this was done above; where
+        // they have not, they are still holding their opening budget.
+        if (clocked && lastTurn[_session.State.SideToMove] < 0)
+            SpendDownTo(_session.State.SideToMove, left[_session.State.SideToMove], stillToCome: 0);
+
+        _showSetup = false;
+
+        // Which puts the board back in play, starts the clock and hands the position to
+        // the engine if the engine is the one on move.
+        ResetPlayState();
+
+        // After, not before: ResetPlayState returns the board to the live position, which
+        // is exactly what it should do everywhere except here.
+        if (ply is { } at && at < played.Count) _reviewPly = at;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Charges a player down to the clock they had, at a moment when they are the one on
+    /// move — which is the only moment the session will take time off them.
+    ///
+    /// <paramref name="stillToCome"/> is how many increments they are yet to be credited
+    /// before the replay ends, so the number here is what leaves them on the right figure
+    /// after those have landed. Floored a tenth of a second above zero: a clock restored
+    /// to nothing is a game lost on time to a phone that got backgrounded, and being a
+    /// tenth of a second generous is the cheaper mistake by a distance.
+    /// </summary>
+    private void SpendDownTo(int player, long remainingMs, int stillToCome)
+    {
+        TimeSpan have = _session.RemainingOf(player);
+        TimeSpan want = TimeSpan.FromMilliseconds(remainingMs) - stillToCome * _session.Options.Clock.Increment;
+
+        TimeSpan charge = have - want;
+        TimeSpan most = have - TimeSpan.FromMilliseconds(100);
+
+        if (charge > most) charge = most;
+        if (charge <= TimeSpan.Zero) return;
+
+        _session.ChargeClock(charge);
+    }
+
+    /// <summary>Takes the move list back apart. An unreadable term ends the list.</summary>
+    private static List<Move> ReadMoves(string text)
+    {
+        var moves = new List<Move>();
+
+        foreach (string term in text.Split(',', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] parts = term.Split('.');
+
+            if (parts.Length != 3 ||
+                !int.TryParse(parts[0], out int kind) || kind is < 0 or > 2 ||
+                !int.TryParse(parts[1], out int row) || row is < 0 or >= Board.Size ||
+                !int.TryParse(parts[2], out int col) || col is < 0 or >= Board.Size)
+            {
+                break;
+            }
+
+            moves.Add(new Move((MoveKind)kind, row, col));
+        }
+
+        return moves;
     }
 
     /// <summary>
@@ -1638,11 +2523,34 @@
         _reviewPly = null;
         _showResult = false;
         _resultHeld = false;
+        _resultSeen = false;
+
+        // Every path that puts a game on the board comes through here, which is the one
+        // place that can say a game is now in play without every caller remembering to.
+        _started = true;
+
+        // Whatever the engine is in the middle of was asked about a position that is no
+        // longer on the board. Cancelled and dropped rather than disposed: the search being
+        // abandoned goes on reading the token it was handed until it notices, and a source
+        // with no registrations has nothing to release.
+        //
+        // In a browser this has never had anything to do — the search holds the only
+        // thread, so nothing can be pressed while it runs. Behind a native shell it is on a
+        // thread of its own and Restart is live throughout, which is the whole point of
+        // being there and also the reason this line has to exist.
+        _engineStop.Cancel();
+        _engineStop = new CancellationTokenSource();
 
         // A fresh opponent has no history to guess from, so the strength stands in for
         // one: the full engine is worth announcing, and the two handicapped bots answer
-        // faster than the word could be read.
-        _lastThinkMs = _session.Strength == BotStrength.Hard ? SlowSearchMs : 0;
+        // faster than the word could be read. A watched game always opens with the full
+        // search, whatever strength it was given to play against.
+        _lastThinkMs = _session.Options.Strength == BotStrength.Hard ||
+                       _session.Options.Mode == GameMode.Spectate
+            ? SlowSearchMs
+            : 0;
+
+        StartClock();
 
         // Not awaited: this is called from Undo and from two network callbacks, none of
         // which is waiting for the engine's reply, and RunEngine repaints for itself. It
@@ -1658,6 +2566,15 @@
 
     /// <summary>Whether the wait is already running, so it is only started once.</summary>
     private bool _resultHeld;
+
+    /// <summary>
+    /// Whether the card for this result has already been up and been dismissed. Every
+    /// render asks whether the game is over and the card is down, and without this the
+    /// answer after a back gesture is yes, forever: the card would go up again half a
+    /// second after being taken off, and the final position it was taken off to look at
+    /// would never be visible for longer than that.
+    /// </summary>
+    private bool _resultSeen;
 
     /// <summary>
     /// Long enough to see the move that won and the finish line flooding out from it, and
@@ -1700,7 +2617,7 @@
     {
         // The player who created the game chose the sides; the one who opened the link
         // starts on the assumption of the second seat and is told otherwise straight away.
-        if (_net.IsConnected && (_session.Mode != WebMode.Online || _showSetup))
+        if (_net.IsConnected && (_session.Options.Mode != GameMode.Online || _showSetup))
         {
             bool host = _net.Code.Length > 0;
 
@@ -1711,8 +2628,10 @@
 
             // The host's flavour travels with the game, so a rematch on a rolled board
             // rolls again for both of them.
-            _session = new WebSession(
-                WebMode.Online, BotStrength.Normal, _seat, setup, host ? _flavour : GameFlavour.Standard);
+            _session = new GameSession(OptionsFor(
+                GameMode.Online, BotStrength.Normal, TimeControl.None,
+                _seat, setup, host ? _flavour : GameFlavour.Standard));
+
             _showSetup = false;
             ResetPlayState();
 
@@ -1735,7 +2654,7 @@
         // screen, so a game already under way is described as it now stands.
         if (message == "board?")
         {
-            if (_net.Code.Length > 0 && _session.Mode == WebMode.Online)
+            if (_net.Code.Length > 0 && _session.Options.Mode == GameMode.Online)
                 await _net.SendAsync($"seat|{_session.LocalSeat ^ 1}|{_session.Setup.Encode()}");
 
             return;
@@ -1761,8 +2680,9 @@
                 {
                     // A board that is not the plain one was rolled or set by the host;
                     // either way this side follows whatever they send on a rematch.
-                    _session = new WebSession(
-                        WebMode.Online, BotStrength.Normal, _seat, setup, GameFlavour.Standard);
+                    _session = new GameSession(OptionsFor(
+                        GameMode.Online, BotStrength.Normal, TimeControl.None,
+                        _seat, setup, GameFlavour.Standard));
 
                     ResetPlayState();
                 }
@@ -1788,8 +2708,9 @@
 
             _seat = swap ? _session.LocalSeat ^ 1 : _session.LocalSeat;
 
-            _session = new WebSession(
-                WebMode.Online, BotStrength.Normal, _seat, setup, _session.Flavour);
+            _session = new GameSession(OptionsFor(
+                GameMode.Online, BotStrength.Normal, TimeControl.None,
+                _seat, setup, _session.Options.Flavour));
 
             ResetPlayState();
             StateHasChanged();
@@ -1834,7 +2755,7 @@
         // on that once held the engine's reply up for five seconds on a cold load.
         _ = SoundFor(move);
 
-        if (_session.Mode == WebMode.Online)
+        if (_session.Options.Mode == GameMode.Online)
         {
             await _net.SendAsync($"move|{ply}|{Notation.Format(move, _session.State)}");
             return;
@@ -1875,9 +2796,34 @@
     }
 
     /// <summary>
-    /// WebAssembly has one thread, and the search is on it. Showing "Thinking" and then
-    /// yielding lets the browser paint that before the page goes quiet for half a second
-    /// — without the yield the label would only appear after the search had finished.
+    /// Stops the search when the position it was asked about is taken off the board — a
+    /// restart, a new game, an undo, the page going away. Cancelled and replaced rather
+    /// than reused, so a loop that comes back round reads a token belonging to the game
+    /// that is now in play.
+    /// </summary>
+    private CancellationTokenSource _engineStop = new();
+
+    /// <summary>
+    /// How long one move takes in a watched game, at the least. Two engines answering as
+    /// fast as they can is a game nobody can follow, and against a person the search is
+    /// its own pause. It is the desktop's own middle setting; the desktop offers three and
+    /// this does not, because a picker for how fast to watch something is a knob the board
+    /// does not need.
+    /// </summary>
+    // The pace of a watched game is the player's, and is above with the rest of the
+    // preferences: see _paceMs.
+
+    /// <summary>
+    /// Plays the engine's moves for as long as it is on move. Cancelling a search does not
+    /// end this loop and does not start another one anywhere else: the loop comes back
+    /// round, reads the session as it now stands, and either searches the new position or
+    /// stops. That is what keeps a restart from putting two searches on one agent.
+    ///
+    /// The search is asked for through <c>ThinkAsync</c>, which runs it on a thread from
+    /// the pool. Behind a native shell that is a real one and the page stays live
+    /// throughout; in WebAssembly the pool is the only thread there is, so the search still
+    /// holds the screen for as long as it lasts — which is why the budget is capped there
+    /// and why "Thinking" is still painted, and yielded on, before it starts.
     /// </summary>
     private async Task RunEngine()
     {
@@ -1889,13 +2835,16 @@
 
         try
         {
-            while (true)
+            while (!_closed)
             {
                 // Read once per turn, and re-read at the top of every one: a restart
                 // replaces the session outright, and the loop has to end up driving
-                // whichever game is now in play rather than the one it started on.
-                WebSession session = _session;
+                // whichever game is now in play rather than the one it started on. The
+                // token is re-read with it, for exactly the same reason.
+                GameSession session = _session;
                 if (!session.IsBotTurn) break;
+
+                CancellationToken token = _engineStop.Token;
 
                 _thinking = true;
                 _saidThinking = _lastThinkMs >= SlowSearchMs;
@@ -1911,28 +2860,63 @@
                     await Task.Delay(40);
 
                     // That yield hands the browser back the thread, and a Restart pressed
-                    // inside it is processed before we get it again. Think() only asks
-                    // that there be an engine, not that it be the engine's turn, so
-                    // pressing on regardless had the engine play the human's opening
-                    // move on the new board. Going round again rather than breaking out:
-                    // the new game may be one the engine opens, and this loop is the one
-                    // holding _engineRunning, so it is the one that has to play it.
+                    // inside it is processed before we get it again. Searching only asks
+                    // that there be an engine on this side, not that the game still be the
+                    // one we set out to play, so pressing on regardless had the engine play
+                    // the human's opening move on the new board. Going round again rather
+                    // than breaking out: the new game may be one the engine opens, and this
+                    // loop is the one holding _engineRunning, so it is the one that has to
+                    // play it.
                     if (!ReferenceEquals(session, _session) || !session.IsBotTurn) continue;
                 }
+
+                // What the answer will have to match to be worth playing.
+                int ply = session.Moves.Count;
 
                 // How long the last search took is the only honest guide to how long
                 // this one will take, and it costs nothing to keep.
                 long started = System.Diagnostics.Stopwatch.GetTimestamp();
 
-                Move move = session.Think();
+                Move move;
+
+                try
+                {
+                    Task<Move> search = session.ThinkAsync(token);
+
+                    // WhenAll waits for every task and not just the first to fail, so once
+                    // this returns the search is over either way and the agent is free for
+                    // the next turn round the loop.
+                    if (session.Options.Mode == GameMode.Spectate)
+                        await Task.WhenAll(search, Task.Delay(_paceMs, token));
+
+                    move = await search;
+                }
+                catch (OperationCanceledException)
+                {
+                    _thinking = false;
+                    _saidThinking = false;
+                    continue;
+                }
 
                 _lastThinkMs = (int)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
+                _thinking = false;
+                _saidThinking = false;
+
+                // An abandoned search still answers: the engine returns the best move it
+                // had rather than throwing, so the cancellation can go unnoticed. The
+                // answer belongs to the position it was asked about, and a restart or an
+                // undo makes it a move for a game that no longer exists.
+                if (token.IsCancellationRequested ||
+                    !ReferenceEquals(session, _session) ||
+                    session.Moves.Count != ply)
+                {
+                    continue;
+                }
 
                 session.Apply(move);
                 _ = SoundFor(move);
 
-                _thinking = false;
-                _saidThinking = false;
                 StateHasChanged();
 
                 // Same reason as after a human move: if the engine is about to think
@@ -1946,6 +2930,11 @@
             _saidThinking = false;
             _engineRunning = false;
         }
+
+        // The board is somebody else's now, so the engine's core is free for as long as
+        // they take over it. Says nothing and does nothing where the host cannot spare a
+        // thread, which is the browser.
+        _session.StartPondering();
 
         await TryPremoveAsync();
     }
@@ -1978,7 +2967,7 @@
     {
         try
         {
-            return _page ??= await Js.InvokeAsync<IJSObjectReference>("import", "./js/page.js");
+            return _page ??= await Js.InvokeAsync<IJSObjectReference>("import", "./_content/Quoridor.Ui/js/page.js");
         }
         catch (Exception)
         {
@@ -2014,8 +3003,27 @@
         StateHasChanged();
     }
 
+    /// <summary>
+    /// Whether the screen has gone. In a browser the page going away takes everything with
+    /// it, so this never had anything to guard; behind a native shell the search and the
+    /// ponder are on threads of their own and would go on running on a board nobody can
+    /// see, holding a core for as long as they were told to.
+    /// </summary>
+    private bool _closed;
+
     public async ValueTask DisposeAsync()
     {
+        _closed = true;
+
+        // The shell outlives this component and holds a delegate into it. A back press
+        // answered by a screen that has gone is a press that does nothing at all.
+        HostShell.BackPressed = null;
+
+        // Both of these are requests rather than events — the search notices at the top of
+        // its next iteration — so nothing here waits for them.
+        _engineStop.Cancel();
+        _session.StopPondering();
+
         await _net.DisposeAsync();
 
         // The listener holds a reference back into here, so it goes first.

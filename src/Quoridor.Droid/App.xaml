@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<Application xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:Quoridor.Droid"
+             x:Class="Quoridor.Droid.App">
+    <Application.Resources>
+        <ResourceDictionary>
+
+            <!-- Deliberately empty. There are no native controls in this app to style: the
+                 window holds one WebView and everything inside it is drawn by the game's
+                 own stylesheet. A palette here would be a second place for the same
+                 colours to be decided, and the two would drift. -->
+
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

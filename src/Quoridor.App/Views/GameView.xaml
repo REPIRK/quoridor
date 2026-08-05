@@ -3,6 +3,27 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Focusable="True">
 
+    <UserControl.Resources>
+        <!-- A row of the move list. It is clickable, so it looks clickable before it is
+             clicked; and the row being read back is marked by a bar in the gutter rather
+             than by its ink alone, which was quiet enough to lose in a list of eighty. The
+             gutter is held open on every row so that marking one does not shift the text. -->
+        <Style x:Key="LogRow" TargetType="Border">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="2,0,0,0" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Padding" Value="5,1" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Brush.Cell}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -37,20 +58,96 @@
                 <ColumnDefinition Width="250" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel x:Name="PlayerColumn" Grid.Column="0" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <StackPanel x:Name="PlayerColumn" />
 
-            <Grid x:Name="BoardHost" Grid.Column="1" Margin="22,0" />
+                <!-- The race, as one figure rather than as two numbers on opposite sides of
+                     a column that nobody subtracts. Each player's remaining steps sit at
+                     their own end in their own ink, and the bar between leans toward
+                     whoever gets home first; the size of the lean is the size of the lead.
+                     Past six steps it stops leaning further, because past that the answer
+                     is simply "them" and a longer bar says the same thing louder.
+
+                     The whole of it is on the figure's own tooltip, which is why nothing is
+                     written beside it. -->
+                <Grid x:Name="Tape" Margin="0,26,0,0" ToolTipService.InitialShowDelay="350">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="36" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="36" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="TapeFirst" Grid.Column="0"
+                               Style="{StaticResource Text.Mono}"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource Brush.Accent0}" />
+
+                    <Grid Grid.Column="1" Height="6" Margin="10,0" ClipToBounds="True">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.ColumnSpan="2" CornerRadius="3"
+                                Background="{DynamicResource Brush.Cell}"
+                                BorderBrush="{DynamicResource Brush.Line}"
+                                BorderThickness="1" />
+
+                        <!-- Half the rail, scaled from the middle outward. One bar and not
+                             two: which side it grows to is the edge it grows from, so the
+                             turn passing slides the same bar across the middle instead of
+                             putting out one and taking in another. -->
+                        <Rectangle x:Name="TapeWedge" Grid.Column="0"
+                                   RadiusX="3" RadiusY="3"
+                                   RenderTransformOrigin="1,0.5">
+                            <Rectangle.RenderTransform>
+                                <ScaleTransform x:Name="TapeWedgeScale" ScaleX="0" />
+                            </Rectangle.RenderTransform>
+                        </Rectangle>
+
+                        <!-- Drawn after the bar, so it is never buried by it: a bar leaning
+                             slightly is only legible as leaning against something. -->
+                        <Rectangle Grid.Column="1" Width="1" HorizontalAlignment="Left"
+                                   Fill="{DynamicResource Brush.Line}" />
+                    </Grid>
+
+                    <TextBlock x:Name="TapeSecond" Grid.Column="2"
+                               Style="{StaticResource Text.Mono}"
+                               TextAlignment="Right"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource Brush.Accent1}" />
+                </Grid>
+            </StackPanel>
+
+            <Grid x:Name="BoardHost" Grid.Column="1" Margin="22,0"
+                  AutomationProperties.Name="Board" />
 
             <StackPanel Grid.Column="2" VerticalAlignment="Center">
 
-                <TextBlock Style="{StaticResource Text.Section}" Text="Status" />
+                <!-- The instructions teach themselves in two moves and are furniture after
+                     that, so they retire on their own. The mark brings them back, and is
+                     the only thing left standing in their place. -->
+                <Grid>
+                    <TextBlock Style="{StaticResource Text.Section}" Text="Status"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="HelpButton"
+                            Style="{StaticResource Button.Ghost}"
+                            Content="?"
+                            Padding="10,2"
+                            HorizontalAlignment="Right"
+                            ToolTip="How to move" />
+                </Grid>
 
                 <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <!-- Whose move it is, said out loud. A player who cannot see the board
+                         learns that the turn has passed from this line and from nothing
+                         else, and it is already the one thing here that says so. -->
                     <TextBlock x:Name="StatusText"
                                FontFamily="Sitka Display, Georgia"
                                FontSize="21"
                                Foreground="{DynamicResource Brush.Text}"
-                               VerticalAlignment="Center" />
+                               VerticalAlignment="Center"
+                               AutomationProperties.LiveSetting="Polite" />
                     <StackPanel x:Name="ThinkingDots"
                                 Orientation="Horizontal"
                                 VerticalAlignment="Bottom"
@@ -58,10 +155,19 @@
                                 Visibility="Collapsed" />
                 </StackPanel>
 
+                <!-- Also a live region, because it is where the keyboard caret names the
+                     square it is standing on and what playing there would cost. -->
                 <TextBlock x:Name="HintText"
                            Style="{StaticResource Text.Subtitle}"
                            Margin="0,10,0,0"
-                           TextWrapping="Wrap" />
+                           TextWrapping="Wrap"
+                           AutomationProperties.LiveSetting="Polite" />
+
+                <TextBlock x:Name="KeysText"
+                           Style="{StaticResource Text.Mono}"
+                           Margin="0,10,0,0"
+                           TextWrapping="Wrap"
+                           Visibility="Collapsed" />
 
                 <TextBlock x:Name="EngineLine"
                            Style="{StaticResource Text.Mono}"
@@ -85,19 +191,25 @@
                     </ScrollViewer>
                 </Grid>
 
+                <!-- ShowOnDisabled throughout: why a control is dead is worth saying, and
+                     the moment it is worth saying is when the pointer is already on it. -->
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
                     <Button x:Name="ReviewPrevButton" Style="{StaticResource Button.Ghost}"
-                            Content="&#x25C0;" Padding="11,4" Margin="0,0,6,0" />
+                            Content="&#x25C0;" Padding="11,4" Margin="0,0,6,0"
+                            ToolTipService.ShowOnDisabled="True" />
                     <Button x:Name="ReviewNextButton" Style="{StaticResource Button.Ghost}"
-                            Content="&#x25B6;" Padding="11,4" Margin="0,0,6,0" />
+                            Content="&#x25B6;" Padding="11,4" Margin="0,0,6,0"
+                            ToolTipService.ShowOnDisabled="True" />
                     <Button x:Name="ReviewLiveButton" Style="{StaticResource Button.Ghost}"
-                            Content="Live" Padding="13,4" />
+                            Content="Live" Padding="13,4"
+                            ToolTipService.ShowOnDisabled="True" />
                 </StackPanel>
 
                 <Rectangle Style="{StaticResource Rule}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
-                    <Button x:Name="UndoButton" Style="{StaticResource Button.Ghost}" Content="Undo" Margin="0,0,8,0" />
+                    <Button x:Name="UndoButton" Style="{StaticResource Button.Ghost}" Content="Undo" Margin="0,0,8,0"
+                            ToolTipService.ShowOnDisabled="True" />
                     <Button x:Name="RestartButton" Style="{StaticResource Button.Ghost}" Content="Restart" />
                 </StackPanel>
             </StackPanel>
@@ -140,8 +252,12 @@
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Text.Section}"
                                    Text="Board" VerticalAlignment="Center" />
+                        <!-- One switch and not three. Reading the position is a single way
+                             of looking at the board, and whatever the board draws for it
+                             belongs behind this button rather than behind a list of them. -->
                         <StackPanel Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal">
-                            <Button x:Name="RoutesButton" Style="{StaticResource Button.Ghost}" Content="Routes" />
+                            <Button x:Name="RoutesButton" Style="{StaticResource Button.Ghost}" Content="Reading"
+                                    ToolTip="Space. Draws each player's route, and how the position stands." />
                         </StackPanel>
 
                         <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource Text.Section}"

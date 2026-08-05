@@ -27,14 +27,20 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="9.0.17" PrivateAssets="all" />
   </ItemGroup>
 
+  <!-- The page itself is one line of Program.cs; everything it shows comes from the
+       component library, which the phone build will host the same way. -->
   <ItemGroup>
-    <ProjectReference Include="..\Quoridor.Core\Quoridor.Core.csproj" />
-    <ProjectReference Include="..\Quoridor.Engine\Quoridor.Engine.csproj" />
+    <ProjectReference Include="..\Quoridor.Ui\Quoridor.Ui.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <TrimmerRootAssembly Include="Quoridor.Core" />
     <TrimmerRootAssembly Include="Quoridor.Engine" />
+
+    <!-- Rooted for the same reason the two above are, and for one of its own: the
+         methods JavaScript calls back into are found by name at run time, and the
+         trimmer cannot see a caller for any of them. -->
+    <TrimmerRootAssembly Include="Quoridor.Ui" />
   </ItemGroup>
 
 </Project>

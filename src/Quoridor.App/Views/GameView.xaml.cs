@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Quoridor.App.Controls;
@@ -64,7 +65,11 @@ public partial class GameView : UserControl
         _board.WallPreviewChanged += (_, preview) => ShowWallPreview(preview);
 
         // Watching two engines is the one time the routes are the point.
-        _board.ShowRoutes = Settings.Current.ShowRoutes || options.Mode == GameMode.Spectate;
+        _board.Reading = Settings.Current.ShowRoutes || options.Mode == GameMode.Spectate;
+
+        // The button was only ever coloured by being pressed, so a game that started with
+        // reading already on showed it as off until it had been turned off and on again.
+        PaintReadingButton();
 
         BuildThinkingDots();
 
@@ -80,6 +85,12 @@ public partial class GameView : UserControl
         if (options.Mode is GameMode.VersusBot or GameMode.Online)
             SwapSidesButton.Visibility = Visibility.Visible;
         RoutesButton.Click += (_, _) => ToggleRoutes();
+
+        HelpButton.Click += (_, _) =>
+        {
+            _showHelp = !_showHelp;
+            UpdateStatus();
+        };
 
         SettingsButton.Click += (_, _) => ShowSettings(true);
         CloseSettingsButton.Click += (_, _) => ShowSettings(false);
@@ -137,7 +148,18 @@ public partial class GameView : UserControl
 
     // ================================================================== flow ==
 
-    private async void OnMoveChosen(object? sender, Move move)
+    /// <summary>
+    /// A move made with the mouse. The caret goes with it: the pointer and the caret are
+    /// the same player pointing at the same board, and one left standing on a square the
+    /// player has just moved away from reads as a second thing also being chosen.
+    /// </summary>
+    private void OnMoveChosen(object? sender, Move move)
+    {
+        StopAiming();
+        PlayHumanMove(move);
+    }
+
+    private async void PlayHumanMove(Move move)
     {
         try
         {
@@ -387,7 +409,10 @@ public partial class GameView : UserControl
     {
         GameOptions options = _session.Options;
 
-        ModeLabel.Text = options.Title;
+        // Titled from the board actually in play rather than from the one the menu chose:
+        // a rolled game rolls again on a rematch, and a header still describing the last
+        // board is worse than no header at all.
+        ModeLabel.Text = options.TitleFor(_session.Setup);
 
         // Whoever the local player is sits at the near edge, so the board turns around
         // when they take the second seat.
@@ -424,6 +449,10 @@ public partial class GameView : UserControl
         // the old position back over the fresh one.
         if (_busy) return;
 
+        // Nothing on the new board is where it was, so the caret goes home with it rather
+        // than being left standing over a square that now means something else.
+        StopAiming();
+
         // Over the network a restart is a joint decision, so tell the other side.
         if (broadcast && _peer is not null) _ = _peer.SendAsync(swap ? "restart|swap" : "restart");
 
@@ -459,6 +488,11 @@ public partial class GameView : UserControl
         else
         {
             _session.Restart();
+
+            // A rolled game comes back on a different board, so the holes the board draws
+            // and the header describing it both have to be asked for again. Standard and
+            // Custom land on the same board and this costs them a redraw of two labels.
+            ApplySeating();
         }
 
         HideResult();
@@ -492,44 +526,355 @@ public partial class GameView : UserControl
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Held with Control the arrows always step through the game, which is what frees
+        // the bare ones for the board below without taking the review away from anybody
+        // who had learned it.
+        if (Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            switch (e.Key)
+            {
+                case Key.Z: Undo(); break;
+                case Key.Left: StepReview(-1); break;
+                case Key.Right: StepReview(+1); break;
+                default: return;
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (Keyboard.Modifiers != ModifierKeys.None) return;
+
+        // Escape puts back whatever the last press put you into: the settings card first,
+        // then the caret, and only then the game itself.
+        if (e.Key == Key.Escape)
+        {
+            if (_settingsOpen) ShowSettings(false);
+            else if (_aiming) StopAiming();
+            else LeaveToMenu();
+
+            e.Handled = true;
+            return;
+        }
+
+        // With the settings card open the keys belong to the card. Space in particular:
+        // it is how a button under the finger is pressed, and taking it for the board
+        // behind meant the card's own controls could not be reached without the mouse.
+        if (_settingsOpen) return;
+
         switch (e.Key)
         {
-            case Key.Escape:
-                if (_settingsOpen) ShowSettings(false);
-                else LeaveToMenu();
-                e.Handled = true;
-                break;
-
-            case Key.Z when Keyboard.Modifiers == ModifierKeys.Control:
-                Undo();
-                e.Handled = true;
-                break;
-
             case Key.F2:
                 Restart();
-                e.Handled = true;
-                break;
-
-            case Key.R:
-                _board.ToggleWallOrientation();
-                e.Handled = true;
                 break;
 
             case Key.Space:
                 ToggleRoutes();
-                e.Handled = true;
                 break;
 
-            case Key.Left:
+            // Left and Right mean the board when there is a move to aim and the game's
+            // past when there is not. It is the same key doing the obvious thing in both
+            // places: while the engine is thinking, or the game is being read back, there
+            // is nothing on the board to point at — and during your own turn the moves
+            // already played are a click away in the list beside you.
+            case Key.Left when !CanAim:
                 StepReview(-1);
-                e.Handled = true;
                 break;
 
-            case Key.Right:
+            case Key.Right when !CanAim:
                 StepReview(+1);
-                e.Handled = true;
                 break;
+
+            // Up and Down have nothing to fall back on, so out of turn they are left to
+            // whatever the focused control wanted them for.
+            case Key.Up when !CanAim:
+            case Key.Down when !CanAim:
+                return;
+
+            // Screen directions and not board ones. The board is turned a half turn for
+            // the second seat, and a caret that turned with it would go left when it was
+            // asked to go right, which is worse than having no caret at all.
+            case Key.Up: StepAim(-1, 0); break;
+            case Key.Down: StepAim(+1, 0); break;
+            case Key.Left: StepAim(0, -1); break;
+            case Key.Right: StepAim(0, +1); break;
+
+            // Into the grooves, and once there, round. Which slot the wall goes in and
+            // which way it lies are the same question asked twice, so they are the same
+            // key pressed twice.
+            case Key.W when CanAim:
+                TurnWall();
+                break;
+
+            // R has always turned the wall under the pointer, and goes on doing that when
+            // there is no caret out to turn instead.
+            case Key.R:
+                if (_aiming) TurnWall();
+                else _board.ToggleWallOrientation();
+                break;
+
+            // Back to your own piece, from wherever forty presses have left the caret.
+            case Key.Home when CanAim:
+                RestAim();
+                break;
+
+            // Only while the caret is out. Otherwise Enter belongs to whatever button the
+            // player has tabbed to — Rematch, on the card where they are most likely to
+            // have reached for it.
+            case Key.Enter when _aiming:
+                PlayAim();
+                break;
+
+            default:
+                return;
         }
+
+        e.Handled = true;
+    }
+
+    // ================================================================= aiming ==
+
+    private MoveKind _aimKind = MoveKind.Pawn;
+    private int _aimRow;
+    private int _aimCol;
+
+    /// <summary>Whether the caret is out. It arrives on the first key that wants it and
+    /// leaves on Escape or on a move made with the mouse, so a player who never touches
+    /// the keyboard never sees it.</summary>
+    private bool _aiming;
+
+    /// <summary>
+    /// The board, if it can draw a caret yet. The cast goes through <see cref="object"/>
+    /// because <c>BoardView</c> is sealed: a sealed type that does not implement an
+    /// interface cannot be tested against it directly, and the control that draws the
+    /// board is maintained apart from this screen. Everything else about keyboard play
+    /// works without it — this is only where the caret is put.
+    /// </summary>
+    private IBoardAim? Caret => (object)_board as IBoardAim;
+
+    /// <summary>The move the caret is standing on, as the move playing it would be.</summary>
+    private Move Aim => new(_aimKind, _aimRow, _aimCol);
+
+    /// <summary>Whether there is anything on the board to point at right now.</summary>
+    private bool CanAim =>
+        !_busy &&
+        !_settingsOpen &&
+        _reviewPly is null &&
+        _session.IsHumanTurn &&
+        ResultOverlay.Visibility != Visibility.Visible;
+
+    /// <summary>
+    /// Brings the caret out, resting it on the piece whose turn it is — which is where the
+    /// next move is being thought about before it has been aimed anywhere. False when
+    /// there is no move to make, and the key then belongs to whatever else wanted it.
+    /// </summary>
+    private bool StartAiming()
+    {
+        if (!CanAim) return false;
+
+        if (!_aiming)
+        {
+            _aiming = true;
+            RestOnOwnPawn();
+        }
+
+        ClampAim();
+        return true;
+    }
+
+    private void StopAiming()
+    {
+        if (!_aiming) return;
+
+        _aiming = false;
+        Caret?.Aim(null, false);
+        UpdateStatus();
+    }
+
+    private void RestOnOwnPawn()
+    {
+        int cell = _session.State.PawnOf(_session.State.SideToMove);
+
+        _aimKind = MoveKind.Pawn;
+        _aimRow = Board.RowOf(cell);
+        _aimCol = Board.ColOf(cell);
+    }
+
+    /// <summary>
+    /// Keeps the caret inside the game actually being played. A smaller board makes the
+    /// point twice over: a caret left where a nine put it can be off a five entirely. The
+    /// grooves stop one short of the squares, because the last row and column have no
+    /// corner of their own for a wall to sit in.
+    /// </summary>
+    private void ClampAim()
+    {
+        int first = _session.State.GoalRow(0);
+        int last = _session.State.GoalRow(1) - (_aimKind == MoveKind.Pawn ? 0 : 1);
+
+        _aimRow = Math.Clamp(_aimRow, first, last);
+        _aimCol = Math.Clamp(_aimCol, first, last);
+    }
+
+    /// <summary>
+    /// Moves the caret one square, or one slot while it is in the grooves, and stops at
+    /// the edge of the game rather than wrapping round it: a caret that comes out at the
+    /// far side is a caret you have to go looking for.
+    /// </summary>
+    private void StepAim(int rows, int cols)
+    {
+        if (!CanAim) return;
+
+        // The first press only brings the caret out, and it comes out on your own piece.
+        // One that appeared already a square away from there would be a caret you had to
+        // work out the origin of before you could steer it.
+        if (!_aiming)
+        {
+            StartAiming();
+            ShowAim();
+            return;
+        }
+
+        if (_board.Flipped)
+        {
+            rows = -rows;
+            cols = -cols;
+        }
+
+        _aimRow += rows;
+        _aimCol += cols;
+
+        ClampAim();
+        ShowAim();
+    }
+
+    /// <summary>
+    /// Takes the caret into the grooves, and turns the wall once it is there. A square's
+    /// own slot is the corner below and to the right of it, which is the wall a player
+    /// looking at that square is thinking about.
+    /// </summary>
+    private void TurnWall()
+    {
+        if (!StartAiming()) return;
+
+        _aimKind = _aimKind switch
+        {
+            MoveKind.HorizontalWall => MoveKind.VerticalWall,
+            MoveKind.VerticalWall => MoveKind.HorizontalWall,
+            _ => MoveKind.HorizontalWall,
+        };
+
+        ClampAim();
+        ShowAim();
+    }
+
+    private void RestAim()
+    {
+        if (!StartAiming()) return;
+
+        RestOnOwnPawn();
+        ShowAim();
+    }
+
+    private void PlayAim()
+    {
+        if (!_aiming || !CanAim || !_session.State.IsLegal(Aim)) return;
+
+        // The caret is left where it is. After a step it is standing on the square the
+        // pawn has just arrived at, and after a wall it is on the groove beside the one
+        // just filled — both of which are where the next move is thought about from.
+        PlayHumanMove(Aim);
+    }
+
+    /// <summary>
+    /// Hands the caret to the board and says out loud what it is standing on. Called from
+    /// every key that moves it and again from <see cref="UpdateUi"/>, so that the caret
+    /// goes away while the turn is somebody else's and comes back when it returns —
+    /// without the player having to find it again each time.
+    /// </summary>
+    private void ShowAim()
+    {
+        if (!_aiming || !CanAim)
+        {
+            Caret?.Aim(null, false);
+            return;
+        }
+
+        Move aim = Aim;
+        Caret?.Aim(aim, _session.State.IsLegal(aim));
+        UpdateStatus();
+    }
+
+    /// <summary>
+    /// What the caret is standing on, in the notation printed round the board and used by
+    /// the move list — so a player who cannot see the board is given the same names as one
+    /// who can, and the two of them can talk about the same game. For a wall it is the
+    /// sentence the pointer already gets, which is the only question worth asking about a
+    /// wall before playing it.
+    /// </summary>
+    private string AimLine()
+    {
+        GameState state = _session.State;
+        Move aim = Aim;
+        string spot = Notation.Format(aim, state);
+
+        if (aim.Kind != MoveKind.Pawn)
+        {
+            string wall = $"Wall {spot[..^1]} {(aim.IsHorizontal ? "across" : "down")}";
+
+            return state.IsWallLegal(aim.Kind, aim.Row, aim.Col)
+                ? $"{wall} — {WallCost(aim)} Enter places it."
+                : $"{wall} — no room for a wall there.";
+        }
+
+        string what = Occupant(aim.Cell);
+
+        return state.IsPawnMoveLegal(aim.Row, aim.Col)
+            ? $"{spot}, {what}. Enter steps here."
+            : $"{spot}, {what}. Not a step from where you stand.";
+    }
+
+    /// <summary>
+    /// What this wall would actually do, in steps added to each side's route. The same
+    /// measurement the board makes for the pointer, made again here because the caret is
+    /// not the pointer and the rules it is measured against are public.
+    /// </summary>
+    private string WallCost(Move wall)
+    {
+        GameState state = _session.State;
+
+        int mover = state.SideToMove;
+        int opponent = mover ^ 1;
+
+        GameState probe = state;
+        probe.PlaceWallUnchecked(wall.Kind, wall.Row, wall.Col);
+
+        int theirs = PathFinder.Distance(probe, opponent) - PathFinder.Distance(state, opponent);
+        int yours = PathFinder.Distance(probe, mover) - PathFinder.Distance(state, mover);
+
+        string them = theirs switch
+        {
+            0 => "costs them nothing",
+            1 => "costs them 1 step",
+            _ => $"costs them {theirs} steps",
+        };
+
+        return yours == 0 ? $"{them}, and nothing to you." : $"{them}, and {yours} to you.";
+    }
+
+    /// <summary>What is standing on a square, in the words the rules card uses for it.</summary>
+    private string Occupant(int cell)
+    {
+        GameState state = _session.State;
+        UInt128 bit = Board.Bit(cell);
+
+        if ((_session.Holes & bit) != 0) return "a gap";
+        if (state.PawnOf(0) == cell) return $"{_session.PlayerName(0)} is here";
+        if (state.PawnOf(1) == cell) return $"{_session.PlayerName(1)} is here";
+        if ((state.WallPickups & bit) != 0) return "two spare walls";
+        if ((state.SkipPickups & bit) != 0) return "a free move";
+        if (state.IsPortalMouth(cell)) return "a portal";
+
+        return "empty";
     }
 
     // ================================================================ review ==
@@ -614,33 +959,68 @@ public partial class GameView : UserControl
         ReviewNextButton.IsEnabled = _reviewPly is not null;
         ReviewLiveButton.IsEnabled = _reviewPly is not null;
 
-        if (_reviewPly is not { } ply) return;
+        // Why each of them is dead, said where the pointer already is.
+        ReviewPrevButton.ToolTip = played == 0 ? "No moves to step back through yet."
+            : ReviewPrevButton.IsEnabled ? null
+            : "This is the position the game started from.";
 
-        StatusText.Text = ply == 0 ? "Starting position" : $"After {Notation.Format(_session.Moves[ply - 1], _session.State)}";
-        HintText.Text = $"Move {ply} of {played}. Play is paused — press Live to catch up.";
+        // The two forward controls only mean anything from inside the game's past.
+        string? live = _reviewPly is null ? "You are at the live position." : null;
+        ReviewNextButton.ToolTip = live;
+        ReviewLiveButton.ToolTip = live;
+
+        if (_reviewPly is not { } ply)
+        {
+            // Nothing is being read back, so nothing is marked. Left set, the mark stayed
+            // on the row the reader stopped at and then sat there for the rest of the game.
+            HighlightLogRow(-1);
+            return;
+        }
+
+        Say(StatusText, ply == 0 ? "Starting position" : $"After {Notation.Format(_session.Moves[ply - 1], _session.State)}");
+        Say(HintText, $"Move {ply} of {played}. Play is paused — press Live to catch up.");
         EngineLine.Visibility = Visibility.Collapsed;
 
-        HighlightLogRow(ply == 0 ? -1 : (ply - 1) / 2);
+        HighlightLogRow(ply == 0 ? -1 : RowOfPly(ply));
+        FollowMoves();
     }
 
+    /// <summary>
+    /// Marks the round being read back. Ink alone was quiet enough to lose in a list of
+    /// eighty rows, so the row is also lit and given a bar in the gutter the other rows
+    /// hold open for it.
+    /// </summary>
     private void HighlightLogRow(int row)
     {
         for (int i = 0; i < LogPanel.Children.Count; i++)
         {
-            ((TextBlock)LogPanel.Children[i]).Foreground = i == row
-                ? Palette.BrushOf(Palette.Text)
-                : Palette.BrushOf(Palette.Muted);
+            bool here = i == row;
+            var line = (Border)LogPanel.Children[i];
+
+            RowText(i).Foreground = Palette.BrushOf(here ? Palette.Text : Palette.Muted);
+            line.BorderBrush = here ? Palette.BrushOf(Palette.Accent0) : Brushes.Transparent;
+
+            // Cleared rather than set to transparent, so that a row nobody is reading goes
+            // back to answering the hover trigger in the style.
+            if (here) line.Background = Palette.BrushOf(Palette.Cell);
+            else line.ClearValue(Border.BackgroundProperty);
         }
     }
 
     private void ToggleRoutes()
     {
-        _board.ShowRoutes = !_board.ShowRoutes;
+        _board.Reading = !_board.Reading;
 
-        RoutesButton.Foreground = _board.ShowRoutes
-            ? Palette.BrushOf(Palette.Accent0)
-            : Palette.BrushOf(Palette.Text);
+        // Kept, not just applied. The menu's own setting has always been written down, so
+        // turning reading on from inside a game and finding it off in the next one was the
+        // two controls disagreeing about the same preference.
+        Settings.Current.ShowRoutes = _board.Reading;
+
+        PaintReadingButton();
     }
+
+    private void PaintReadingButton() =>
+        RoutesButton.Foreground = Palette.BrushOf(_board.Reading ? Palette.Accent0 : Palette.Text);
 
     // ============================================================== settings ==
 
@@ -770,6 +1150,7 @@ public partial class GameView : UserControl
         UpdateCards();
 
         UndoButton.IsEnabled = _session.CanUndo && !_busy;
+        UndoButton.ToolTip = UndoNote;
         RestartButton.IsEnabled = !_busy;
 
         _board.IsInteractive = !_busy && _session.IsHumanTurn && _reviewPly is null;
@@ -778,6 +1159,32 @@ public partial class GameView : UserControl
         UpdateStatus();
         UpdateEngineLine();
         UpdateReviewChrome();
+
+        // After the status, because the caret has the last word on the hint line; and on
+        // every pass, so that it goes away while the turn is somebody else's and comes
+        // back when it returns rather than having to be found again.
+        ShowAim();
+    }
+
+    /// <summary>
+    /// Why Undo is not available, when it is not. Over the network it never is, and that
+    /// is a rule of the mode rather than of the position, so it is worth saying even though
+    /// the button will not come back to life in that game.
+    /// </summary>
+    private string? UndoNote
+    {
+        get
+        {
+            if (_busy) return "The board is in the middle of a move.";
+            if (_session.CanUndo) return null;
+
+            if (_session.Options.Mode == GameMode.Online)
+                return "Taking a move back has to be agreed, and there is no way to ask.";
+
+            return _session.Moves.Count == 0
+                ? "Nothing has been played yet."
+                : "Not until you have had a move of your own to take back.";
+        }
     }
 
     private void UpdateCards()
@@ -796,16 +1203,155 @@ public partial class GameView : UserControl
                 !_session.IsOver && state.SideToMove == player,
                 clock);
         }
+
+        UpdateTape(first, second);
+    }
+
+    // =================================================================== tape ==
+
+    /// <summary>
+    /// How far ahead a player has to be before the bar stops leaning further. Past six
+    /// steps the answer is simply "them", and a longer bar would be saying the same thing
+    /// louder rather than saying more.
+    /// </summary>
+    private const int DecisiveLead = 6;
+
+    /// <summary>
+    /// The race, drawn. Each side's remaining steps sit at its own end, and the bar leans
+    /// toward whoever gets home first by as much as the lead is worth.
+    ///
+    /// The half-step of being on move is counted, because the player about to walk one of
+    /// those steps is that much nearer than the count says. It is also why the bar is never
+    /// exactly level, and why the turn passing is visible here as well as on the board.
+    /// </summary>
+    private void UpdateTape(int first, int second)
+    {
+        // Set outright rather than through Say: these are not a live region. The whole
+        // figure is named for a reader, and two numbers read out on every clock tick would
+        // bury the one line that is worth hearing.
+        TapeFirst.Text = Remaining(first);
+        TapeSecond.Text = Remaining(second);
+
+        double lead;
+
+        // Having no route at all is not being a long way behind; it is being out of the
+        // race, and the figure should say so rather than pick a number.
+        if (first < 0 && second < 0) lead = 0;
+        else if (first < 0) lead = -DecisiveLead;
+        else if (second < 0) lead = DecisiveLead;
+        else lead = second - first + (_session.IsOver ? 0 : _session.State.SideToMove == 0 ? 0.5 : -0.5);
+
+        int ahead = lead >= 0 ? 0 : 1;
+        double edge = Math.Min(Math.Abs(lead) / DecisiveLead, 1);
+
+        // The whole sentence goes on the figure, which is why nothing is written beside it.
+        string race = Race(first, second);
+        Tape.ToolTip = race;
+        AutomationProperties.SetName(Tape, race);
+
+        // The cards are redrawn ten times a second while a clock is running, and an
+        // animation relaunched on every one of those never finishes: the bar would creep
+        // toward its target and stop short of it for as long as the game lasted.
+        if ((ahead, edge) == _tapeAt) return;
+
+        _tapeAt = (ahead, edge);
+
+        // One bar and not two, so the turn passing slides the same shape across the middle.
+        // Which half of the rail it lives in is also which edge it grows from.
+        Grid.SetColumn(TapeWedge, ahead);
+        TapeWedge.RenderTransformOrigin = new Point(ahead == 0 ? 1 : 0, 0.5);
+        TapeWedge.Fill = Palette.BrushOf(ahead == 0 ? Palette.Accent0 : Palette.Accent1);
+
+        TapeWedgeScale.BeginAnimation(ScaleTransform.ScaleXProperty,
+            new DoubleAnimation(edge, TimeSpan.FromMilliseconds(280))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            });
+    }
+
+    /// <summary>Where the bar was last sent, so it is only sent somewhere new.</summary>
+    private (int Ahead, double Edge) _tapeAt = (-1, -1);
+
+    /// <summary>What a player has left to walk, short enough to sit at the end of the bar.</summary>
+    private static string Remaining(int distance) =>
+        distance < 0 ? "—" : distance == 0 ? "home" : distance.ToString();
+
+    /// <summary>
+    /// The figure said out loud, for the tooltip and for anyone reading the screen rather
+    /// than looking at it. A shape with a sentence attached needs no caption printed beside it.
+    /// </summary>
+    private string Race(int first, int second)
+    {
+        string both = $"{_session.PlayerName(0)} {Walk(first)}, {_session.PlayerName(1)} {Walk(second)}";
+
+        if (first < 0 || second < 0) return $"{both}.";
+
+        int lead = Math.Abs(second - first);
+
+        if (lead == 0)
+        {
+            return _session.IsOver
+                ? $"{both} — level."
+                : $"{both} — level, and {_session.PlayerName(_session.State.SideToMove)} to move.";
+        }
+
+        return $"{both} — {_session.PlayerName(second > first ? 0 : 1)} ahead by {lead} {(lead == 1 ? "step" : "steps")}.";
+    }
+
+    private static string Walk(int distance) => distance switch
+    {
+        < 0 => "has no route",
+        0 => "is home",
+        1 => "is one step from home",
+        _ => $"is {distance} steps from home",
+    };
+
+    /// <summary>
+    /// Whether the how-to-move line has been asked for. It retires on its own after a
+    /// couple of moves — by then it has been learned by doing, and a line that never
+    /// changes is a line you stop reading — and the mark by the heading brings it back.
+    /// </summary>
+    private bool _showHelp;
+
+    /// <summary>
+    /// Writes a line and, if anything is listening, says that it changed. WPF raises
+    /// nothing by itself when a live region's text is set from code, and the guard is not
+    /// only for the cost: the status is rewritten several times a second while a wall is
+    /// being aimed, and a reader that heard every one of those would be unusable.
+    /// </summary>
+    private static void Say(TextBlock block, string text)
+    {
+        if (block.Text == text) return;
+
+        block.Text = text;
+        UIElementAutomationPeer.FromElement(block)?.RaiseAutomationEvent(AutomationEvents.LiveRegionChanged);
     }
 
     private void UpdateStatus()
+    {
+        WriteStatus();
+
+        // The caret has the last word on the hint line, because while it is out that line
+        // is what the caret is: where it stands, what is on that square, and what playing
+        // there would cost.
+        if (_aiming && CanAim) Say(HintText, AimLine());
+
+        // A shortcut nobody is told about is a shortcut nobody uses, and a list of them
+        // standing over the board all game is exactly the furniture the help line retired
+        // for being. So they are shown with the help and not otherwise.
+        KeysText.Visibility = _showHelp && !_session.IsOver ? Visibility.Visible : Visibility.Collapsed;
+        KeysText.Text = "Arrows aim  ·  Enter plays  ·  W walls, R turns  ·  Home your pawn\n" +
+                        "Space reads  ·  Ctrl+← → step the game  ·  Ctrl+Z undo  ·  Esc back";
+    }
+
+    private void WriteStatus()
     {
         GameState state = _session.State;
 
         if (_session.IsOver)
         {
-            StatusText.Text = WinnerLabel(_session.Winner);
-            HintText.Text = "Rematch to play again, or head back to the menu.";
+            Say(StatusText, WinnerLabel(_session.Winner));
+            Say(HintText, "Rematch to play again, or head back to the menu.");
             return;
         }
 
@@ -823,35 +1369,44 @@ public partial class GameView : UserControl
                 ? "Through the portal — one step to the square it is linked to."
                 : state.WallsOf(side) == 0
                     ? "No walls left — it is a straight race now."
-                    : "Click a square to step, or hover a groove between squares to place a wall.";
+                    : Instructions;
 
         if (_peer is not null)
         {
             if (!_peer.IsConnected)
             {
-                StatusText.Text = "Disconnected";
-                HintText.Text = _peer.Trouble.Length > 0 ? _peer.Trouble : "The link to the other player is gone.";
+                Say(StatusText, "Disconnected");
+                Say(HintText, _peer.Trouble.Length > 0 ? _peer.Trouble : "The link to the other player is gone.");
                 return;
             }
 
-            StatusText.Text = _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
-            HintText.Text = advice;
+            Say(StatusText, _session.IsHumanTurn ? "Your move" : "Waiting for your opponent");
+            Say(HintText, advice);
             return;
         }
 
         if (_session.Options.Mode == GameMode.Spectate)
         {
-            StatusText.Text = $"{_session.PlayerName(side)} to move";
-            HintText.Text = "Both sides are played by the engine. Routes are drawn for each.";
+            Say(StatusText, $"{_session.PlayerName(side)} to move");
+            Say(HintText, "Both sides are played by the engine. Routes are drawn for each.");
             return;
         }
 
-        StatusText.Text = _session.IsHumanTurn && _session.Options.Mode == GameMode.VersusBot
+        Say(StatusText, _session.IsHumanTurn && _session.Options.Mode == GameMode.VersusBot
             ? "Your move"
-            : $"{_session.PlayerName(side)} to move";
+            : $"{_session.PlayerName(side)} to move");
 
-        HintText.Text = advice;
+        Say(HintText, advice);
     }
+
+    /// <summary>
+    /// How to move, while it is still worth saying. Everything else on this line is about
+    /// the position and changes with it; this one sentence never changes, which is why it
+    /// is the one that goes.
+    /// </summary>
+    private string Instructions => _showHelp || _session.Moves.Count <= 2
+        ? "Click a square to step, or hover a groove between squares to place a wall. Arrows and Enter play it from the keyboard."
+        : string.Empty;
 
     /// <summary>
     /// Answers the only question that matters about a wall before you commit to it:
@@ -867,9 +1422,9 @@ public partial class GameView : UserControl
 
         if (!wall.Legal)
         {
-            HintText.Text = wall.WouldSeal
+            Say(HintText, wall.WouldSeal
                 ? "That would leave a player with no route at all — not allowed."
-                : "No room for a wall there.";
+                : "No room for a wall there.");
             return;
         }
 
@@ -880,9 +1435,9 @@ public partial class GameView : UserControl
             _ => $"Costs them {wall.CostToOpponent} steps",
         };
 
-        HintText.Text = wall.CostToMover == 0
+        Say(HintText, wall.CostToMover == 0
             ? $"{opponent}, and nothing to you."
-            : $"{opponent}, and {wall.CostToMover} to you.";
+            : $"{opponent}, and {wall.CostToMover} to you.");
     }
 
     private void RebuildLog()
@@ -899,13 +1454,11 @@ public partial class GameView : UserControl
         {
             int index = LogPanel.Children.Count;
 
-            var line = new TextBlock
+            var line = new Border
             {
-                Style = (Style)FindResource("Text.Mono"),
-                Margin = new Thickness(0, 0, 0, 5),
-                Background = Brushes.Transparent,
-                Cursor = Cursors.Hand,
+                Style = (Style)FindResource("LogRow"),
                 Opacity = 0,
+                Child = new TextBlock { Style = (Style)FindResource("Text.Mono") },
             };
 
             // Clicking a row shows the position as it stood after that round.
@@ -920,10 +1473,62 @@ public partial class GameView : UserControl
         {
             string first = Notation.Format(moves[row * 2], _session.State);
             string second = row * 2 + 1 < moves.Count ? Notation.Format(moves[row * 2 + 1], _session.State) : string.Empty;
-            ((TextBlock)LogPanel.Children[row]).Text = $"{row + 1,2}.  {first,-6}{second}";
+            RowText(row).Text = $"{row + 1,2}.  {first,-6}{second}";
         }
 
-        LogScroller.ScrollToEnd();
+        FollowMoves();
+    }
+
+    private TextBlock RowText(int row) => (TextBlock)((Border)LogPanel.Children[row]).Child;
+
+    /// <summary>
+    /// The row of the list this pair of plies is written on. Half a move down, since the
+    /// list is a round to a line.
+    /// </summary>
+    private static int RowOfPly(int ply) => ply <= 0 ? 0 : (ply - 1) / 2;
+
+    /// <summary>Where the list was last left, so it is only moved when it has to be.</summary>
+    private (int Played, int? Reviewing) _listed = (-1, null);
+
+    /// <summary>
+    /// Keeps the row that matters in view. The list is a fixed height and a game outgrows
+    /// it about ten moves in, after which the move just played is below the fold —
+    /// including the one the review has just stepped to, which is the whole point of
+    /// having stepped. It used to be scrolled to the end unconditionally, so reading the
+    /// game back scrolled the row you were reading away from you.
+    ///
+    /// Deferred to the end of the layout pass, because a row added this moment has no
+    /// height yet and so no position to scroll to.
+    /// </summary>
+    private void FollowMoves()
+    {
+        (int, int?) now = (_session.Moves.Count, _reviewPly);
+        if (now == _listed) return;
+
+        _listed = now;
+
+        Dispatcher.InvokeAsync(() =>
+        {
+            int rows = LogPanel.Children.Count;
+            if (rows == 0) return;
+
+            int wanted = _reviewPly is { } ply ? RowOfPly(ply) : rows - 1;
+            if (wanted >= rows) return;
+
+            var row = (Border)LogPanel.Children[wanted];
+            double top = row.TranslatePoint(new Point(0, 0), LogPanel).Y;
+            double bottom = top + row.ActualHeight;
+
+            // Only as far as it has to go. A row already on screen is left where it is,
+            // so following the game does not shuffle the list under a reader's eye.
+            double offset = LogScroller.VerticalOffset;
+
+            if (top < offset) offset = top;
+            else if (bottom > offset + LogScroller.ViewportHeight) offset = bottom - LogScroller.ViewportHeight;
+            else return;
+
+            SmoothScroll.To(LogScroller, offset, TimeSpan.FromMilliseconds(260));
+        }, DispatcherPriority.Loaded);
     }
 
     private void OnThemeChanged()
@@ -1001,11 +1606,11 @@ public partial class GameView : UserControl
 
         if (!thinking) return;
 
-        StatusText.Text = "Thinking";
+        Say(StatusText, "Thinking");
 
-        HintText.Text = _session.Options.Mode == GameMode.Spectate
+        Say(HintText, _session.Options.Mode == GameMode.Spectate
             ? "Both sides are played by the engine. Routes are drawn for each."
-            : "The engine is looking for the move that stretches your route the most.";
+            : "The engine is looking for the move that stretches your route the most.");
     }
 
     // ================================================================ result ==
@@ -1028,7 +1633,10 @@ public partial class GameView : UserControl
 
         ResultOverlay.Visibility = Visibility.Visible;
 
-        var delay = TimeSpan.FromMilliseconds(240);
+        // The pawn has just landed on the far row and that is the move the whole game was
+        // about, so the card waits long enough for it to be seen. A quarter of a second was
+        // the pawn arriving and the board being taken away in the same glance.
+        var delay = TimeSpan.FromMilliseconds(750);
 
         ResultOverlay.BeginAnimation(OpacityProperty,
             new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(340)) { BeginTime = delay });
@@ -1040,11 +1648,10 @@ public partial class GameView : UserControl
                 EasingFunction = new QuinticEase { EasingMode = EasingMode.EaseOut },
             });
 
-        // Pushing the board out of focus puts the result where the eye already is.
-        var blur = new BlurEffect { Radius = 0 };
-        BoardHost.Effect = blur;
-        blur.BeginAnimation(BlurEffect.RadiusProperty,
-            new DoubleAnimation(0, 13, TimeSpan.FromMilliseconds(460)) { BeginTime = TimeSpan.FromMilliseconds(180) });
+        // The board used to be blurred behind the card. A blur over the whole board is a
+        // full-screen filter re-rasterised every frame, and — worse — it takes away the
+        // position at the one moment a player wants to look at it. The wash the overlay
+        // already carries is enough to say what is in front.
     }
 
     private void HideResult()
@@ -1054,12 +1661,5 @@ public partial class GameView : UserControl
         var fade = new DoubleAnimation(0, TimeSpan.FromMilliseconds(180));
         fade.Completed += (_, _) => ResultOverlay.Visibility = Visibility.Collapsed;
         ResultOverlay.BeginAnimation(OpacityProperty, fade);
-
-        if (BoardHost.Effect is BlurEffect blur)
-        {
-            var clear = new DoubleAnimation(0, TimeSpan.FromMilliseconds(220));
-            clear.Completed += (_, _) => BoardHost.Effect = null;
-            blur.BeginAnimation(BlurEffect.RadiusProperty, clear);
-        }
     }
 }

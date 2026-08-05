@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- allowBackup is left on deliberately: what the app keeps on disk is one line of
+         preferences, and having it follow the player to a new phone is the point of
+         keeping it in the app's own data directory rather than in the WebView's. -->
+    <application android:allowBackup="true"
+                 android:icon="@mipmap/appicon"
+                 android:roundIcon="@mipmap/appicon_round"
+                 android:supportsRtl="true"
+                 android:hardwareAccelerated="true" />
+
+    <!-- Only online play needs the network. A game against the engine is played entirely
+         on the phone: the engine is in the app, not on a server. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+</manifest>

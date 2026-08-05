@@ -26,7 +26,7 @@ namespace Quoridor.App.Controls;
 /// <see cref="ViewIndex"/> / <see cref="ViewSlot"/> — both of which are their own
 /// inverse, which is what lets hit-testing run the same mapping backwards.
 /// </summary>
-public sealed class BoardView : UserControl
+public sealed class BoardView : UserControl, Views.IBoardAim
 {
     // --- geometry -----------------------------------------------------------
     private const double Pad = 28;
@@ -41,27 +41,84 @@ public sealed class BoardView : UserControl
     /// <summary>How close the cursor must be to a groove centre to mean "wall".</summary>
     private const double GrooveReach = 17;
 
+    /// <summary>
+    /// How far apart the two pawns have to be, in steps, before the reading calls a square
+    /// decisively one player's. Past this the stain stops deepening: the difference between
+    /// six steps clear and nine is not a difference anyone plays on.
+    /// </summary>
+    private const int Decisive = 6;
+
+    /// <summary>
+    /// How far a tile is mixed toward its owner, at a dead heat and at a decisive lead.
+    /// The faint end has to be visible as more than noise and the strong end has to stay a
+    /// tinted board rather than a coloured one — the reading is a chart drawn on the board,
+    /// not a second board laid over it.
+    /// </summary>
+    private const double FaintestStain = 0.10;
+
+    private const double StrongestStain = 0.44;
+
+    /// <summary>The window a one-shot has to land in, matched to the wall and hint timings.</summary>
+    private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(320);
+
+    private static readonly TimeSpan Travel = TimeSpan.FromMilliseconds(300);
+
     // --- layers -------------------------------------------------------------
     private readonly Canvas _root = new() { Width = Extent, Height = Extent, Background = Brushes.Transparent };
     private readonly Canvas _coordinateLayer = new() { IsHitTestVisible = false };
     private readonly Canvas _goalLayer = new() { IsHitTestVisible = false };
     private readonly Canvas _hintLayer = new();
+    private readonly Canvas _frontLayer = new();
     private readonly Canvas _routeLayer = new();
+    private readonly Canvas _detourLayer = new();
+    private readonly Canvas _burstLayer = new();
     private readonly Canvas _wallLayer = new();
     private readonly Canvas _pawnLayer = new();
     private readonly Rectangle _highlight = new();
     private readonly Rectangle _lastMoveMark = new();
     private readonly Rectangle _ghost = new();
+    private readonly Rectangle _caret = new();
+
+    /// <summary>
+    /// Each pawn is three things that travel together: the shadow it puts on the board, the
+    /// ring that says whose turn it is, and the piece itself. The holder carries all three
+    /// across the board; the lift inside it carries the piece and its ring <em>over</em>
+    /// whatever is being jumped, while the shadow stays down on the squares.
+    /// </summary>
+    private readonly Canvas[] _pawnHolder = new Canvas[2];
+
+    private readonly Canvas[] _pawnLift = new Canvas[2];
     private readonly Ellipse[] _pawnShapes = new Ellipse[2];
-    private readonly DropShadowEffect[] _pawnGlow = new DropShadowEffect[2];
+    private readonly Ellipse[] _pawnRing = new Ellipse[2];
+    private readonly Ellipse[] _pawnShadow = new Ellipse[2];
 
     private GameState _state;
     private bool _interactive;
     private bool _busy;
     private bool _flipped;
     private bool _preferHorizontal = true;
-    private bool _showRoutes;
+    private bool _reading;
     private int _hoverCell = -1;
+
+    /// <summary>Which pawn is wearing the turn ring, so it only lands when it changes hands.</summary>
+    private int _ringOn = -1;
+
+    /// <summary>
+    /// The reading, per square: whose reach it is in (-1 for neither) and how far mixed
+    /// toward them. Held rather than recomputed per draw because one hover redraws the
+    /// hints and the routes several times a second and the answer has not moved.
+    /// </summary>
+    private readonly int[] _owner = new int[Board.CellCount];
+
+    private readonly double[] _stain = new double[Board.CellCount];
+
+    /// <summary>
+    /// The stained tile fills, one per player per depth of lead. There are only fourteen
+    /// distinct colours a square can take, so they are mixed once and shared rather than
+    /// mixed eighty-one times per move — and rebuilt when the theme changes, since they are
+    /// derived colours and cannot ride the shared brushes the rest of the board uses.
+    /// </summary>
+    private readonly SolidColorBrush[,] _stainBrushes = new SolidColorBrush[2, Decisive + 1];
 
     /// <summary>The square rectangles, in screen order, so holes can be restyled later.</summary>
     private readonly Rectangle[] _cells = new Rectangle[Board.CellCount];
@@ -77,6 +134,20 @@ public sealed class BoardView : UserControl
     private int _framedFrom = -1;
     private Move? _ghostMove;
     private bool _ghostLegal;
+
+    /// <summary>
+    /// Where the keyboard's caret is standing, in rules coordinates, and whether pressing
+    /// now would be accepted. Held rather than read back off the drawn rectangle because the
+    /// board can be turned around or reframed underneath it, and a caret that knew only its
+    /// screen position would be left pointing at a different square than the one the player
+    /// is steering.
+    /// </summary>
+    private Move? _caretAt;
+
+    private bool _caretPlayable;
+
+    /// <summary>Who played the move the ring is standing on, so its wash can be mixed again.</summary>
+    private int _lastMoveBy = -1;
 
     public BoardView()
     {
@@ -198,30 +269,65 @@ public sealed class BoardView : UserControl
                     continue;
                 }
 
-                bool hole = (_holes & Board.Bit(Board.Index(row, col))) != 0;
+                int cell = Board.Index(row, col);
+                bool hole = (_holes & Board.Bit(cell)) != 0;
 
                 square.Visibility = Visibility.Visible;
-                square.Fill = hole ? null : Palette.BrushOf(Palette.Cell);
-                square.Stroke = hole ? Palette.BrushOf(Palette.Line) : null;
-                square.StrokeThickness = hole ? 1 : 0;
-                square.StrokeDashArray = hole ? new DoubleCollection { 3, 5 } : null;
-                square.Opacity = hole ? 0.5 : 0.9;
+
+                // A square out of play is a darker square, edged with the same hairline
+                // every other square has. Drawn as a dashed outline it read as a selection
+                // marquee somebody had left lying on the board; drawn as the board's own
+                // deepest tone it reads as what it is, somewhere there is nothing to stand
+                // on — and it keeps its place in the grid instead of becoming a gap in it.
+                square.Fill = hole ? Palette.BrushOf(Palette.Pit) : TileFill(cell);
+                square.Stroke = Palette.BrushOf(Palette.Line);
+                square.StrokeThickness = 0.75;
+                square.StrokeDashArray = null;
+                square.Opacity = hole ? 1 : 0.9;
             }
         }
     }
 
     /// <summary>
-    /// Draws both players' current shortest routes. Quoridor is a game about the length
-    /// of a route, and the route is the one thing a board does not show you.
+    /// What one square is painted: its own colour, or that colour mixed toward whichever
+    /// player gets there first while the reading is up.
+    ///
+    /// A tile and the reading of it are the same pixel, so this is a state of the tile and
+    /// not a translucent square laid over it. Eighty-one extra shapes to say what eighty-one
+    /// existing shapes can say themselves is the difference between a board that is also a
+    /// chart and a chart sitting on top of a board.
     /// </summary>
-    public bool ShowRoutes
+    private Brush TileFill(int cell)
     {
-        get => _showRoutes;
+        if (!_reading || _owner[cell] < 0) return Palette.BrushOf(Palette.Cell);
+
+        int player = _owner[cell];
+        int depth = (int)Math.Round((_stain[cell] - FaintestStain) / (StrongestStain - FaintestStain) * Decisive);
+        depth = Math.Clamp(depth, 0, Decisive);
+
+        return _stainBrushes[player, depth] ??= new SolidColorBrush(Palette.Mix(
+            Palette.ColorOf(Palette.Cell),
+            Palette.ColorOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
+            FaintestStain + (StrongestStain - FaintestStain) * depth / Decisive));
+    }
+
+    /// <summary>
+    /// Reads the position back to you: both players' routes home, whose reach each square
+    /// is in, and the seam where that answer changes.
+    ///
+    /// One switch and not three. The three are one thought — Quoridor is a game about the
+    /// length of a route, and a route, a reach and the line between two reaches are the
+    /// same fact seen at three distances. Offering them separately would be three decisions
+    /// where the player has one question.
+    /// </summary>
+    public bool Reading
+    {
+        get => _reading;
         set
         {
-            if (_showRoutes == value) return;
-            _showRoutes = value;
-            RefreshRoutes();
+            if (_reading == value) return;
+            _reading = value;
+            RefreshReading();
         }
     }
 
@@ -289,8 +395,18 @@ public sealed class BoardView : UserControl
         _lastMoveMark.IsHitTestVisible = false;
         _root.Children.Add(_lastMoveMark);
 
+        // The seam sits under the routes and over the tiles it divides: it is a property of
+        // the whole field, and the two routes are answers drawn on top of that field.
+        _frontLayer.IsHitTestVisible = false;
+        _root.Children.Add(_frontLayer);
+
         _routeLayer.IsHitTestVisible = false;
         _root.Children.Add(_routeLayer);
+
+        // Above the routes, because the detour is the answer to a question you are asking
+        // right now and the routes are the standing state it is asked against.
+        _detourLayer.IsHitTestVisible = false;
+        _root.Children.Add(_detourLayer);
 
         _hintLayer.IsHitTestVisible = false;
         _root.Children.Add(_hintLayer);
@@ -311,34 +427,118 @@ public sealed class BoardView : UserControl
         _ghost.IsHitTestVisible = false;
         _root.Children.Add(_ghost);
 
+        // The caret the keyboard steers. Above the walls, so one resting in a groove that is
+        // already filled is still findable, and below the pieces, so resting it on your own
+        // pawn rings the square rather than drawing a box over the piece.
+        _caret.Fill = null;
+        _caret.StrokeThickness = 1.5;
+        _caret.Opacity = 0;
+        _caret.IsHitTestVisible = false;
+        _root.Children.Add(_caret);
+
+        // A ring opening out of the square a prize was standing on. Above the pieces so a
+        // pawn arriving on the prize does not cover the only mark that it was ever there.
+        _burstLayer.IsHitTestVisible = false;
+
         _pawnLayer.IsHitTestVisible = false;
-        for (int player = 0; player < 2; player++)
-        {
-            // Kept small: a wide neon halo is the least paper-like thing a board can do.
-            var glow = new DropShadowEffect
-            {
-                Color = Palette.ColorOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
-                BlurRadius = 18,
-                ShadowDepth = 0,
-                Opacity = 0.2,
-            };
-
-            var pawn = new Ellipse
-            {
-                Width = PawnRadius * 2,
-                Height = PawnRadius * 2,
-                Fill = Palette.BrushOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
-                Effect = glow,
-                RenderTransformOrigin = new Point(0.5, 0.5),
-                RenderTransform = new ScaleTransform(1, 1),
-            };
-
-            _pawnGlow[player] = glow;
-            _pawnShapes[player] = pawn;
-            _pawnLayer.Children.Add(pawn);
-        }
+        for (int player = 0; player < 2; player++) BuildPawn(player);
 
         _root.Children.Add(_pawnLayer);
+        _root.Children.Add(_burstLayer);
+    }
+
+    /// <summary>
+    /// One piece, in three parts about a common origin. Everything inside a holder is drawn
+    /// around (0,0), which is why the holder can simply be placed on a square centre and why
+    /// the lift's transforms — a rise for a jump, a shrink for a portal — need no origin of
+    /// their own: scaling and translating about (0,0) is scaling and translating about the
+    /// piece.
+    /// </summary>
+    private void BuildPawn(int player)
+    {
+        string accent = player == 0 ? Palette.Accent0 : Palette.Accent1;
+
+        // What the piece puts on the board rather than a glow coming off it. It is what
+        // makes a jump read as height: it stays down on the squares while the piece rises,
+        // and draws in and darkens as the piece gets further from it.
+        var shadow = new Ellipse
+        {
+            Width = PawnRadius * 2.3,
+            Height = PawnRadius * 2.3,
+            Fill = ContactInk(),
+            Opacity = 0.8,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = new ScaleTransform(1, 1),
+        };
+
+        Place(shadow, -PawnRadius * 1.15, -PawnRadius * 1.15 + 2);
+
+        // Switched on and off, never faded. Whose turn it is has to be unambiguous at every
+        // instant, and a fade is a window in which it is neither — which is exactly the
+        // window a player looks up during. The old board pulsed this forever instead, which
+        // is the one thing on a paper board that never stops asking for attention.
+        var ring = new Ellipse
+        {
+            Width = PawnRadius * 2 + 12,
+            Height = PawnRadius * 2 + 12,
+            Stroke = Palette.BrushOf(accent),
+            StrokeThickness = 1.5,
+            Opacity = 0,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = new ScaleTransform(1, 1),
+        };
+
+        Place(ring, -PawnRadius - 6, -PawnRadius - 6);
+
+        var pawn = new Ellipse
+        {
+            Width = PawnRadius * 2,
+            Height = PawnRadius * 2,
+            Fill = Palette.BrushOf(accent),
+        };
+
+        Place(pawn, -PawnRadius, -PawnRadius);
+
+        var lift = new Canvas();
+        lift.RenderTransform = new TransformGroup
+        {
+            Children = { new ScaleTransform(1, 1), new TranslateTransform(0, 0) },
+        };
+
+        lift.Children.Add(ring);
+        lift.Children.Add(pawn);
+
+        var holder = new Canvas();
+        holder.Children.Add(shadow);
+        holder.Children.Add(lift);
+
+        _pawnShadow[player] = shadow;
+        _pawnRing[player] = ring;
+        _pawnShapes[player] = pawn;
+        _pawnLift[player] = lift;
+        _pawnHolder[player] = holder;
+
+        _pawnLayer.Children.Add(holder);
+    }
+
+    /// <summary>
+    /// The shadow a piece casts: the board's own darkest tone, faded out from the middle so
+    /// it has no edge of its own. A hard-edged disc would read as a second piece; a WPF
+    /// blur would re-rasterise the whole pawn every frame it moved.
+    /// </summary>
+    private static RadialGradientBrush ContactInk()
+    {
+        Color ink = Palette.ColorOf(Palette.Pit);
+
+        return new RadialGradientBrush
+        {
+            GradientStops =
+            {
+                new GradientStop(Color.FromArgb(0x6E, ink.R, ink.G, ink.B), 0),
+                new GradientStop(Color.FromArgb(0x40, ink.R, ink.G, ink.B), 0.55),
+                new GradientStop(Color.FromArgb(0x00, ink.R, ink.G, ink.B), 1),
+            },
+        };
     }
 
     /// <summary>
@@ -410,15 +610,21 @@ public sealed class BoardView : UserControl
 
     private void RefreshThemeColours()
     {
-        for (int player = 0; player < 2; player++)
-            _pawnGlow[player].Color = Palette.ColorOf(player == 0 ? Palette.Accent0 : Palette.Accent1);
-
         // The gradient is mixed from the board colour, so it has to be mixed again when
         // that colour changes. The rest of the board rides DynamicResource and does not.
         _backdrop.Fill = BoardSheen();
 
-        // The portal inks are likewise raw colours rather than shared brushes.
+        for (int player = 0; player < 2; player++) _pawnShadow[player].Fill = ContactInk();
+
+        // Likewise derived rather than shared: the stains are mixed colours and the portal
+        // inks are raw ones, so neither can follow the theme by itself. They land at once
+        // while the shared brushes cross-fade around them, which is only visible at all
+        // with the reading held up during a theme switch.
+        Array.Clear(_stainBrushes);
+
+        ApplyLastMoveInk();
         RefreshPortals();
+        RefreshCells();
     }
 
     /// <summary>
@@ -675,6 +881,12 @@ public sealed class BoardView : UserControl
 
         ClearHover();
         RefreshOverlays();
+
+        // The board may have just been turned around or reframed for a smaller game, either
+        // of which moves every square out from under whatever was drawn on it. The caret is
+        // held in rules coordinates precisely so it can be put back on the square the player
+        // is still steering rather than on the pixels it happened to occupy.
+        PlaceCaret(animate: false);
     }
 
     /// <summary>
@@ -693,6 +905,10 @@ public sealed class BoardView : UserControl
 
         if (move.Kind == MoveKind.Pawn)
         {
+            // Read off the position the board is still showing, before it is replaced. A
+            // prize taken otherwise just stops being drawn, and the only thing that marks
+            // it is a sound — which is nothing at all with the sound turned off.
+            MarkPickup(move.Cell, mover);
             AnimatePawn(mover, move.Cell, () => Finish());
         }
         else
@@ -714,20 +930,106 @@ public sealed class BoardView : UserControl
         }
     }
 
+    /// <summary>
+    /// Sees off a prize that is about to be stepped on: a ring opening outward from the
+    /// square and fading, once. Taking one is the only thing on this board that changes the
+    /// game without changing the position, so it is the one thing worth watching go.
+    ///
+    /// A wall goes in the board's neutral ink and a free move in the taker's own, because a
+    /// wall is stock and a free move is a turn — and this board already says whose a thing
+    /// is by colouring it.
+    /// </summary>
+    private void MarkPickup(int cell, int taker)
+    {
+        UInt128 bit = Board.Bit(cell);
+
+        bool wall = (_state.WallPickups & bit) != 0;
+        bool skip = (_state.SkipPickups & bit) != 0;
+
+        if (!wall && !skip) return;
+
+        var halo = new Ellipse
+        {
+            Width = CellSize,
+            Height = CellSize,
+            Stroke = wall
+                ? Palette.BrushOf(Palette.Text)
+                : Palette.BrushOf(taker == 0 ? Palette.Accent0 : Palette.Accent1),
+            StrokeThickness = 3,
+            Opacity = 0,
+            RenderTransformOrigin = new Point(0.5, 0.5),
+            RenderTransform = new ScaleTransform(0.35, 0.35),
+        };
+
+        Place(halo, CellCentreOf(Board.ColOf(cell)) - CellSize / 2, CellCentreOf(Board.RowOf(cell)) - CellSize / 2);
+        _burstLayer.Children.Add(halo);
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var open = new DoubleAnimation(0.35, 1.5, Settle) { EasingFunction = ease };
+
+        var fade = new DoubleAnimationUsingKeyFrames { Duration = Settle };
+        fade.KeyFrames.Add(new EasingDoubleKeyFrame(0.85, KeyTime.FromPercent(0)));
+        fade.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1), ease));
+
+        // Taken off the board once it has played, rather than left lying in the layer for
+        // the rest of the game: one of these is drawn every time a prize is stepped on.
+        fade.Completed += (_, _) => _burstLayer.Children.Remove(halo);
+
+        var scale = (ScaleTransform)halo.RenderTransform;
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, open);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, open);
+        halo.BeginAnimation(OpacityProperty, fade);
+    }
+
     private void SnapPawn(int player)
     {
-        Ellipse pawn = _pawnShapes[player];
+        Canvas holder = _pawnHolder[player];
         int cell = _state.PawnOf(player);
 
-        pawn.BeginAnimation(Canvas.LeftProperty, null);
-        pawn.BeginAnimation(Canvas.TopProperty, null);
+        holder.BeginAnimation(Canvas.LeftProperty, null);
+        holder.BeginAnimation(Canvas.TopProperty, null);
+        holder.BeginAnimation(OpacityProperty, null);
+        holder.Opacity = 1;
 
-        Place(pawn, CellCentreOf(Board.ColOf(cell)) - PawnRadius, CellCentreOf(Board.RowOf(cell)) - PawnRadius);
+        // A snap can land on top of a move still in flight — a restart during the engine's
+        // reply, or a step backwards through the game. Everything the flight was driving is
+        // put back, or the piece stays shrunk or hanging in mid-jump on the new position.
+        (ScaleTransform scale, TranslateTransform rise) = LiftOf(player);
+
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        scale.ScaleX = scale.ScaleY = 1;
+
+        rise.BeginAnimation(TranslateTransform.YProperty, null);
+        rise.Y = 0;
+
+        SettleShadow(player);
+
+        Place(holder, CellCentreOf(Board.ColOf(cell)), CellCentreOf(Board.RowOf(cell)));
+    }
+
+    private (ScaleTransform Scale, TranslateTransform Rise) LiftOf(int player)
+    {
+        var group = (TransformGroup)_pawnLift[player].RenderTransform;
+        return ((ScaleTransform)group.Children[0], (TranslateTransform)group.Children[1]);
+    }
+
+    private void SettleShadow(int player)
+    {
+        Ellipse shadow = _pawnShadow[player];
+        var scale = (ScaleTransform)shadow.RenderTransform;
+
+        shadow.BeginAnimation(OpacityProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+
+        shadow.Opacity = 0.8;
+        scale.ScaleX = scale.ScaleY = 1;
     }
 
     private void AnimatePawn(int player, int targetCell, Action completed)
     {
-        Ellipse pawn = _pawnShapes[player];
+        Canvas holder = _pawnHolder[player];
 
         // The board still shows the position before the move, so the square being left is
         // the one the position records.
@@ -739,31 +1041,90 @@ public sealed class BoardView : UserControl
             return;
         }
 
-        double x = CellCentreOf(Board.ColOf(targetCell)) - PawnRadius;
-        double y = CellCentreOf(Board.RowOf(targetCell)) - PawnRadius;
+        // The piece that is moving passes over the one that is standing still. Set on the
+        // layer rather than by reordering it, so nothing is detached mid-flight.
+        Panel.SetZIndex(holder, 1);
+        Panel.SetZIndex(_pawnHolder[player ^ 1], 0);
 
-        var duration = TimeSpan.FromMilliseconds(300);
+        double x = CellCentreOf(Board.ColOf(targetCell));
+        double y = CellCentreOf(Board.RowOf(targetCell));
+
         var ease = new CubicEase { EasingMode = EasingMode.EaseInOut };
 
-        var slideX = new DoubleAnimation(x, duration) { EasingFunction = ease };
-        var slideY = new DoubleAnimation(y, duration) { EasingFunction = ease };
+        var slideX = new DoubleAnimation(x, Travel) { EasingFunction = ease };
+        var slideY = new DoubleAnimation(y, Travel) { EasingFunction = ease };
         slideY.Completed += (_, _) => completed();
 
-        pawn.BeginAnimation(Canvas.LeftProperty, slideX);
-        pawn.BeginAnimation(Canvas.TopProperty, slideY);
+        holder.BeginAnimation(Canvas.LeftProperty, slideX);
+        holder.BeginAnimation(Canvas.TopProperty, slideY);
 
-        // A small stretch on departure and settle on arrival: the pawn reads as a
-        // physical piece being lifted rather than a sprite teleporting.
-        var pulse = new DoubleAnimationUsingKeyFrames { Duration = duration };
-        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromPercent(0)));
-        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.16, KeyTime.FromPercent(0.35),
-            new CubicEase { EasingMode = EasingMode.EaseOut }));
-        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromPercent(1),
-            new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.6 }));
+        // How far the piece leaves the board, which is the difference between the three
+        // things a pawn move can be. A step never leaves it at all; a diagonal slip past a
+        // pawn you could not jump straight is a lean; a jump over a pawn is a jump, and
+        // has to pass above the piece it is passing.
+        int rows = Math.Abs(Board.RowOf(from) - Board.RowOf(targetCell));
+        int cols = Math.Abs(Board.ColOf(from) - Board.ColOf(targetCell));
+        double rise = rows + cols >= 3 || rows == 2 || cols == 2 ? 17 : rows == 1 && cols == 1 ? 7 : 0;
 
-        var scale = (ScaleTransform)pawn.RenderTransform;
-        scale.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
-        scale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
+        // No sign flip on a turned board. The flip here is a remapping of indices rather
+        // than a rotation of the drawing, so up the screen is negative Y whichever seat is
+        // being played — unlike the browser, where the whole board group is turned and
+        // every light-bearing offset has to be negated back.
+        Rise(player, rise);
+        Contact(player, rise);
+    }
+
+    /// <summary>The piece leaving the board and coming back down on the far square.</summary>
+    private void Rise(int player, double height)
+    {
+        (_, TranslateTransform rise) = LiftOf(player);
+
+        if (height <= 0)
+        {
+            rise.BeginAnimation(TranslateTransform.YProperty, null);
+            rise.Y = 0;
+            return;
+        }
+
+        var arc = new DoubleAnimationUsingKeyFrames { Duration = Travel };
+        arc.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(0)));
+        arc.KeyFrames.Add(new EasingDoubleKeyFrame(-height, KeyTime.FromPercent(0.45),
+            new SineEase { EasingMode = EasingMode.EaseOut }));
+        arc.KeyFrames.Add(new EasingDoubleKeyFrame(0, KeyTime.FromPercent(1),
+            new SineEase { EasingMode = EasingMode.EaseIn }));
+
+        rise.BeginAnimation(TranslateTransform.YProperty, arc);
+    }
+
+    /// <summary>
+    /// The other half of the height: the shadow stays down on the squares while the piece
+    /// is off them, drawing in and darkening as the gap opens and spreading back out as the
+    /// piece lands. On the same keyframe as the arc, so the two agree about when the piece
+    /// is highest rather than nearly agreeing.
+    /// </summary>
+    private void Contact(int player, double height)
+    {
+        Ellipse shadow = _pawnShadow[player];
+        var scale = (ScaleTransform)shadow.RenderTransform;
+
+        double tight = height >= 17 ? 0.62 : height > 0 ? 0.82 : 1;
+        double dark = height >= 17 ? 1 : height > 0 ? 0.92 : 0.8;
+
+        var spread = new DoubleAnimationUsingKeyFrames { Duration = Travel };
+        spread.KeyFrames.Add(new EasingDoubleKeyFrame(1.4, KeyTime.FromPercent(0)));
+        spread.KeyFrames.Add(new EasingDoubleKeyFrame(tight, KeyTime.FromPercent(0.45),
+            new SineEase { EasingMode = EasingMode.EaseOut }));
+        spread.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromPercent(1),
+            new SineEase { EasingMode = EasingMode.EaseIn }));
+
+        var deepen = new DoubleAnimationUsingKeyFrames { Duration = Travel };
+        deepen.KeyFrames.Add(new EasingDoubleKeyFrame(0.5, KeyTime.FromPercent(0)));
+        deepen.KeyFrames.Add(new EasingDoubleKeyFrame(dark, KeyTime.FromPercent(0.45)));
+        deepen.KeyFrames.Add(new EasingDoubleKeyFrame(0.8, KeyTime.FromPercent(1)));
+
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, spread);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, spread);
+        shadow.BeginAnimation(OpacityProperty, deepen);
     }
 
     /// <summary>
@@ -774,8 +1135,8 @@ public sealed class BoardView : UserControl
     /// </summary>
     private void WarpPawn(int player, int targetCell, Action completed)
     {
-        Ellipse pawn = _pawnShapes[player];
-        var scale = (ScaleTransform)pawn.RenderTransform;
+        Canvas holder = _pawnHolder[player];
+        (ScaleTransform scale, _) = LiftOf(player);
 
         var duration = TimeSpan.FromMilliseconds(170);
 
@@ -791,17 +1152,18 @@ public sealed class BoardView : UserControl
 
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
-        pawn.BeginAnimation(OpacityProperty, fadeOut);
+
+        // On the holder, so the shadow goes down the mouth with the piece. A shadow left
+        // standing on an empty square is the one thing that would say the piece is still
+        // on it, and this is the move where it demonstrably is not.
+        holder.BeginAnimation(OpacityProperty, fadeOut);
 
         void Arrive()
         {
             // Moved while it cannot be seen, so there is no motion between the mouths.
-            pawn.BeginAnimation(Canvas.LeftProperty, null);
-            pawn.BeginAnimation(Canvas.TopProperty, null);
-            Place(
-                pawn,
-                CellCentreOf(Board.ColOf(targetCell)) - PawnRadius,
-                CellCentreOf(Board.RowOf(targetCell)) - PawnRadius);
+            holder.BeginAnimation(Canvas.LeftProperty, null);
+            holder.BeginAnimation(Canvas.TopProperty, null);
+            Place(holder, CellCentreOf(Board.ColOf(targetCell)), CellCentreOf(Board.RowOf(targetCell)));
 
             var back = TimeSpan.FromMilliseconds(240);
 
@@ -815,7 +1177,7 @@ public sealed class BoardView : UserControl
 
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
-            pawn.BeginAnimation(OpacityProperty, fadeIn);
+            holder.BeginAnimation(OpacityProperty, fadeIn);
         }
     }
 
@@ -976,6 +1338,184 @@ public sealed class BoardView : UserControl
             new DoubleAnimation(legal ? 0.5 : 0.3, TimeSpan.FromMilliseconds(110)));
 
         WallPreviewChanged?.Invoke(this, MeasureWall(kind, row, col, legal));
+        ShowDetour(kind, row, col, legal);
+    }
+
+    // ================================================================ detour ==
+
+    /// <summary>
+    /// What the wall under the cursor would actually do to the route it is aimed at: the
+    /// stretch of the old way that dies, and the way round.
+    ///
+    /// The number in the panel says how much longer. This says where, which is the part you
+    /// choose a wall on — whether the detour goes the way you wanted it to go. Both arcs are
+    /// cut to the part that differs and extended one square past each end, so they leave and
+    /// rejoin the same route rather than being two drawings of the whole board.
+    /// </summary>
+    private void ShowDetour(MoveKind kind, int row, int col, bool legal)
+    {
+        _detourLayer.Children.Clear();
+
+        if (!legal || _state.IsGameOver) return;
+
+        // The wall is played against the other player, so theirs is the route it bends.
+        int player = _state.SideToMove ^ 1;
+
+        Span<byte> distances = stackalloc byte[Board.CellCount];
+
+        var before = new List<int>(Board.CellCount);
+        PathFinder.FillDistancesToGoal(_state, player, distances);
+        PathFinder.TraceShortestPath(_state, player, distances, before);
+        if (before.Count < 2) return;
+
+        GameState placed = _state;
+        placed.PlaceWallUnchecked(kind, row, col);
+
+        UInt128 old = 0;
+        foreach (int cell in before) old |= Board.Bit(cell);
+
+        var after = new List<int>(Board.CellCount);
+        PathFinder.FillDistancesToGoal(placed, player, distances);
+        TraceFamiliar(placed, player, distances, old, after);
+        if (after.Count < 2) return;
+
+        UInt128 taken = 0;
+        foreach (int cell in after) taken |= Board.Bit(cell);
+
+        // Cut at the first portal each stretch takes rather than broken into pieces at every
+        // one: unlike a route ribbon, the new way round is a single line that draws itself
+        // in, and both the drawing and the length it is drawn over assume one unbroken run.
+        // What is kept is the part nearest the pawn, which is the part being asked about.
+        List<int> gone = Unbroken(Diverging(before, taken));
+        List<int> now = Unbroken(Diverging(after, old));
+
+        // The wall bends nothing this player was going to do anyway. The panel still says
+        // what it costs; there is simply no detour to draw.
+        if (gone.Count < 2 && now.Count < 2) return;
+
+        string accent = player == 0 ? Palette.Accent0 : Palette.Accent1;
+
+        if (gone.Count >= 2)
+        {
+            Polyline dying = Ribbon(Centres(gone), accent, 2, 0.34);
+            dying.StrokeDashArray = new DoubleCollection { 1.5, 2.5 };
+            dying.StrokeDashCap = PenLineCap.Round;
+            _detourLayer.Children.Add(dying);
+        }
+
+        if (now.Count < 2) return;
+
+        Polyline way = Ribbon(Centres(now), accent, 3, 0.9);
+
+        // The new way draws itself in rather than appearing, because the point of it is that
+        // it is longer, and a line you watch being drawn is a line you have felt the length
+        // of. Every segment of a route is exactly one pitch, so the length is arithmetic and
+        // needs no measuring pass — but WPF states dashes in multiples of the stroke width
+        // rather than in units, so both numbers are divided by it on the way in.
+        double length = (now.Count - 1) * Pitch / way.StrokeThickness;
+
+        way.StrokeDashArray = new DoubleCollection { length, length };
+        way.StrokeDashOffset = length;
+        way.BeginAnimation(Shape.StrokeDashOffsetProperty, new DoubleAnimation(length, 0, Travel)
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
+        });
+
+        _detourLayer.Children.Add(way);
+    }
+
+    /// <summary>
+    /// One shortest route, preferring squares the other route already used.
+    ///
+    /// Ties on a distance field are everywhere, and choosing among them arbitrarily redraws
+    /// a route that has not really changed. Keeping to the old one wherever it is still
+    /// shortest is the whole of why the difference reads as a detour rather than as a
+    /// different board.
+    /// </summary>
+    private static void TraceFamiliar(in GameState state, int player, Span<byte> distances, UInt128 old, List<int> cells)
+    {
+        int cell = state.PawnOf(player);
+        if (distances[cell] == PathFinder.Unreachable) return;
+
+        cells.Add(cell);
+
+        while (distances[cell] > 0)
+        {
+            int next = -1;
+            bool kept = false;
+
+            for (int direction = 0; direction < 4; direction++)
+            {
+                if (state.Blocked(cell, direction)) continue;
+
+                int neighbour = cell + Board.Delta[direction];
+                byte step = distances[neighbour];
+
+                // On a distance field anything strictly closer is already one step closer,
+                // so this is the whole of the test for being on a shortest route.
+                if (step == PathFinder.Unreachable || step >= distances[cell]) continue;
+
+                bool familiar = (old & Board.Bit(neighbour)) != 0;
+
+                // Take the first candidate, and after that only trade up: a square the old
+                // route used, in place of one it did not.
+                if (next >= 0 && !(familiar && !kept)) continue;
+
+                next = neighbour;
+                kept = familiar;
+            }
+
+            if (next < 0) break;
+
+            cell = next;
+            cells.Add(cell);
+        }
+    }
+
+    /// <summary>
+    /// The run of a route the other one does not have, with one square kept at each end so
+    /// the two arcs start and finish on the same squares — which is what makes them read as
+    /// one route leaving and rejoining rather than as two unrelated lines.
+    /// </summary>
+    private static List<int> Diverging(List<int> route, UInt128 shared)
+    {
+        int first = -1;
+        int last = -1;
+
+        for (int i = 0; i < route.Count; i++)
+        {
+            if ((shared & Board.Bit(route[i])) != 0) continue;
+
+            if (first < 0) first = i;
+            last = i;
+        }
+
+        if (first < 0) return new List<int>();
+
+        int from = Math.Max(first - 1, 0);
+        int to = Math.Min(last + 1, route.Count - 1);
+
+        return route.GetRange(from, to - from + 1);
+    }
+
+    /// <summary>The leading part of a route, up to the first portal it takes.</summary>
+    private static List<int> Unbroken(List<int> route)
+    {
+        for (int i = 1; i < route.Count; i++)
+            if (!AreNeighbours(route[i - 1], route[i]))
+                return route.GetRange(0, i);
+
+        return route;
+    }
+
+    private PointCollection Centres(List<int> cells)
+    {
+        var points = new PointCollection(cells.Count);
+
+        foreach (int cell in cells)
+            points.Add(new Point(CellCentreOf(Board.ColOf(cell)), CellCentreOf(Board.RowOf(cell))));
+
+        return points;
     }
 
     /// <summary>Steps this wall would add to each side's shortest route.</summary>
@@ -1004,7 +1544,103 @@ public sealed class BoardView : UserControl
 
         _ghostMove = null;
         _ghost.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(110)));
+        _detourLayer.Children.Clear();
         WallPreviewChanged?.Invoke(this, null);
+    }
+
+    // ================================================================= caret ==
+
+    /// <summary>
+    /// Puts the keyboard's caret on a move, or takes it off the board. The whole of the
+    /// contract in <see cref="Views.IBoardAim"/>: where the caret may stand and whether what
+    /// it stands on is legal are questions about the position, answered by the screen; where
+    /// that square actually is on a board that may have been turned round is a question only
+    /// the board can answer, and this is it.
+    /// </summary>
+    public void Aim(Move? at, bool playable)
+    {
+        if (at is not { } move)
+        {
+            if (_caretAt is null) return;
+
+            _caretAt = null;
+            _caret.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(130)));
+            return;
+        }
+
+        // Arrows step the caret within one kind of move and W changes the kind, so staying
+        // the same kind is exactly the case where the caret is travelling between two of the
+        // same thing. It glides then, for the reason the hover highlight does — the eye keeps
+        // hold of it. Changing kind swaps a square for a groove, and a bar sliding out of a
+        // square would be one shape pretending to be another, so that lands where it is.
+        bool travelling = _caretAt is { } previous && previous.Kind == move.Kind;
+
+        _caretAt = move;
+        _caretPlayable = playable;
+
+        PlaceCaret(travelling);
+
+        if (!travelling)
+            _caret.BeginAnimation(OpacityProperty, new DoubleAnimation(0.85, TimeSpan.FromMilliseconds(130)));
+    }
+
+    /// <summary>
+    /// Draws the caret where its move actually is. Split from <see cref="Aim"/> so the board
+    /// can put it back on the right square after being turned around or reframed, without the
+    /// screen having to notice that the geometry moved under it.
+    ///
+    /// It takes the exact footprint of the move it stands on — the square, or the wall — for
+    /// the same reason the ghost does: a caret the size of what you are about to play tells
+    /// you what you are about to play. That is also why it is not inflated the way the
+    /// last-move mark is; when the two land on one square you get two rings rather than one
+    /// ambiguous one.
+    /// </summary>
+    private void PlaceCaret(bool animate)
+    {
+        if (_caretAt is not { } move) return;
+
+        bool pawn = move.Kind == MoveKind.Pawn;
+        double x, y;
+
+        if (pawn)
+        {
+            x = CellOriginOf(move.Col);
+            y = CellOriginOf(move.Row);
+            _caret.Width = _caret.Height = CellSize;
+        }
+        else
+        {
+            bool horizontal = move.IsHorizontal;
+            x = WallXOf(move.Kind, move.Col);
+            y = WallYOf(move.Kind, move.Row);
+            _caret.Width = horizontal ? WallLength : GapSize;
+            _caret.Height = horizontal ? GapSize : WallLength;
+        }
+
+        _caret.RadiusX = _caret.RadiusY = pawn ? 3 : 2;
+
+        // The caret is drawn in the ink of whoever is on move, like the hover highlight and
+        // the move hints, because it belongs to the player steering it. Somewhere it cannot
+        // go is shown by breaking the line rather than by turning it red: the ghost makes the
+        // same choice a few lines up, a warning colour would clash with a player's own ink,
+        // and a caret that changed colour on nearly every arrow press would only flicker —
+        // most squares on a board are not somewhere a pawn may step.
+        _caret.Stroke = Palette.BrushOf(_state.SideToMove == 0 ? Palette.Accent0 : Palette.Accent1);
+        _caret.StrokeDashArray = _caretPlayable ? null : [2, 2];
+
+        if (!animate)
+        {
+            _caret.BeginAnimation(Canvas.LeftProperty, null);
+            _caret.BeginAnimation(Canvas.TopProperty, null);
+            Place(_caret, x, y);
+            return;
+        }
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(170);
+
+        _caret.BeginAnimation(Canvas.LeftProperty, new DoubleAnimation(x, duration) { EasingFunction = ease });
+        _caret.BeginAnimation(Canvas.TopProperty, new DoubleAnimation(y, duration) { EasingFunction = ease });
     }
 
     private void MoveHighlightTo(int cell)
@@ -1090,10 +1726,12 @@ public sealed class BoardView : UserControl
         int active = _state.SideToMove;
         bool live = !_state.IsGameOver;
 
-        for (int player = 0; player < 2; player++)
-            SetPulse(player, live && player == active);
+        if (!live) _ringOn = -1;
 
-        RefreshRoutes();
+        for (int player = 0; player < 2; player++)
+            SetTurnRing(player, live && player == active);
+
+        RefreshReading();
         RefreshPortals();
         RefreshPickups();
         RefreshHover();
@@ -1156,12 +1794,8 @@ public sealed class BoardView : UserControl
         _lastMoveMark.Width = width;
         _lastMoveMark.Height = height;
 
-        // Outline plus a wash inside it. The outline alone was quiet enough to miss,
-        // and the last move is exactly what you look for after glancing away.
-        Brush ink = Palette.BrushOf(mover == 0 ? Palette.Accent0 : Palette.Accent1);
-
-        _lastMoveMark.Stroke = ink;
-        _lastMoveMark.Fill = new SolidColorBrush(((SolidColorBrush)ink).Color) { Opacity = 0.13 };
+        _lastMoveBy = mover;
+        ApplyLastMoveInk();
 
         _lastMoveMark.BeginAnimation(Canvas.LeftProperty, null);
         _lastMoveMark.BeginAnimation(Canvas.TopProperty, null);
@@ -1170,13 +1804,211 @@ public sealed class BoardView : UserControl
         _lastMoveMark.BeginAnimation(OpacityProperty, new DoubleAnimation(0.75, TimeSpan.FromMilliseconds(220)));
     }
 
-    private void HideLastMove() =>
+    /// <summary>
+    /// Outline plus a wash inside it. The outline alone was quiet enough to miss, and the
+    /// last move is exactly what you look for after glancing away.
+    ///
+    /// The outline rides the shared brush and follows the theme by itself. The wash is that
+    /// same colour at a fraction of its strength, which has to be a brush of its own — so it
+    /// is mixed again on a theme change, or a mark left standing across one keeps the old
+    /// palette's ink inside the new palette's outline. It is mixed from the colour the theme
+    /// is going to, not from the one the shared brush is currently part-way through fading
+    /// toward, so the two arrive together rather than the wash chasing the outline.
+    /// </summary>
+    private void ApplyLastMoveInk()
+    {
+        if (_lastMoveBy < 0) return;
+
+        string accent = _lastMoveBy == 0 ? Palette.Accent0 : Palette.Accent1;
+
+        _lastMoveMark.Stroke = Palette.BrushOf(accent);
+        _lastMoveMark.Fill = new SolidColorBrush(Palette.ColorOf(accent)) { Opacity = 0.13 };
+    }
+
+    private void HideLastMove()
+    {
+        _lastMoveBy = -1;
         _lastMoveMark.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(150)));
+    }
+
+    /// <summary>
+    /// Works out the whole reading and draws it: the stain on every tile, the seam between
+    /// the two reaches, and each player's way home.
+    /// </summary>
+    private void RefreshReading()
+    {
+        ReadPosition();
+        RefreshCells();
+        RefreshFront();
+        RefreshRoutes();
+    }
+
+    /// <summary>
+    /// How many steps every square is from a player's pawn, flooding out the way that pawn
+    /// may actually walk. Squares out of play need no test of their own: taking one out
+    /// blocks it in all four directions and blocks each of its neighbours back toward it,
+    /// so a frontier can neither enter a gap nor leave one — and the ring outside a smaller
+    /// game is sealed the same way when the board is built.
+    /// </summary>
+    private static void FillReach(in GameState state, int player, Span<byte> steps)
+    {
+        steps.Fill(PathFinder.Unreachable);
+
+        UInt128 reached = Board.Bit(state.PawnOf(player));
+        UInt128 previous = 0;
+        byte distance = 0;
+
+        while (reached != previous)
+        {
+            UInt128 layer = reached & ~previous;
+
+            while (layer != 0)
+            {
+                steps[Board.LowestBit(layer)] = distance;
+                layer &= layer - UInt128.One;
+            }
+
+            previous = reached;
+            reached = PathFinder.Expand(state, reached);
+            distance++;
+        }
+    }
+
+    /// <summary>
+    /// Which player reaches each square first, and how far ahead they are there. Held in
+    /// <see cref="_owner"/> and <see cref="_stain"/> rather than returned, because the tiles
+    /// and the seam are two drawings of one answer.
+    /// </summary>
+    private void ReadPosition()
+    {
+        // A finished game has nothing left to read: the race is over, and a board still
+        // stained with who was going to get there first would be answering last move's
+        // question. The seam and the routes come down for the same reason.
+        if (!_reading || _state.IsGameOver)
+        {
+            Array.Fill(_owner, -1);
+            return;
+        }
+
+        Span<byte> mine = stackalloc byte[Board.CellCount];
+        Span<byte> theirs = stackalloc byte[Board.CellCount];
+
+        FillReach(_state, 0, mine);
+        FillReach(_state, 1, theirs);
+
+        for (int cell = 0; cell < Board.CellCount; cell++)
+        {
+            byte first = mine[cell];
+            byte second = theirs[cell];
+
+            // Neither can get there — a pocket the walls closed off, or a square that is
+            // not part of this game at all. It belongs to nobody and stays a plain tile.
+            if (first == PathFinder.Unreachable && second == PathFinder.Unreachable)
+            {
+                _owner[cell] = -1;
+                continue;
+            }
+
+            // A square both pawns reach in the same number of steps goes to whoever is on
+            // move, because they take the first of those steps. That is also why the seam
+            // shifts by a square as the turn passes: the race has genuinely changed hands,
+            // and under a reading you have asked for that is the thing you asked to see.
+            _owner[cell] = first == second ? _state.SideToMove : first < second ? 0 : 1;
+
+            int margin = first == PathFinder.Unreachable || second == PathFinder.Unreachable
+                ? Decisive
+                : Math.Abs(first - second);
+
+            _stain[cell] = FaintestStain +
+                (StrongestStain - FaintestStain) * Math.Min(margin, Decisive) / Decisive;
+        }
+    }
+
+    /// <summary>
+    /// The seam, as one geometry: every groove with a different answer on either side of it,
+    /// drawn down the middle of the gap and a whole pitch long, so consecutive segments meet
+    /// at the corners instead of leaving a nick at every crossing.
+    ///
+    /// Drawn twice off the one figure — a broad haze that gives the line a place on the
+    /// board, and a thin stroke that gives it a position.
+    /// </summary>
+    private void RefreshFront()
+    {
+        _frontLayer.Children.Clear();
+        if (!_reading || _state.IsGameOver) return;
+
+        int from = Math.Max(0, _framedFrom);
+        int last = Board.Size - 1 - from;
+
+        var figure = new StreamGeometry();
+
+        using (StreamGeometryContext draw = figure.Open())
+        {
+            for (int row = from; row <= last; row++)
+            {
+                for (int col = from; col <= last; col++)
+                {
+                    int cell = Board.Index(row, col);
+                    if (_owner[cell] < 0) continue;
+
+                    // Both segments are stated in screen space off the two squares they run
+                    // between, so a turned board needs no separate case: the groove between
+                    // two adjacent model columns is the groove between two adjacent screen
+                    // columns, whichever way round they were mapped.
+                    if (col < last && Divides(cell, cell + 1))
+                    {
+                        double x = Origin(Math.Min(ViewIndex(col), ViewIndex(col + 1))) + CellSize + GapSize / 2;
+                        double y = Origin(ViewIndex(row)) - GapSize / 2;
+
+                        draw.BeginFigure(new Point(x, y), false, false);
+                        draw.LineTo(new Point(x, y + Pitch), true, false);
+                    }
+
+                    if (row < last && Divides(cell, cell + Board.Size))
+                    {
+                        double x = Origin(ViewIndex(col)) - GapSize / 2;
+                        double y = Origin(Math.Min(ViewIndex(row), ViewIndex(row + 1))) + CellSize + GapSize / 2;
+
+                        draw.BeginFigure(new Point(x, y), false, false);
+                        draw.LineTo(new Point(x + Pitch, y), true, false);
+                    }
+                }
+            }
+        }
+
+        figure.Freeze();
+
+        if (figure.IsEmpty()) return;
+
+        _frontLayer.Children.Add(FrontStroke(figure, 10, 0.13));
+        _frontLayer.Children.Add(FrontStroke(figure, 1.6, 0.62));
+
+        // It arrives where it now is rather than sliding there. When the turn passes the
+        // contested squares change hands and the seam is somewhere else — not on its way
+        // there, because it was never travelling.
+        foreach (UIElement stroke in _frontLayer.Children)
+            stroke.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, ((Path)stroke).Opacity, Settle));
+    }
+
+    private static Path FrontStroke(Geometry figure, double thickness, double opacity) => new()
+    {
+        Data = figure,
+        Stroke = Palette.BrushOf(Palette.Front),
+        StrokeThickness = thickness,
+        StrokeEndLineCap = PenLineCap.Round,
+        StrokeStartLineCap = PenLineCap.Round,
+        Opacity = opacity,
+    };
+
+    /// <summary>Whether the seam runs between a square and the neighbour given.</summary>
+    private bool Divides(int cell, int neighbour) =>
+        _owner[neighbour] >= 0 && _owner[neighbour] != _owner[cell];
 
     private void RefreshRoutes()
     {
         _routeLayer.Children.Clear();
-        if (!_showRoutes || _state.IsGameOver) return;
+        if (!_reading || _state.IsGameOver) return;
 
         Span<byte> distances = stackalloc byte[Board.CellCount];
         var cells = new List<int>(Board.CellCount);
@@ -1210,52 +2042,81 @@ public sealed class BoardView : UserControl
 
             AddRouteLine(line, player);
         }
-
-        static bool AreNeighbours(int a, int b) =>
-            Math.Abs(Board.RowOf(a) - Board.RowOf(b)) + Math.Abs(Board.ColOf(a) - Board.ColOf(b)) == 1;
     }
 
-    /// <summary>One unbroken stretch of a player's route. A single point is not a stretch.</summary>
+    /// <summary>Whether two squares are a step apart on the board itself, portals aside.</summary>
+    private static bool AreNeighbours(int a, int b) =>
+        Math.Abs(Board.RowOf(a) - Board.RowOf(b)) + Math.Abs(Board.ColOf(a) - Board.ColOf(b)) == 1;
+
+    /// <summary>
+    /// One unbroken stretch of a player's route. A single point is not a stretch.
+    ///
+    /// A route is a way home, and a body under a spine reads as one. The dashed hairline
+    /// this replaces read as a debug overlay somebody had left switched on — right about
+    /// where the route went, wrong about what it was.
+    /// </summary>
     private void AddRouteLine(PointCollection points, int player)
     {
         if (points.Count < 2) return;
 
-        _routeLayer.Children.Add(new Polyline
-        {
-            Points = points,
-            Stroke = Palette.BrushOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
-            StrokeThickness = 2,
-            StrokeDashArray = new DoubleCollection { 1.4, 2.2 },
-            StrokeDashCap = PenLineCap.Round,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
-            StrokeLineJoin = PenLineJoin.Round,
-            Opacity = 0.6,
-        });
+        string accent = player == 0 ? Palette.Accent0 : Palette.Accent1;
+
+        _routeLayer.Children.Add(Ribbon(points, accent, 9, 0.1));
+        _routeLayer.Children.Add(Ribbon(points, accent, 2.25, 0.55));
     }
 
-    private void SetPulse(int player, bool active)
+    private static Polyline Ribbon(PointCollection points, string accent, double thickness, double opacity) => new()
     {
-        DropShadowEffect glow = _pawnGlow[player];
+        Points = points,
+        Stroke = Palette.BrushOf(accent),
+        StrokeThickness = thickness,
+        StrokeStartLineCap = PenLineCap.Round,
+        StrokeEndLineCap = PenLineCap.Round,
+        StrokeLineJoin = PenLineJoin.Round,
+        Opacity = opacity,
+    };
+
+    /// <summary>
+    /// Whose turn it is, marked on the board where the eye already is rather than only in
+    /// the panel beside it.
+    ///
+    /// A ring is switched on and switched off; it is never faded and it never pulses. The
+    /// old halo breathed forever, which on a board made of paper is the one mark that never
+    /// stops asking to be looked at — and a fade would leave a window in which neither piece
+    /// is clearly on move, which is precisely the window a player looks up during.
+    /// </summary>
+    private void SetTurnRing(int player, bool active)
+    {
+        Ellipse ring = _pawnRing[player];
+        var scale = (ScaleTransform)ring.RenderTransform;
+
+        _pawnShapes[player].Opacity = active ? 1 : 0.72;
+
+        ring.BeginAnimation(OpacityProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        scale.ScaleX = scale.ScaleY = 1;
 
         if (!active)
         {
-            glow.BeginAnimation(DropShadowEffect.OpacityProperty, null);
-            glow.Opacity = 0;
-            _pawnShapes[player].BeginAnimation(OpacityProperty, null);
-            _pawnShapes[player].Opacity = 0.72;
+            ring.Opacity = 0;
             return;
         }
 
-        _pawnShapes[player].BeginAnimation(OpacityProperty, null);
-        _pawnShapes[player].Opacity = 1;
+        // Only the ring that is now on lands, and only once: the turn arriving is an event,
+        // and the ring standing there afterwards is a state.
+        ring.Opacity = 0.55;
 
-        glow.BeginAnimation(DropShadowEffect.OpacityProperty, new DoubleAnimation(0.12, 0.44, TimeSpan.FromMilliseconds(1600))
-        {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
-        });
+        if (_ringOn == player) return;
+
+        _ringOn = player;
+
+        var ease = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
+        var land = new DoubleAnimation(1.28, 1, Settle) { EasingFunction = ease };
+
+        ring.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 0.55, Settle));
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, land);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, land);
     }
 
     // ============================================================== geometry ==

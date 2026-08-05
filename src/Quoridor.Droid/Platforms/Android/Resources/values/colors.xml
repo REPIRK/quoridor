@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- The system's share of the app's colours. The two darks are the stylesheet's own
+     background and the dark it drops to under the board, so the status bar and the window
+     behind the board are the board's ink; the accent is the first player's teal, which is
+     the colour the game already uses for "this one is yours". -->
+<resources>
+    <color name="colorPrimary">#171714</color>
+    <color name="colorPrimaryDark">#0a0908</color>
+    <color name="colorAccent">#6baaa6</color>
+</resources>

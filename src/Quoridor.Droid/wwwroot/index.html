@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+
+    <!-- No pinch zoom, and the page is allowed under a notch. The board sizes itself to
+         the window and a pinch on it would only ever be a mis-aimed drag of a wall. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+    <title>Quoridor</title>
+    <base href="/" />
+
+    <!-- The board's own stylesheet, out of the component library, byte for byte the one
+         the browser build loads. -->
+    <link rel="stylesheet" href="_content/Quoridor.Ui/css/app.css" />
+    <link rel="icon" href="data:," />
+</head>
+
+<body>
+    <div id="app">
+        <div class="booting">
+            <span>Quoridor</span>
+            <small>loading the engine…</small>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        Something went wrong. <a href="" class="reload">Reload</a>
+    </div>
+
+    <script>
+        // Where this host keeps the panel's choices. The page's storage module looks for
+        // exactly this object and uses localStorage when it does not find one, so a
+        // browser tab is unaffected and neither side has to ask which it is.
+        //
+        // Both calls cross into .NET, so both answer with a promise; the module hands
+        // whatever it is given straight back to Blazor, which awaits it. See HostSettings
+        // for why the WebView's own storage is not where these belong.
+        window.quoridorSettingsStore = {
+            read: () => DotNet.invokeMethodAsync('Quoridor.Droid', 'ReadSettings'),
+            write: text => DotNet.invokeMethodAsync('Quoridor.Droid', 'WriteSettings', text),
+        };
+
+        // And where the game in progress is kept, which is a different file for different
+        // reasons — see HostGame. Same arrangement: the page looks for this object, and
+        // uses the browser's own storage where it does not find one.
+        window.quoridorGameStore = {
+            read: () => DotNet.invokeMethodAsync('Quoridor.Droid', 'ReadGame'),
+            write: text => DotNet.invokeMethodAsync('Quoridor.Droid', 'WriteGame', text),
+        };
+
+        // Which way the page's theme has gone, for the parts of the window the page does
+        // not draw. A browser has its own answer to this and the page gives it too — a
+        // theme-color tag — so this is the extra one, not the only one: it reaches the
+        // status bar and the gesture bar, which no tag can.
+        window.quoridorChrome = {
+            theme: (light, ink) => DotNet.invokeMethodAsync('Quoridor.Droid', 'SetTheme', light, ink),
+        };
+    </script>
+
+    <!-- Only needed to introduce two devices to each other; once they are talking, moves
+         go directly between them over WebRTC. The vendored copy out of the component
+         library, not a CDN: an app that is installed should not need someone else's host
+         to be up, and on a phone it may well be the only thing on the screen that would
+         have needed the network at all. -->
+    <script src="_content/Quoridor.Ui/js/peerjs.min.js"></script>
+
+    <!-- The one line that differs from the browser build's page: the same components, on
+         a runtime that is already here rather than one being downloaded. autostart is off
+         because the native side starts it once the app has its root component. -->
+    <script src="_framework/blazor.webview.js" autostart="false"></script>
+</body>
+
+</html>

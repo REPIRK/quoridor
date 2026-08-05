@@ -37,10 +37,57 @@ export async function copy(text) {
     }
 }
 
-/// Whether the device has no hover — a touch screen, where one stray tap would move a
-/// pawn and the confirm step earns its keep.
+/// Whether the thing pointing at the page is a finger rather than a mouse. The board asks
+/// so it can give the grooves between squares a share of the pitch a fingertip can
+/// actually land on, and the page asks so it can say "press" where it would say "hover".
 export function isCoarsePointer() {
     return window.matchMedia('(hover: none)').matches;
+}
+
+/// Lets go of the pointer capture a touch press takes for itself.
+///
+/// This is what makes the board's one gesture work. Placing a wall on a phone is press,
+/// look, lift — and sliding the thumb between the press and the lift is how a player
+/// corrects a landing on a target that is twenty pixels wide. But a browser, on the
+/// pointerdown of a touch, silently captures the pointer to the element it landed on:
+/// every event after that is delivered to that one element however far the finger travels,
+/// so the grooves the thumb slides onto are never told it is over them and the aim sticks
+/// where it first touched down. Releasing the capture puts the events back on whatever is
+/// actually under the finger, which is the behaviour a mouse has had all along.
+///
+/// Done here rather than in the component because it has to happen in the same tick as the
+/// press: a round trip into .NET to ask what to do would arrive after the capture is in
+/// force and after the first slide has already been misdelivered. Attempted twice — on the
+/// press and on the first movement afterwards — because whether the capture is in place
+/// during the pointerdown handler or set immediately after it is exactly the sort of detail
+/// browsers differ on, and the second attempt costs nothing when the first one worked.
+///
+/// One listener on the document rather than one per target: there are some two hundred
+/// targets on a board and they are rebuilt on every render.
+export function freeTheBoard() {
+    if (freed) return;
+    freed = true;
+
+    document.addEventListener('pointerdown', free, true);
+    document.addEventListener('pointermove', free, true);
+}
+
+let freed = false;
+
+function free(event) {
+    // A mouse is never captured and has nothing to release; asking anyway would be a
+    // throw on every movement across the board.
+    if (event.pointerType === 'mouse') return;
+
+    const target = event.target;
+    if (!target?.closest?.('.board')) return;
+
+    try {
+        if (target.hasPointerCapture?.(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    } catch (error) {
+        // The pointer is already gone, or this browser will not be told. Either way the
+        // press still aims and the lift still plays; only the sliding is lost.
+    }
 }
 
 /// Keeps the move list on the move that matters, which is decided by whether the game is
@@ -84,13 +131,24 @@ export function followMoves(reviewing) {
 // cannot come back half from one visit and half from another.
 const settingsKey = 'quoridor.settings';
 
+/// A store the host has put there itself, or nothing. A browser tab installs nothing and
+/// the two functions below fall through to localStorage, which is what a browser tab has;
+/// a native shell installs a pair of functions that reach its own storage, because inside
+/// an app localStorage belongs to the WebView rather than to the app and is not a promise
+/// the app can keep. Either way the page stores the same line and does not ask which host
+/// it is in. Whatever the host's functions return is handed straight back to Blazor, which
+/// awaits it — so a store that has to cross into .NET may answer with a promise.
+function host() {
+    return globalThis.quoridorSettingsStore;
+}
+
 /// The stored settings, exactly as they were written, or an empty string when there is
 /// nothing stored yet. Storage is not always there to be had — a browser told to refuse
 /// it throws on the very first read rather than answering null — and a remembered volume
 /// is never worth a page that will not start.
 export function readSettings() {
     try {
-        return localStorage.getItem(settingsKey) ?? '';
+        return host() ? host().read() : localStorage.getItem(settingsKey) ?? '';
     } catch (error) {
         return '';
     }
@@ -100,9 +158,75 @@ export function readSettings() {
 /// as this tab is open, which is the whole of what the player asked for just now.
 export function writeSettings(text) {
     try {
-        localStorage.setItem(settingsKey, text);
+        if (host()) host().write(text);
+        else localStorage.setItem(settingsKey, text);
     } catch (error) {
         // Refused, or full. Nothing here is worth interrupting a game over.
+    }
+}
+
+// ============================================================== the game itself ==
+
+// Where the game in progress is kept, which is not where the settings are kept. They are
+// written at different moments and for different reasons — a setting when somebody
+// chooses one, the game after every single move — and a game that is over leaves nothing
+// behind while a setting outlives every game there has ever been. One string each, and
+// the same two-step as above: the host keeps it if the host has said how, otherwise the
+// browser does.
+const resumeKey = 'quoridor.game';
+
+function gameHost() {
+    return globalThis.quoridorGameStore;
+}
+
+/// The game in progress when the app was last shut, or an empty string for none.
+export function readResume() {
+    try {
+        return gameHost() ? gameHost().read() : localStorage.getItem(resumeKey) ?? '';
+    } catch (error) {
+        return '';
+    }
+}
+
+/// Writes down the game in progress, or clears it when the text is empty. Silent on
+/// failure: not being able to resume later is not a reason to interrupt the game now.
+export function writeResume(text) {
+    try {
+        if (gameHost()) gameHost().write(text);
+        else if (text) localStorage.setItem(resumeKey, text);
+        else localStorage.removeItem(resumeKey);
+    } catch (error) {
+        // Refused, or full.
+    }
+}
+
+// ============================================================== the window's own ==
+
+/// Tells whatever is around this page which way the theme has gone.
+///
+/// The page draws its own light and dark, but there is always a strip of window it does
+/// not draw: the browser's address bar on a phone, and the status and navigation bars of
+/// an app. Those belong to the host and the host cannot know which theme is up, because
+/// the theme is a preference the page remembers. So the page says.
+///
+/// Both answers are given every time. `theme-color` is what a mobile browser reads and is
+/// the whole of what a tab can do; the host store is what a native shell installs to
+/// colour the system's own bars. Neither one being there is normal.
+export function setSystemTheme(light, ink) {
+    let tag = document.querySelector('meta[name="theme-color"]');
+
+    if (!tag) {
+        tag = document.createElement('meta');
+        tag.setAttribute('name', 'theme-color');
+        document.head.appendChild(tag);
+    }
+
+    tag.setAttribute('content', ink);
+
+    try {
+        globalThis.quoridorChrome?.theme(light, ink);
+    } catch (error) {
+        // A host that cannot colour its bars still draws the page.
     }
 }
 

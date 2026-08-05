@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8" ?>
+
+<!-- The whole app. No title bar, no tabs, no navigation: the game is one board and the
+     things around it, exactly as it is in a browser tab, and a phone has less room for
+     chrome than anything else the game runs on.
+
+     The root component is Quoridor.Ui.App, the same type from the same assembly that the
+     browser build hands to blazor.webassembly.js.
+
+     The colour is the stylesheet's own background ink, written out rather than looked up:
+     it is what is behind the board for the moment before the page has painted, and behind
+     a rounded corner or a gesture bar afterwards. It is not a theme — the theme is the
+     page's business and is remembered inside the page, so the native side cannot know
+     which one is coming. Dark is what the game opens as. -->
+
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:ui="clr-namespace:Quoridor.Ui;assembly=Quoridor.Ui"
+             x:Class="Quoridor.Droid.MainPage"
+             BackgroundColor="#171714"
+             Padding="0">
+
+    <BlazorWebView x:Name="Board" HostPage="wwwroot/index.html" BackgroundColor="#171714">
+        <BlazorWebView.RootComponents>
+            <RootComponent Selector="#app" ComponentType="{x:Type ui:App}" />
+        </BlazorWebView.RootComponents>
+    </BlazorWebView>
+
+</ContentPage>

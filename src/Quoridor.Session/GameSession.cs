@@ -1,7 +1,7 @@
 using Quoridor.Core;
 using Quoridor.Engine;
 
-namespace Quoridor.App.Game;
+namespace Quoridor.Session;
 
 public enum GameMode
 {
@@ -16,20 +16,21 @@ public sealed record GameOptions(
     BotStrength Strength,
     TimeControl Clock,
     bool HumanMovesFirst = true,
-    GameSetup? Board = null)
+    GameSetup? Board = null,
+    GameFlavour Flavour = GameFlavour.Standard)
 {
     /// <summary>The board this game is played on, standard unless something says otherwise.</summary>
     public GameSetup Setup => Board ?? GameSetup.Standard;
 
-    public static GameOptions Hotseat(TimeControl clock, GameSetup board) =>
-        new(GameMode.Hotseat, BotStrength.Normal, clock, Board: board);
+    public static GameOptions Hotseat(TimeControl clock, GameSetup board, GameFlavour flavour) =>
+        new(GameMode.Hotseat, BotStrength.Normal, clock, Board: board, Flavour: flavour);
 
     public static GameOptions VersusBot(
-        BotStrength strength, TimeControl clock, bool humanMovesFirst, GameSetup board) =>
-        new(GameMode.VersusBot, strength, clock, humanMovesFirst, board);
+        BotStrength strength, TimeControl clock, bool humanMovesFirst, GameSetup board, GameFlavour flavour) =>
+        new(GameMode.VersusBot, strength, clock, humanMovesFirst, board, flavour);
 
-    public static GameOptions Spectate(BotStrength strength, GameSetup board) =>
-        new(GameMode.Spectate, strength, TimeControl.None, Board: board);
+    public static GameOptions Spectate(BotStrength strength, GameSetup board, GameFlavour flavour) =>
+        new(GameMode.Spectate, strength, TimeControl.None, Board: board, Flavour: flavour);
 
     /// <summary>A network game is set up by the host, who says which seat and board.</summary>
     public static GameOptions Online(bool isHost, GameSetup board) =>
@@ -42,25 +43,45 @@ public sealed record GameOptions(
     /// </summary>
     public int HumanSeat => !HumanMovesFirst && Mode is GameMode.VersusBot or GameMode.Online ? 1 : 0;
 
-    public string Title
+    public string Title => TitleFor(Setup);
+
+    /// <summary>
+    /// The header for a game played on <paramref name="board"/>. Takes the board rather
+    /// than reading its own, because a rolled game rolls again on a rematch and the two
+    /// part company from then on.
+    /// </summary>
+    public string TitleFor(GameSetup board)
     {
-        get
+        string name = Mode switch
         {
-            string name = Mode switch
-            {
-                GameMode.Hotseat => "Local match",
-                GameMode.Spectate => "Two engines",
-                GameMode.Online => "Network game",
-                _ => $"Versus {Strength.ToString().ToLowerInvariant()} bot",
-            };
+            GameMode.Hotseat => "Local match",
+            GameMode.Spectate => "Two engines",
+            GameMode.Online => "Network game",
+            _ => $"Versus {Strength.ToString().ToLowerInvariant()} bot",
+        };
 
-            if (!Setup.IsStandard) name += $" · {Setup.Describe()}";
-            if (Mode == GameMode.VersusBot && !HumanMovesFirst) name += " · you move second";
-            if (Clock.IsEnabled) name += $" · {Clock.Label}";
+        if (!board.IsStandard) name += $" · {board.Describe()}";
+        if (Mode == GameMode.VersusBot && !HumanMovesFirst) name += " · you move second";
+        if (Clock.IsEnabled) name += $" · {Clock.Label}";
 
-            return name;
-        }
+        return name;
     }
+}
+
+/// <summary>
+/// The two engine preferences a game cannot decide for itself: how long the engine may
+/// think about one move, and whether it may also think while the human is deciding.
+/// </summary>
+public sealed record EnginePreferences(TimeSpan MoveTime, bool Ponder)
+{
+    /// <summary>
+    /// What a host that has said nothing gets. Read off an untouched <see cref="Settings"/>
+    /// rather than written out a second time, so the numbers have one home.
+    /// </summary>
+    public static readonly EnginePreferences Defaults = Of(new Settings());
+
+    /// <summary>The two values above as a settings object has them.</summary>
+    public static EnginePreferences Of(Settings settings) => new(settings.EngineMoveTime, settings.Ponder);
 }
 
 /// <summary>
@@ -70,6 +91,17 @@ public sealed record GameOptions(
 /// </summary>
 public sealed class GameSession
 {
+    /// <summary>
+    /// Where a session gets its engine preferences. It is handed them rather than going
+    /// and finding them, because where they are kept is the host's business — a file in a
+    /// roaming profile on Windows, and something else on a phone.
+    ///
+    /// A function rather than a value, because it is asked afresh every time it is needed:
+    /// turning pondering off in the settings screen has always taken effect on the game
+    /// already in progress, and a snapshot taken when the game began would not.
+    /// </summary>
+    public static Func<EnginePreferences> Preferences { get; set; } = () => EnginePreferences.Defaults;
+
     /// <summary>How much of the remaining budget the engine may spend on one move.</summary>
     private const int ClockShare = 20;
 
@@ -105,11 +137,13 @@ public sealed class GameSession
     {
         Options = options;
 
+        EnginePreferences engine = Preferences();
+
         switch (options.Mode)
         {
             case GameMode.VersusBot:
                 _agents[options.HumanSeat ^ 1] = AgentFactory.Create(
-                    options.Strength, Settings.Current.EngineMoveTime, ponder: Settings.Current.Ponder);
+                    options.Strength, engine.MoveTime, ponder: engine.Ponder);
                 break;
 
             case GameMode.Spectate:
@@ -117,11 +151,13 @@ public sealed class GameSession
                 // not take a quarter of an hour, against whatever you picked.
                 _agents[0] = new SearchAgent(
                     maxDepth: 32, moveTime: TimeSpan.FromMilliseconds(600), threads: 1, tableMegabytes: 16);
-                _agents[1] = AgentFactory.Create(options.Strength, Settings.Current.EngineMoveTime);
+                _agents[1] = AgentFactory.Create(options.Strength, engine.MoveTime);
                 break;
         }
 
-        BuiltBoard built = options.Setup.Build();
+        Setup = options.Setup;
+
+        BuiltBoard built = Setup.Build();
 
         State = built.State;
         Holes = built.Holes;
@@ -131,12 +167,22 @@ public sealed class GameSession
 
     public GameOptions Options { get; }
 
+    /// <summary>
+    /// The board actually in play. Normally the one the menu chose, but a rolled game
+    /// rolls again on a rematch, so this and <c>Options.Setup</c> part company the first
+    /// time Restart is pressed.
+    /// </summary>
+    public GameSetup Setup { get; private set; }
+
     /// <summary>The squares out of play, for the board to draw.</summary>
-    public UInt128 Holes { get; }
+    public UInt128 Holes { get; private set; }
 
     public GameState State { get; private set; }
 
     public IReadOnlyList<Move> Moves => _moves;
+
+    /// <summary>The move just played, or none in a game nothing has been played in yet.</summary>
+    public Move? LastMove => _moves.Count > 0 ? _moves[^1] : null;
 
     /// <summary>
     /// The position as it stood after the first <paramref name="plies"/> moves, for
@@ -172,6 +218,15 @@ public sealed class GameSession
     /// </summary>
     public bool IsHumanTurn => !IsOver && IsHumanSeat(State.SideToMove);
 
+    /// <summary>
+    /// The seat the person at this device plays, or -1 when they play both of them or
+    /// neither. It is not the same question as <see cref="GameOptions.HumanSeat"/>, which
+    /// answers "which end of the board is ours" for every mode and so says 0 for a local
+    /// match and for a watched game as well — true of the drawing, and wrong for anything
+    /// that has to know whose result this is.
+    /// </summary>
+    public int LocalSeat => Options.Mode is GameMode.Hotseat or GameMode.Spectate ? -1 : Options.HumanSeat;
+
     /// <summary>Whether the person at this keyboard is the one who plays this seat.</summary>
     private bool IsHumanSeat(int seat) => _agents[seat] is null &&
         (Options.Mode != GameMode.Online || seat == Options.HumanSeat);
@@ -206,6 +261,19 @@ public sealed class GameSession
     /// </summary>
     public bool LastMoveCrossedPortal { get; private set; }
 
+    /// <summary>
+    /// The pickup the move just played took and the square it was standing on, so the
+    /// board can see it off from where it was collected rather than have it vanish.
+    /// </summary>
+    public (int Cell, bool IsWall)? LastPickup { get; private set; }
+
+    /// <summary>
+    /// Who made the move just played, or -1 for none. What a move did is shown beside the
+    /// player it happened to, and on a board with skip pickups the turn does not alternate,
+    /// so the side to move is not the side that just moved.
+    /// </summary>
+    public int LastMover { get; private set; } = -1;
+
     public bool Apply(Move move)
     {
         if (IsOver || !State.IsLegal(move)) return false;
@@ -228,6 +296,14 @@ public sealed class GameSession
         // player had nothing to play and forfeited theirs.
         bool tookFreeMove = move.Kind == MoveKind.Pawn && (State.SkipPickups & Board.Bit(move.Cell)) != 0;
 
+        // And once more for the same reason: what was standing on the square is only
+        // readable while it is still standing there.
+        LastPickup = move.Kind == MoveKind.Pawn && (State.WallPickups & Board.Bit(move.Cell)) != 0
+            ? (move.Cell, true)
+            : tookFreeMove
+                ? (move.Cell, false)
+                : null;
+
         _positions.Add(State);
         _moves.Add(move);
 
@@ -242,6 +318,7 @@ public sealed class GameSession
         LastTurnForfeited = cameStraightBack && !tookFreeMove;
         LastMoveTookAWall = State.WallsOf(mover) > wallsBefore;
         LastMoveCrossedPortal = crossedPortal;
+        LastMover = mover;
 
         if (HasClock) _remaining[mover] += Options.Clock.Increment;
 
@@ -317,9 +394,17 @@ public sealed class GameSession
         _moves.Clear();
         _flagged = -1;
 
-        // The same numbers give the same board, so a rematch is played on the one you
-        // just played on rather than a fresh roll of the dice.
-        State = Options.Setup.Build().State;
+        // A rolled game rolls again. Playing the same random board twice is not what
+        // "random" was asked for, and the browser build has always worked this way — the
+        // desktop simply never carried the flavour far enough to know. Standard and
+        // Custom are settings rather than a throw of the dice, so they stand.
+        if (Options.Flavour == GameFlavour.Random) Setup = GameSetup.Roll(Random.Shared.Next());
+
+        BuiltBoard built = Setup.Build();
+
+        State = built.State;
+        Holes = built.Holes;
+
         ResetClocks();
 
         ForgetLastMove();
@@ -338,10 +423,11 @@ public sealed class GameSession
     public event Action? PositionChanged;
 
     /// <summary>
-    /// Drops what the last move did. The three flags below describe the move just played,
-    /// and after a rewind or a restart no move was just played — without this the panel
-    /// went on announcing the pickup or the portal from the game that has been taken off
-    /// the board.
+    /// Drops what the last move did. Everything below describes the move just played, and
+    /// after a rewind or a restart no move was just played — without this the panel went on
+    /// announcing the pickup or the portal from the game that has been taken off the board,
+    /// and the board saw a collected pickup off a second time as the position it was keyed
+    /// on changed under it.
     /// </summary>
     private void ForgetLastMove()
     {
@@ -349,6 +435,8 @@ public sealed class GameSession
         LastTurnForfeited = false;
         LastMoveTookAWall = false;
         LastMoveCrossedPortal = false;
+        LastPickup = null;
+        LastMover = -1;
     }
 
     /// <summary>
@@ -445,7 +533,7 @@ public sealed class GameSession
     /// </summary>
     public void StartPondering()
     {
-        if (!Settings.Current.Ponder || Options.Mode != GameMode.VersusBot || !IsHumanTurn) return;
+        if (!Preferences().Ponder || Options.Mode != GameMode.VersusBot || !IsHumanTurn) return;
         if (_agents[State.SideToMove ^ 1] is not SearchAgent engine || !engine.CanPonder) return;
 
         StopPondering();

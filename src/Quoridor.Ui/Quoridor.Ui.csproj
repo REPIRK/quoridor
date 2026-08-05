@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- The board, the panels around it and the assets they draw with. This is a class
+       library and not an application on purpose: a Blazor WebAssembly project cannot be
+       referenced by anything, so as long as the components lived in one they could only
+       ever be a web page. Here they can be hosted by the browser build and, unchanged,
+       by a native shell on a phone. -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Quoridor.Ui</AssemblyName>
+    <RootNamespace>Quoridor.Ui</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.17" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Quoridor.Core\Quoridor.Core.csproj" />
+    <ProjectReference Include="..\Quoridor.Engine\Quoridor.Engine.csproj" />
+
+    <!-- The game behind the screen: the position, the history, the clocks and the engine
+         seats. These components used to keep a thinner copy of their own, which is how the
+         browser build came to have no clock and no engine-against-engine — not because
+         either was hard in a browser, but because the class that knew how was in the WPF
+         project. There is one now, and both builds run it. -->
+    <ProjectReference Include="..\Quoridor.Session\Quoridor.Session.csproj" />
+  </ItemGroup>
+
+</Project>

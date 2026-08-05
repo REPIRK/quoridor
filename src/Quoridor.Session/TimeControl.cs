@@ -1,4 +1,4 @@
-namespace Quoridor.App.Game;
+namespace Quoridor.Session;
 
 /// <summary>
 /// A chess clock: a starting budget per player plus an increment credited after each

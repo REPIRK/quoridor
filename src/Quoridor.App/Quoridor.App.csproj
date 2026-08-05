@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Quoridor.Core\Quoridor.Core.csproj" />
     <ProjectReference Include="..\Quoridor.Engine\Quoridor.Engine.csproj" />
+    <ProjectReference Include="..\Quoridor.Session\Quoridor.Session.csproj" />
   </ItemGroup>
 
 </Project>

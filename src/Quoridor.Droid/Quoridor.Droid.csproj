@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- The phone build. There is no game in this project: it is a window, a WebView and
+       the two lines that tell the shared components which host they are in. Everything
+       on the screen comes from Quoridor.Ui, which the browser build hosts the same way,
+       and everything behind it from Quoridor.Session, Quoridor.Engine and Quoridor.Core.
+
+       Why a WebView and not native MAUI views: the board, the panels and the CSS that
+       draws them already exist and already work on a small screen. What the phone is
+       here for is the other side of the WebView — a real .NET runtime with a real thread
+       pool, so the engine's search runs off the UI thread. That is what the browser
+       build cannot have and why it has no clock, no pondering and a 600 ms ceiling. -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Quoridor.Droid</RootNamespace>
+    <AssemblyName>Quoridor.Droid</AssemblyName>
+
+    <!-- The Razor SDK otherwise treats every .css under wwwroot as a component's own
+         scoped stylesheet. The one stylesheet this app loads belongs to the component
+         library and is served from there. -->
+    <EnableDefaultCssItems>false</EnableDefaultCssItems>
+
+    <ApplicationTitle>Quoridor</ApplicationTitle>
+    <ApplicationId>io.github.repirk.quoridor</ApplicationId>
+    <ApplicationDisplayVersion>2.0.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <!-- Android 7. Below this there is no BlazorWebView, and above it the phones that
+         are left are a rounding error. The WebView itself updates through the Play
+         Store independently of the system, so even a 2016 phone draws the board with a
+         current Chromium. -->
+    <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+
+    <!-- The methods JavaScript calls back into are found by name at run time and nothing
+         in the program calls them, which is the same reason the browser build roots its
+         own assemblies. This is the Release default for Android; it is written down
+         because the app depends on it rather than merely tolerating it. -->
+    <AndroidLinkMode>SdkOnly</AndroidLinkMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#171714" />
+    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#171714" BaseSize="128,128" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="$(MauiVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Quoridor.Ui alone would bring the other three in with it. They are named anyway,
+         because this project is the answer to "does the game move to a phone unchanged",
+         and the answer should be legible in the one file that would have to lie about
+         it. Not one line of any of the four was written for Android. -->
+    <ProjectReference Include="..\Quoridor.Core\Quoridor.Core.csproj" />
+    <ProjectReference Include="..\Quoridor.Engine\Quoridor.Engine.csproj" />
+    <ProjectReference Include="..\Quoridor.Session\Quoridor.Session.csproj" />
+    <ProjectReference Include="..\Quoridor.Ui\Quoridor.Ui.csproj" />
+  </ItemGroup>
+
+</Project>

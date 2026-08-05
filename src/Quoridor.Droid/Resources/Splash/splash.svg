@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+
+<!-- What is on the screen for the second between the launcher and the board. The same
+     mark as the icon, on the same ink, so the app opens on one colour and stays on it:
+     the splash background, the window behind the WebView and the page's own background
+     are all #171714, and nothing flashes white on the way in. -->
+
+<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
+
+    <g fill="#2a2823">
+        <rect x="102" y="102" width="76" height="76" rx="9" />
+        <rect x="190" y="102" width="76" height="76" rx="9" />
+        <rect x="278" y="102" width="76" height="76" rx="9" />
+        <rect x="102" y="190" width="76" height="76" rx="9" />
+        <rect x="190" y="190" width="76" height="76" rx="9" />
+        <rect x="278" y="190" width="76" height="76" rx="9" />
+        <rect x="102" y="278" width="76" height="76" rx="9" />
+        <rect x="190" y="278" width="76" height="76" rx="9" />
+        <rect x="278" y="278" width="76" height="76" rx="9" />
+    </g>
+
+    <circle cx="228" cy="228" r="27" fill="#6baaa6" />
+    <rect x="267" y="102" width="10" height="164" rx="5" fill="#d96c4a" />
+
+</svg>

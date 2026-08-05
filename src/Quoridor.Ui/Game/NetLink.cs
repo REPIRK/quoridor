@@ -1,6 +1,6 @@
 using Microsoft.JSInterop;
 
-namespace Quoridor.Web.Game;
+namespace Quoridor.Ui.Game;
 
 public enum NetState
 {
@@ -107,7 +107,10 @@ public sealed class NetLink : IAsyncDisposable
 
     private async Task PrepareAsync()
     {
-        _module ??= await _js.InvokeAsync<IJSObjectReference>("import", "./js/net.js");
+        // A class library's own wwwroot is served from _content/<assembly>/, whatever is
+        // hosting it, and the path stays relative to the page so it survives being served
+        // from a subdirectory the way GitHub Pages serves this.
+        _module ??= await _js.InvokeAsync<IJSObjectReference>("import", "./_content/Quoridor.Ui/js/net.js");
         _self ??= DotNetObjectReference.Create(this);
     }
 

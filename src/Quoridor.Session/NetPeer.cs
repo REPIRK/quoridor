@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using Quoridor.Core;
 
-namespace Quoridor.App.Game;
+namespace Quoridor.Session;
 
 public enum NetState
 {

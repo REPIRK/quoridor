@@ -155,10 +155,44 @@
 
 * { box-sizing: border-box; }
 
+/* ============================================================ the window's edges ==
+
+   How much of the window is not the page's to draw on. A phone puts a clock along the
+   top, a gesture bar or three buttons along the bottom, and on some of them a rounded
+   corner or a camera cut out of the screen itself — and from Android 15 an app is laid
+   out under all of it by default rather than beside it. A page that ignores this is a
+   page whose header is behind the clock and whose bottom row of buttons is under the
+   system's own.
+
+   Two sources, because neither is enough on its own. env(safe-area-inset-*) is the
+   standard answer and is what a browser gives; on Android it reports the display cutout
+   and says nothing at all about the status or navigation bars, which are the two that
+   matter most. So a native shell measures what it is actually laid out under and sets
+   --inset-*, and the larger of the two answers wins. Where the shell has set nothing —
+   every browser, and any host that already keeps the page clear of the bars — the var
+   falls back to zero and this is exactly env() on its own. */
+:root {
+    /* How tall the strip of controls along the bottom of a phone is. Named because two
+       rules need to agree about it — the strip itself, and the space the page leaves
+       under its own last line so that nothing ends up behind it. */
+    --tools: 58px;
+
+    --edge-top: max(env(safe-area-inset-top, 0px), var(--inset-top, 0px));
+    --edge-right: max(env(safe-area-inset-right, 0px), var(--inset-right, 0px));
+    --edge-bottom: max(env(safe-area-inset-bottom, 0px), var(--inset-bottom, 0px));
+    --edge-left: max(env(safe-area-inset-left, 0px), var(--inset-left, 0px));
+}
+
 html, body {
     margin: 0;
     height: 100%;
     background: #171714;
+
+    /* The page is exactly as tall as the window and has one scrolling region inside it,
+       so a rubber-band at either end is a page that has come loose from the phone it is
+       drawn on — and on the board it is a wall being placed while the whole screen
+       slides. */
+    overscroll-behavior: none;
 }
 
 body {
@@ -172,7 +206,14 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
+
+    /* Both, in this order. A phone's address bar slides away as the page is scrolled, and
+       100vh is the height the window has when it is gone — so a page written in vh is one
+       whose bottom edge is off the screen for as long as the bar is showing, which on a
+       first load is always. dvh is the height there actually is at this instant; the vh
+       above it is what a browser too old to know that falls back to. */
     height: 100vh;
+    height: 100dvh;
     gap: 10px;
     color: #ede7da;
     font-family: Georgia, "Times New Roman", serif;
@@ -185,7 +226,12 @@ body {
     display: none;
     position: fixed;
     inset: auto 0 0 0;
-    padding: 14px 20px;
+
+    /* Above the dialogs, which are themselves above the page. Whatever else is on the
+       screen, the one thing that has to be readable is the message saying the page has
+       stopped working. */
+    z-index: 40;
+    padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
     background: #d96c4a;
     color: #171714;
 }
@@ -194,10 +240,17 @@ body {
 
 .app {
     min-height: 100vh;
+    min-height: 100dvh;
     background: var(--bg);
     color: var(--text);
     display: flex;
     flex-direction: column;
+
+    /* Held off the window's own edges rather than off the screen's. The background is on
+       this element and the padding is inside it, so the page's ink still runs under the
+       status bar and behind a rounded corner — which is what makes the system's bars look
+       like part of the app instead of a frame around it — while nothing readable does. */
+    padding: var(--edge-top) var(--edge-right) var(--edge-bottom) var(--edge-left);
 }
 
 .bar {
@@ -247,14 +300,32 @@ body {
     height: auto;
     display: block;
 
-    /* A board is a thing you tap. Without these a double tap zooms the page instead of
-       playing two moves, a drag across the board selects the coordinate labels, and the
-       browser paints its own grey box over the square under a thumb before the move it is
-       asking for has even been played. */
-    touch-action: manipulation;
+    /* A board is a thing you press and hold. Without these a double tap zooms the page
+       instead of playing two moves, a drag across the board selects the coordinate labels,
+       a press that rests anywhere raises the system's own text-selection handles over the
+       square being looked at, and the browser paints a grey box over that square before the
+       move it is asking for has even been played.
+
+       `none` and not `manipulation`, which is what this said while a tap was the whole of
+       what a finger could do here. Placing a wall is now a press that holds, slides and
+       lifts — and a browser watching a slide begin on an element it is allowed to scroll
+       takes the gesture away and cancels the press, which is precisely the gesture. The
+       cost is that a scroll cannot be started on the board itself; the phone layout is
+       built so that in portrait there is little to scroll, and everything around the
+       board still scrolls the page. */
+    touch-action: none;
     -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+
+    /* Nothing on this board is a target except the targets. The board itself now handles
+       the press and the release — which is what lets a press that began on one square be
+       played on the one it was slid to — and a board that could be the thing pressed would
+       play the last aim for a press on its tray, its coordinate labels or the dead corner
+       of a smaller game. The squares and grooves put it back with `pointer-events: all`,
+       and what they catch still bubbles up to here. */
+    pointer-events: none;
 }
 
 /* ================================================================ players ==== */
@@ -293,7 +364,33 @@ body {
 .turn.p0 { background: var(--p0); }
 .turn.p1 { background: var(--p1); }
 
+/* The name and, when there is one, the clock: one line, one at each end of it. The two
+   answer the same question between them — who this seat is and how they are doing for
+   time — and a clock on a line of its own reads as a third thing in the panel rather than
+   as part of the seat it belongs to. */
+.player .line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+
 .name { font-family: Georgia, "Times New Roman", serif; font-size: 18px; }
+
+/* Tabular figures, because a clock that shifts sideways as its digits change is a clock
+   that catches the eye ten times a second for no reason. Muted like the seat it sits in,
+   and only the player on move has a clock that is actually running — which is the whole
+   of why the row it is in brightens. */
+.clock {
+    font-family: ui-monospace, Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.player.on-move .clock { color: var(--text); }
+
+/* A fallen flag is the one thing here that is not a matter of degree, so it is said in the
+   seat's own colour rather than by fading something. The seat is on the element because
+   the panel draws player 1 first and a positional rule would have named the wrong one. */
+.clock.flagged.p0 { color: var(--p0); }
+.clock.flagged.p1 { color: var(--p1); }
 
 /* Wraps rather than widening its column: a game can start with twenty walls, and
    pickups can push a player past that. */
@@ -547,11 +644,22 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
 .overlay {
     position: fixed;
     inset: 0;
+
+    /* Over everything, and said rather than left to the order things happen to be written
+       in: the strip of controls along the bottom of a phone is positioned too, and a
+       positioned element that raises itself above the flow raises itself above a dialog as
+       well unless the dialog has an answer. */
+    z-index: 20;
     background: var(--overlay);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+
+    /* The sheet itself covers the whole window, bars and all — that is what makes it read
+       as a sheet over the app rather than a panel inside it — and the card on it is held
+       clear of the same edges the page is. */
+    padding: calc(24px + var(--edge-top)) calc(24px + var(--edge-right))
+             calc(24px + var(--edge-bottom)) calc(24px + var(--edge-left));
 
     /* A tall card on a short screen has to scroll on its own, and the scroll must
        stop here: without this, reaching the end of the card hands the gesture to the
@@ -1092,12 +1200,11 @@ input.slider::-moz-range-thumb {
 
 @keyframes detour-draw { to { stroke-dashoffset: 0; } }
 
-/* Said out loud rather than pretended universal: a touch screen has no hover, so there is
-   no pointing at a groove to answer and the sentence in the panel is the whole of what a
-   phone gets. Drawing it on a tap would flash a route away under the thumb that asked. */
-@media (hover: none) {
-    .board .detour { display: none; }
-}
+/* This used to be hidden on a touch screen, on the grounds that there was no pointing at a
+   groove to answer: a tap was the whole gesture, so the route would have flashed up and
+   away under the thumb that asked for it. A press that holds is a pointing, and the route
+   around a proposed wall is the clearest thing on this board for saying what one costs —
+   so it is drawn on a phone now, for exactly as long as the thumb stays down. */
 
 /* The piece itself, and the ring that says it is on move. The ring is drawn for both
    and revealed for one, so nothing is added or removed as the turn changes.
@@ -1145,8 +1252,14 @@ input.slider::-moz-range-thumb {
 
 /* `fill: none` rather than a transparent fill: a transparent fill is still a fill,
    and the browser paints all hundred and thirty of these on every frame for nothing.
-   `pointer-events: all` keeps them catching the mouse without being drawn at all. */
-.board .hit { fill: none; pointer-events: all; cursor: pointer; }
+   `pointer-events: all` keeps them catching the pointer without being drawn at all.
+
+   And they are the only things on this board that catch it — see the rule below the board
+   itself. The press and the release are handled on the board as a whole, and without that
+   rule a press on the tray around the squares would arrive at the same handler and play
+   whatever the pointer had last been over. Bubbling is not affected by pointer-events, so
+   what these catch still reaches the board; nothing else does. */
+.board .hit { fill: none; pointer-events: all; cursor: pointer; touch-action: none; }
 
 /* ================================================================= carved ====
 
@@ -1568,9 +1681,13 @@ input.slider::-moz-range-thumb {
 
 /* ================================================================ narrow ====
 
-   Below the wide layout the board comes first and everything else stacks under
-   it. On a phone there is no hover at all, which is why the confirm step exists
-   and turns itself on there. */
+   Below the wide layout the board comes first and everything else stacks under it.
+
+   On a phone the same elements are rearranged again rather than replaced: the board, then
+   what the board has to say about itself, then the seats, then the game so far — and the
+   controls a player reaches for while a game is on move to the bottom edge, where a hand
+   holding a phone already is. Nothing here is a second set of components and nothing is
+   hidden; every rule below moves something that is already on the page. */
 
 @media (max-width: 1080px) {
     .layout { grid-template-columns: 1fr; gap: 18px; }
@@ -1591,6 +1708,10 @@ input.slider::-moz-range-thumb {
 }
 
 @media (max-width: 640px) {
+    /* The strip along the bottom holds the window's own edge open now, so the page must
+       not hold it open a second time. */
+    .app { padding-bottom: 0; }
+
     .bar {
         grid-template-columns: 1fr;
         justify-items: center;
@@ -1601,13 +1722,35 @@ input.slider::-moz-range-thumb {
     .bar .actions { justify-self: center; justify-content: center; }
     .brand { font-size: 21px; }
 
-    .layout { padding: 6px 14px 20px; gap: 14px; }
+    /* Room at the foot for the strip of controls that is now fixed there, plus whatever
+       the phone itself keeps below that. Without it the last row of the move list sits
+       under the buttons and cannot be read. */
+    .layout {
+        padding: 6px 14px calc(var(--tools) + var(--edge-bottom) + 10px);
+        gap: 14px;
+    }
+
     .board { max-width: 100%; }
 
-    /* Order: the board, then who is on move, then the rest. */
+    /* The panel stops being a box and becomes its own contents. It is one column beside
+       the board on a desktop and there is nothing to be beside here, so what was a panel
+       is four separate things with four separate places to be — and `display: contents`
+       is what lets them take those places without the markup knowing it happened.
+
+       Order: the board; what is being said about it, which belongs under it and not four
+       screens down; then the seats and the race; then the game so far. The tools are
+       fixed to the bottom edge and are out of this ordering entirely. */
     .board-wrap { order: 1; }
-    .players { order: 2; gap: 0 14px; }
-    .panel { order: 3; }
+    .panel { display: contents; }
+    .panel > .heading, .status, .hint, .engine { order: 2; }
+    .players { order: 3; gap: 0 14px; }
+    .panel > hr, .panel > h2, .moves { order: 4; }
+
+    /* The heading is "Status" and a question mark, and the sentence under it says the same
+       thing in words. On a screen this size the word is a line of furniture; the mark it
+       carries is not, so the row stays and only the word goes. */
+    .panel > .heading > h2 { display: none; }
+    .panel > .heading { justify-content: flex-end; margin-bottom: -14px; }
 
     /* The figure is about the board, so on a phone it goes directly under the board and
        the two seats follow it. `order` on the one child that moves rather than reversing
@@ -1615,8 +1758,59 @@ input.slider::-moz-range-thumb {
        figure is being relocated. */
     .tape { order: -1; padding: 6px 0 4px; }
 
+    /* ------------------------------------------------------------ within reach ----
+
+       Undo, the three review controls and Restart, moved from the foot of a column on the
+       right — which on a phone is the very bottom of a scrolling page, further from a
+       thumb than anything else on it — to the one place a hand holding a phone is already
+       touching. They are the same five buttons in the same order; only where they are
+       drawn has changed, which is why this is nine rules and not a second layout.
+
+       Fixed rather than sticky: they must be there while the move list is being scrolled
+       and while the board is being played, not only when the page happens to be at the
+       bottom. */
+    .tools {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 5;
+
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+
+        background: var(--surface);
+        border-top: 1px solid var(--line);
+
+        /* The bar's ink runs to the true bottom of the window and its buttons stop above
+           whatever the phone keeps down there. */
+        padding: 7px calc(14px + var(--edge-right)) calc(7px + var(--edge-bottom))
+                 calc(14px + var(--edge-left));
+    }
+
+    /* The rule between the two groups was the panel saying "and now something else". Side
+       by side on one bar they are already two groups, and a vertical hairline between five
+       buttons is a line to read past. */
+    .tools hr { display: none; }
+
+    /* Five buttons across the narrowest phone anybody still has. They keep their full
+       forty-four pixels of height — which is the dimension a thumb actually misses in —
+       and give up the horizontal padding, which it does not; and the row does not wrap,
+       because a strip that is one line tall on most phones and two on some is a strip
+       whose buttons are in a different place depending on the phone. */
+    .tools .actions { margin: 0; flex-wrap: nowrap; }
+    .tools button.ghost { padding: 11px 12px; }
+    .tools .actions.review button { padding: 6px 11px; }
+
+    /* The three review controls are one control and are grouped tight; Undo and Restart
+       are two separate decisions and are not. */
+    .tools .actions.review { gap: 4px; }
+
     .player { padding: 10px 0; }
     .name { font-size: 16px; }
+    .clock { font-size: 14px; }
     .walls i { width: 4px; height: 13px; }
 
     .moves { height: 96px; }
@@ -1650,4 +1844,81 @@ input.slider::-moz-range-thumb {
 
     /* The label has lost its column, so there is nothing left to indent past. */
     .setup .fine.why { padding-left: 0; }
+}
+
+/* ============================================================== turned over ====
+
+   A phone on its side, which until now this stylesheet had no rule for at all — so a
+   turned phone got the portrait layout, a board as tall as the whole window and every
+   other thing on the page somewhere below the bottom of it.
+
+   Keyed on the height rather than on the orientation. What is actually wrong with a phone
+   in landscape is that there are four hundred pixels from top to bottom and a square board
+   wants all of them; a short desktop window has the same problem and gets the same answer,
+   and a tall narrow window that happens to report "landscape" does not have it and does
+   not get it. The width floor keeps this off a portrait phone whose keyboard has taken
+   half the window.
+
+   The answer is the wide layout again, compressed: the board takes the height it can have
+   and everything else goes beside it in one column. Which is also why the controls come
+   off the bottom edge here — laid across the foot of a landscape screen they would be a
+   bar sixty pixels tall eating a seventh of the board's height, and at the foot of the
+   column beside it they are under the same thumb anyway. */
+
+@media (max-height: 560px) and (min-width: 620px) {
+    .bar {
+        grid-template-columns: auto 1fr auto;
+        justify-items: stretch;
+        gap: 12px;
+        padding: 6px 14px 2px;
+    }
+
+    .bar .actions { justify-self: end; justify-content: flex-end; }
+    .brand { font-size: 18px; }
+
+    /* The page holds its own bottom edge open again, because nothing is fixed to it here. */
+    .app { padding-bottom: var(--edge-bottom); }
+
+    /* Two columns and two rows: the board down the left of both, the seats above the
+       game so far on the right. The board is the item that must not be squeezed, so the
+       second column is the one with the fixed range. */
+    .layout {
+        grid-template-columns: minmax(0, 1fr) minmax(210px, 300px);
+        grid-template-rows: auto minmax(0, 1fr);
+        align-items: start;
+        gap: 10px 16px;
+        padding: 2px 14px 8px;
+    }
+
+    .board-wrap { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+
+    /* Undone: the panel is a column again, in the place a column goes. */
+    .panel { display: block; grid-column: 2; grid-row: 2; min-height: 0; }
+    .players { grid-column: 2; grid-row: 1; flex-direction: row; gap: 0 16px; }
+
+    /* The board is bounded by the window's height here and not by its width, which is the
+       whole difference between this layout and the one above it. */
+    .board { max-width: min(86vh, 100%); }
+
+    .panel > .heading > h2 { display: block; }
+    .panel > .heading { justify-content: space-between; margin-bottom: 0; }
+
+    .player { padding: 6px 0; }
+    .player + .player { border-top: none; }
+    .tape { padding: 4px 0 0; }
+    .status { font-size: 17px; }
+    .moves { height: 88px; }
+    .panel hr { margin: 10px 0 8px; }
+
+    /* Back into the flow at the foot of its own column. */
+    .tools {
+        position: static;
+        display: block;
+        background: none;
+        border-top: none;
+        padding: 0;
+    }
+
+    .tools hr { display: block; }
+    .tools .actions { margin: 6px 0 0; }
 }

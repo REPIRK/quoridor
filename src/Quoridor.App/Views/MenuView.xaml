@@ -368,7 +368,7 @@
                         </StackPanel>
 
                         <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource Text.Section}"
-                                   Text="Routes" VerticalAlignment="Center" Margin="0,14,0,0" />
+                                   Text="Reading" VerticalAlignment="Center" Margin="0,14,0,0" />
                         <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,14,0,0">
                             <RadioButton x:Name="RoutesHiddenOption" GroupName="SetRoutes"
                                          Style="{StaticResource Button.Segment}" Content="On request" />
@@ -536,8 +536,20 @@
                                Text="Hover a groove, then click         place a wall" />
                     <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
                                Text="Right-click / wheel / R            flip the wall" />
+
+                    <!-- The board can be played without the mouse at all. Said here rather
+                         than left to be discovered, because a shortcut nobody is told about
+                         is a shortcut nobody uses. -->
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
+                               Text="Arrow keys                         aim, in screen directions" />
                     <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
-                               Text="Ctrl+Z  undo      F2  restart      Esc  menu" />
+                               Text="Enter                              play what you are aiming at" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
+                               Text="W  into the grooves    R  turn     Home  back to your pawn" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
+                               Text="Space  read the position           Ctrl+&#x2190; &#x2192;  step through the game" />
+                    <TextBlock Style="{StaticResource Text.Mono}" Margin="0,6,0,0"
+                               Text="Ctrl+Z  undo      F2  restart      Esc  back" />
 
                     <Button x:Name="CloseRulesButton"
                             Style="{StaticResource Button.Ghost}"

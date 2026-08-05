@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Everything a game needs that is not a screen: the position and its history, the
+       clocks, the engine seats, the preferences and the peer-to-peer link. It lived in
+       the WPF project, which meant a phone could not have it — not for any reason in the
+       code, which is plain C#, but because of the folder it sat in. -->
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Quoridor.Session</AssemblyName>
+    <RootNamespace>Quoridor.Session</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Quoridor.Core\Quoridor.Core.csproj" />
+    <ProjectReference Include="..\Quoridor.Engine\Quoridor.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

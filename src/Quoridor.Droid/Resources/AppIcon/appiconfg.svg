@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+
+<!-- The one move that is only ever Quoridor: a wall set down across the square a pawn was
+     about to walk into. Three tiles by three rather than nine by nine, because a launcher
+     draws this at the size of a fingernail and eighty-one squares at that size are a grey
+     rectangle. The colours are the stylesheet's own, not new ones: the tile tone, the
+     first player's teal and the second's orange, so the icon and the board agree.
+
+     Everything is kept inside the middle two thirds of the canvas, which is all a round,
+     a squircle or a squared-off launcher mask is guaranteed to leave showing. -->
+
+<svg width="456" height="456" viewBox="0 0 456 456" version="1.1" xmlns="http://www.w3.org/2000/svg">
+
+    <!-- Nine tiles: 76 across, 12 apart, so the gaps between them are the field showing
+         through and the grid needs no lines drawn for it. -->
+    <g fill="#2a2823">
+        <rect x="102" y="102" width="76" height="76" rx="9" />
+        <rect x="190" y="102" width="76" height="76" rx="9" />
+        <rect x="278" y="102" width="76" height="76" rx="9" />
+        <rect x="102" y="190" width="76" height="76" rx="9" />
+        <rect x="190" y="190" width="76" height="76" rx="9" />
+        <rect x="278" y="190" width="76" height="76" rx="9" />
+        <rect x="102" y="278" width="76" height="76" rx="9" />
+        <rect x="190" y="278" width="76" height="76" rx="9" />
+        <rect x="278" y="278" width="76" height="76" rx="9" />
+    </g>
+
+    <!-- The pawn, on the middle square. -->
+    <circle cx="228" cy="228" r="27" fill="#6baaa6" />
+
+    <!-- The wall, in the groove to its right and two squares long: the pawn's way
+         forward, closed. -->
+    <rect x="267" y="102" width="10" height="164" rx="5" fill="#d96c4a" />
+
+</svg>

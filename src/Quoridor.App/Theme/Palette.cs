@@ -34,6 +34,19 @@ public static class Palette
     public const string Overlay = "Brush.Overlay";
 
     /// <summary>
+    /// The darkest tone the board has: what you see where a square has been taken out of
+    /// play, and what the pawns cast onto it. A square out of play is a darker square,
+    /// not an outlined one — an outline reads as a selection, an absence reads as a hole.
+    /// </summary>
+    public const string Pit = "Brush.Pit";
+
+    /// <summary>
+    /// The seam between the two players' reaches. Deliberately neither player's ink: the
+    /// line is not a piece belonging to a side, it is the shape the two sides make.
+    /// </summary>
+    public const string Front = "Brush.Front";
+
+    /// <summary>
     /// Ink on paper. The light theme is a warm bone sheet with printer's ink; the dark
     /// theme is the same ink well with the paper taken away, so the greys stay warm
     /// rather than sliding into the blue-black that every dark UI defaults to.
@@ -55,6 +68,8 @@ public static class Palette
         [Wall] = (Rgb(0xE6, 0xDF, 0xD1), Rgb(0x2A, 0x26, 0x22)),
         [Danger] = (Rgb(0xD9, 0x55, 0x3A), Rgb(0x8E, 0x2B, 0x18)),
         [Overlay] = (Argb(0xE8, 0x17, 0x17, 0x14), Argb(0xE8, 0xE8, 0xE3, 0xD8)),
+        [Pit] = (Rgb(0x0A, 0x09, 0x08), Rgb(0x8B, 0x81, 0x70)),
+        [Front] = (Rgb(0xB8, 0xAB, 0x90), Rgb(0x6F, 0x65, 0x52)),
     };
 
     private static readonly Dictionary<string, SolidColorBrush> Brushes = new();
@@ -100,6 +115,41 @@ public static class Palette
     }
 
     public static SolidColorBrush BrushOf(string key) => Brushes[key];
+
+    /// <summary>
+    /// One colour laid over another by <paramref name="amount"/> (0 to 1), mixed in
+    /// linear light rather than in the encoded values.
+    ///
+    /// sRGB is not linear, so the average of two sRGB numbers is darker than the average
+    /// of the two lights they stand for — the classic dip in the middle of a gradient.
+    /// The board mixes a tile toward a player's ink to say whose reach that square is in,
+    /// and a mix that lost brightness on the way would read as a shadow falling across
+    /// the board rather than as a stain in it.
+    /// </summary>
+    public static Color Mix(Color under, Color over, double amount)
+    {
+        double t = Math.Clamp(amount, 0, 1);
+
+        return Color.FromRgb(
+            Channel(under.R, over.R),
+            Channel(under.G, over.G),
+            Channel(under.B, over.B));
+
+        byte Channel(byte a, byte b) => ToSrgb(ToLinear(a) + (ToLinear(b) - ToLinear(a)) * t);
+
+        static double ToLinear(byte value)
+        {
+            double c = value / 255.0;
+            return c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+        }
+
+        static byte ToSrgb(double linear)
+        {
+            double c = Math.Clamp(linear, 0, 1);
+            double encoded = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.Pow(c, 1 / 2.4) - 0.055;
+            return (byte)Math.Round(encoded * 255);
+        }
+    }
 
     public static void Apply(AppTheme theme, bool animate = true)
     {

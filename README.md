@@ -21,9 +21,16 @@ a player without a route.
 
 The desktop build has local play, three engine strengths, a chess clock, a mode where
 two engines play each other, review of the game so far, play over your own network, and
-a light and a dark theme. The browser build is smaller, but it is the one you can share:
-play the engine, play a friend on the same screen, or **send someone a link and play
-them online**. It works on a phone, and it keeps premoves and a move list.
+a light and a dark theme. The browser build has all of those but the network game, which
+it trades for one anybody can join: play the engine, play a friend on the same screen, or
+**send someone a link and play them online**. It works on a phone, and it keeps premoves
+and a move list.
+
+What the browser cannot have is the thread. WebAssembly hands the search the only one
+there is, so the engine's budget is also how long the page stops answering — the browser
+offers up to 0.6 s a move where the desktop offers up to 3 s, and it never sets the
+engine thinking while you are deciding. That limit is the host's and not the screen's:
+the same components draw both builds, and each host declares what it can spare.
 
 Either build lets you choose which side you take — before the game and again on a
 rematch. Setting a game up asks one question first:
