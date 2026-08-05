@@ -24,8 +24,10 @@
     </div>
 
     <!-- Only needed to introduce two browsers to each other; once they are talking,
-         moves go directly between them over WebRTC. -->
-    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+         moves go directly between them over WebRTC. Served from here rather than from a
+         CDN: everything else this page loads comes from this origin, and a game against
+         the engine should not depend on someone else's host being up. -->
+    <script src="js/peerjs.min.js"></script>
     <script src="_framework/blazor.webassembly.js"></script>
 </body>
 
