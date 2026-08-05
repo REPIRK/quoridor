@@ -42,7 +42,7 @@ public sealed class WebSession
         // WebAssembly runs the search on the only thread there is, so the budget is
         // also how long the page stops answering. Kept short on purpose.
         _bot = mode == WebMode.VersusBot
-            ? AgentFactory.Create(strength, TimeSpan.FromMilliseconds(FastBudgetMs))
+            ? AgentFactory.Create(strength, TimeSpan.FromMilliseconds(600))
             : null;
 
         BuiltBoard built = Setup.Build();
@@ -195,82 +195,13 @@ public sealed class WebSession
         return true;
     }
 
-    // ================================================================== budget ==
-
     /// <summary>
-    /// What the engine gets when the game is moving quickly, and what it has always
-    /// had. On this build the budget is also how long the page stops answering, so it
-    /// is the number the rest of the play loop is built around.
+    /// Runs the engine. There is no thread to move this off, so the caller has to let
+    /// the browser paint before calling it.
     /// </summary>
-    public const int FastBudgetMs = 600;
-
-    /// <summary>
-    /// The most the engine may ever be given. The desktop can think while the player
-    /// does; here there is one thread, so a longer search is a longer freeze and the
-    /// ceiling is chosen for the freeze rather than for the strength: 900 ms more than
-    /// usual, once, is a pause a person can place as the opponent thinking. Anything
-    /// approaching two seconds reads as the page having stopped.
-    /// </summary>
-    public const int SlowestBudgetMs = 1500;
-
-    /// <summary>
-    /// How long the player is allowed to take before any of it comes back at them. Under
-    /// this they are playing quickly, and a freeze that grows while the game is rattling
-    /// along is felt as the page misbehaving rather than as an opponent thinking. It also
-    /// makes a premove free: one is entered before the position exists, so it arrives with
-    /// nothing on the clock and is answered at the usual speed.
-    ///
-    /// The first step the player can actually see is later than this, because the budget
-    /// is rounded to a tenth of a second afterwards: it takes 3.1 s of thought to round up
-    /// to 700 ms. Under that the answer is the usual 600 to the millisecond.
-    /// </summary>
-    private const int BriskMs = 2500;
-
-    /// <summary>
-    /// How much of the player's thinking the engine is given: one millisecond in twelve.
-    /// Together with the ceiling and the rounding, the budget reaches its longest at
-    /// 12.7 s of human thought, which is a genuinely long think.
-    /// </summary>
-    private const int Share = 12;
-
-    /// <summary>
-    /// How long the engine gets for its next move, given how long the player spent on
-    /// theirs. Fast play is answered at exactly the speed it always was; a long think
-    /// earns the engine a longer one, bounded so the page is never frozen for much more
-    /// than a second.
-    ///
-    /// Rounded to a tenth of a second on purpose. A budget that lands on 1237 ms and then
-    /// on 1244 ms wanders, and a wait that wanders reads as jitter; one that steps reads
-    /// as a decision.
-    /// </summary>
-    public int BudgetFor(int humanMs)
-    {
-        // Easy and Normal answer from a heuristic in about a millisecond, so there is
-        // nothing for a longer budget to be spent on and nothing to explain to the player.
-        if (_bot is not SearchAgent) return FastBudgetMs;
-
-        if (humanMs <= BriskMs) return FastBudgetMs;
-
-        int budget = FastBudgetMs + ((humanMs - BriskMs) / Share);
-        budget = Math.Clamp(budget, FastBudgetMs, SlowestBudgetMs);
-
-        return (budget + 50) / 100 * 100;
-    }
-
-    /// <summary>
-    /// Runs the engine for at most <paramref name="budgetMs"/>. There is no thread to move
-    /// this off, so the caller has to let the browser paint before calling it — and has to
-    /// have decided by then how long the page is going to be gone for.
-    /// </summary>
-    public Move Think(int budgetMs)
+    public Move Think()
     {
         IQuoridorAgent bot = _bot ?? throw new InvalidOperationException("No engine in this game.");
-
-        // The property is the one a chess clock uses on the desktop, and it means the same
-        // thing here. Clamped rather than trusted: this is the only place that decides how
-        // long the page may stop answering for, so it is the place to be sure of it.
-        if (bot is SearchAgent engine)
-            engine.MoveTime = TimeSpan.FromMilliseconds(Math.Clamp(budgetMs, FastBudgetMs, SlowestBudgetMs));
 
         var history = new ulong[_positions.Count];
         for (int i = 0; i < _positions.Count; i++) history[i] = _positions[i].Hash;
