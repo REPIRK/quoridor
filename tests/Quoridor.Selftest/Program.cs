@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Quoridor.Core;
 using Quoridor.Engine;
 
@@ -37,6 +38,7 @@ internal static class Program
         Run("the wall-less race verdict matches exact play", RaceVerdict);
         Run("what a portal board would ask of the race verdict", PortalRaceVerdict);
         Run("search engine respects its budget and outplays the heuristic", SearchAgentStrength);
+        Run("a ponder leaves no mark on the game it is played in", PonderLeavesNothingBehind);
         Run("path finding throughput", PathThroughput);
 
         Console.WriteLine();
@@ -1359,6 +1361,102 @@ internal static class Program
         Check(worstMove < 700, "no move overran the 250 ms budget by more than a safety margin");
         Check(searchWins >= games - 1, "the engine beats the one-ply agent nearly every game");
         Check(deepest >= 6, "iterative deepening reaches a serious depth inside the budget");
+    }
+
+    /// <summary>
+    /// Pondering has one hard rule and one soft one, and this is the regression test for
+    /// both. The hard rule is that two searches never share a <see cref="SearchEngine"/>:
+    /// an engine keeps its move stack, killers, history and stop flag in instance fields,
+    /// so two searches in one is corruption, and this project has shipped that bug once
+    /// already. The soft one is that nothing a ponder computes may reach the board.
+    ///
+    /// Neither is provable by inspection now that the ponder guesses which position to
+    /// search, because it guesses wrong about half the time and a wrong guess fills the
+    /// shared table with analysis of a game that never happened. So: play a real game
+    /// with the engine pondering every time the opponent is on move, hammer the ponder
+    /// from a second thread at the same moment so the gate is actually contended, and
+    /// insist that every move is legal, that the game ends, and that the ponder left no
+    /// mark on anything the next real search reads.
+    /// </summary>
+    private static void PonderLeavesNothingBehind()
+    {
+        var engine = new SearchAgent(
+            maxDepth: 32, moveTime: TimeSpan.FromMilliseconds(200), threads: 1,
+            tableMegabytes: 32, ponder: true);
+
+        Check(engine.CanPonder, "an agent built with a ponder engine says so");
+        Check(!new SearchAgent(maxDepth: 4).CanPonder, "and one built without it says so too");
+
+        var opponent = new HeuristicAgent(BotStrength.Normal, seed: 41);
+        GameState state = GameState.CreateInitial();
+        var history = new List<ulong>();
+
+        int ponders = 0;
+        int ply = 0;
+
+        // What the engine's own last search left behind. Everything between two engine
+        // moves is ponder, so these two must read back unchanged when its turn comes
+        // round again — that is the whole of "nothing a ponder computes reaches the board"
+        // in the two places a result could leak into the next search.
+        SearchResult fromLastSearch = default;
+        TimeSpan clockOfLastSearch = engine.MoveTime;
+
+        for (; ply < 300 && !state.IsGameOver; ply++)
+        {
+            if (state.SideToMove == 1)
+            {
+                // Exactly what the desktop does while a human decides, except that a
+                // second thread races it. Only one of the two may get past the gate; if
+                // both did they would be driving the same engine and the moves that
+                // follow would stop making sense.
+                ulong[] snapshot = history.ToArray();
+                GameState pondered = state;
+
+                using var stop = new CancellationTokenSource(80);
+                CancellationToken token = stop.Token;
+
+                Task rival = Task.Run(() => engine.Ponder(pondered, snapshot, token));
+                engine.Ponder(pondered, snapshot, token);
+                rival.Wait();
+
+                ponders++;
+            }
+
+            IQuoridorAgent agent = state.SideToMove == 0 ? engine : opponent;
+            agent.SetGameHistory(CollectionsMarshal.AsSpan(history));
+
+            if (agent == engine)
+            {
+                // Read after the ponders and before the search, so a ponder that wrote to
+                // either of them is caught on the very next ply and not at the end.
+                Check(engine.LastResult == fromLastSearch,
+                      $"ply {ply}: the ponders left LastResult exactly as the last real search set it");
+                Check(engine.MoveTime == clockOfLastSearch,
+                      $"ply {ply}: and left the budget the next search will be given alone");
+            }
+
+            Move move = agent.ChooseMove(state);
+
+            if (!state.IsLegal(move))
+            {
+                Check(false, $"ply {ply}: a pondering engine offered illegal {move}");
+                return;
+            }
+
+            if (agent == engine)
+            {
+                fromLastSearch = engine.LastResult;
+                clockOfLastSearch = engine.MoveTime;
+            }
+
+            history.Add(state.Hash);
+            state.Apply(move);
+        }
+
+        Console.WriteLine($"      {ply} plies, {ponders} contended ponders, winner player {state.Winner}");
+
+        Check(state.IsGameOver, "a game played against a pondering engine reaches a result");
+        Check(ponders > 5, "and the engine really did ponder along the way");
     }
 
     private static void PathThroughput()

@@ -14,9 +14,10 @@ namespace Quoridor.Bench;
 ///
 /// And a fourth, since the engine learned to search while the opponent is deciding:
 /// is that worth anything. <c>ponder</c> asks whether the work survives at all,
-/// <c>ponderhit</c> asks how much of it lands where the game actually goes and how often
-/// the opponent plays the move the engine expected, and <c>ponderduel</c> asks the only
-/// question that settles it, which is whether it wins games.
+/// <c>ponderhit</c> asks which of the two positions a ponder could root on is worth more
+/// and how often the opponent plays the move the engine expected, <c>pondermiss</c> asks
+/// whether guessing wrong can make the engine play worse, and <c>ponderduel</c> asks the
+/// only question that settles it, which is whether it wins games.
 /// </summary>
 internal static class Program
 {
@@ -44,6 +45,7 @@ internal static class Program
         if (mode is "smpduel") ThreadDuel();
         if (mode is "ponder") PonderMechanism(args);
         if (mode is "ponderhit") PonderPrediction(args);
+        if (mode is "pondermiss") PonderMiss(args);
         if (mode is "ponderduel") PonderDuel(args);
 
         return 0;
@@ -99,10 +101,12 @@ internal static class Program
             $"Ponder mechanism: real search {real.TotalMilliseconds:F0} ms, single thread, " +
             $"{TableMegabytes} MB table");
         Console.WriteLine();
-        Console.WriteLine("  \"parent\" is the position the design ponders — the one the opponent is");
-        Console.WriteLine("  deciding from. \"child\" ponders the position the real search will actually");
-        Console.WriteLine("  run on, which no design can arrange but which bounds what any of them can");
-        Console.WriteLine("  be worth: it is a prediction that is right every single time.");
+        Console.WriteLine("  \"parent\" is the position the opponent is deciding from, which is where the");
+        Console.WriteLine("  design used to ponder. \"child\" ponders the position the real search will");
+        Console.WriteLine("  actually run on, which no design can arrange but which bounds what any of");
+        Console.WriteLine("  them can be worth: it is a prediction that is right every single time. What");
+        Console.WriteLine("  ships now guesses at the child and lands on it about half the time, so it");
+        Console.WriteLine("  sits between these two rows — see ponderhit for where.");
         Console.WriteLine();
         Console.WriteLine("  position         ponder   root     to    real   nodes   move    score");
 
@@ -142,8 +146,8 @@ internal static class Program
             Console.WriteLine();
         }
 
-        Summarise("  pondering the parent, as designed", fromParent);
-        Summarise("  pondering the child, the ceiling ", fromChild);
+        Summarise("  pondering the parent, as it was ", fromParent);
+        Summarise("  pondering the child, the ceiling", fromChild);
         Console.WriteLine();
 
         static void Summarise(string label, List<int> gains)
@@ -211,44 +215,85 @@ internal static class Program
     }
 
     /// <summary>
-    /// The number that decides whether this design pondered the right position. It
-    /// ponders the opponent's own position, so there is no prediction to get wrong —
-    /// but the alternative, pondering the reply the engine expects, is only the better
-    /// bet if that reply is usually what gets played. So: after every engine move, ask
-    /// the table what it expects next, and see how often the opponent obliges.
+    /// The number that decides which position a ponder should run on. Three arms, from
+    /// the same positions on the same budgets, each measured against the same cold
+    /// baseline so the three are paired reply by reply:
     ///
-    /// Measured against a paired reading of what the ponder was actually worth at that
-    /// same position, so the two can be crossed: if the gain is concentrated on the
-    /// plies where the prediction was right, the prediction variant is worth revisiting,
-    /// and if it is spread evenly it is not.
+    ///   parent      — the position the opponent is deciding from. Nothing to get wrong,
+    ///                 but the first ply of the work goes on moves they will not make.
+    ///   prediction  — the position after the reply the engine expects, which is what
+    ///                 SearchAgent.Ponder does, fallback and all.
+    ///   ceiling     — the position the real search will actually run on. No design can
+    ///                 arrange it; it bounds what any of them can be worth.
+    ///
+    /// The prediction arm only wins if its OVERALL number beats the parent arm — hits and
+    /// misses pooled, in the proportion they actually occur. A better number on hits
+    /// alone proves nothing, because a hit is by construction the ceiling and the ceiling
+    /// was already known to be higher. What was not known is what a miss costs and how
+    /// often one happens, and those are what the pooled figure prices in.
+    ///
+    /// Reported paired as well as arm by arm. The three arms answer the same position, so
+    /// the difference between two of them on one reply is a far quieter number than
+    /// either arm's own spread, and the standard error on that difference is the thing
+    /// that says whether an edge is real or is this machine having a moment.
     ///
     /// A bench-local engine and table rather than a <see cref="SearchAgent"/>, because
     /// the agent owns its table privately and the whole measurement is a probe of it.
-    /// The calls are the same ones the agent makes.
+    /// The calls are the same ones the agent makes, including the prediction probe, which
+    /// is <see cref="SearchAgent.PredictedReply"/> written out: probe the table at the
+    /// position the opponent is deciding from, take the stored move, revalidate it. The
+    /// one divergence from production is that this table sees no ponder writes, since
+    /// every ponder here runs on a private table so the pairing stays clean — so a
+    /// prediction here always comes from the last real search, which is the conservative
+    /// reading and the one the 47% and 80% hit rates were measured under.
+    ///
+    ///   ponderhit [ponderMs] [games] [engine|heuristic] [measureEvery] [seed]
     /// </summary>
     private static void PonderPrediction(string[] args)
     {
         int ponderMs = args.Length > 1 ? int.Parse(args[1]) : 3000;
         int games = args.Length > 2 ? int.Parse(args[2]) : 6;
         bool strong = args.Length <= 3 || args[3] != "heuristic";
+
+        // The paired measurement below costs three ponders and four real searches, so by
+        // default it runs on every fourth reply rather than all of them. The prediction
+        // itself is a single probe and is taken on every one, which is why the two sample
+        // sizes printed at the end are different numbers.
+        int measureEvery = args.Length > 4 ? int.Parse(args[4]) : 4;
+
+        // Openings are seeded, so several runs pool into one sample instead of being one
+        // experiment repeated. Offsetting the seed is what makes the second run a second
+        // sample and not a re-reading of the first.
+        int seed = args.Length > 5 ? int.Parse(args[5]) : 0;
+
         var real = TimeSpan.FromMilliseconds(300);
 
         Console.WriteLine(
             $"Prediction and gain over {games} games, {ponderMs} ms ponder against a " +
-            $"{real.TotalMilliseconds:F0} ms search, opponent {(strong ? "engine" : "heuristic")}");
+            $"{real.TotalMilliseconds:F0} ms search, opponent {(strong ? "engine" : "heuristic")}, " +
+            $"every {measureEvery}th reply measured, seed {seed}");
 
         int predicted = 0, hits = 0, replies = 0;
-        var gainOnHit = new List<int>();
-        var gainOnMiss = new List<int>();
-        var nodesOnHit = new List<double>();
-        var nodesOnMiss = new List<double>();
-        var ceiling = new List<int>();
 
-        // The paired measurement below costs a ponder and two real searches, so it runs
-        // on every fourth reply rather than all of them. The prediction itself is a
-        // single probe and is taken on every one, which is why the two sample sizes
-        // printed at the end are different numbers.
-        const int measureEvery = 4;
+        // Every list below is indexed by sample: entry i of each is the same reply in the
+        // same game, which is what lets the arms be differenced rather than only averaged.
+        var parentGain = new List<int>();
+        var predictGain = new List<int>();
+        var ceilingGain = new List<int>();
+        var wasHit = new List<bool>();
+        var hadPrediction = new List<bool>();
+        var parentNodes = new List<double>();
+        var predictNodes = new List<double>();
+
+        // How often the real search's answer moved away from the cold one. Not a verdict
+        // on its own in either direction — a warmed table legitimately changes an answer,
+        // because an entry searched deeper than the current iteration is grafted in and
+        // that is the whole point of having a table. It is recorded because a miss column
+        // far above the hit column would be the first sign that a wrong ponder is doing
+        // something other than wasting time, and because it says how much of the depth
+        // gain below is depth the search actually used. Whether a changed answer is a
+        // worse answer is a separate question and <c>pondermiss</c> is where it is asked.
+        int movedOnHit = 0, movedOnMiss = 0, missSamples = 0;
 
         for (int game = 0; game < games; game++)
         {
@@ -266,10 +311,10 @@ internal static class Program
             // some hope of guessing, so this is the hit rate at its most flattering.
             var opponentTable = new TranspositionTable(64);
             var opponent = new SearchEngine(opponentTable);
-            IQuoridorAgent weak = new HeuristicAgent(BotStrength.Normal, seed: 7 + game);
+            IQuoridorAgent weak = new HeuristicAgent(BotStrength.Normal, seed: 7 + seed + game);
 
             int engineSeat = game % 2;
-            GameState state = RandomOpening(new Random(2000 + game), plies: 4);
+            GameState state = RandomOpening(new Random(2000 + seed + game), plies: 4);
             var history = new List<ulong>();
 
             for (int ply = 0; ply < 300 && !state.IsGameOver; ply++)
@@ -297,7 +342,7 @@ internal static class Program
                 Move expected = default;
 
                 if (table.TryGet(state.Hash, out TableEntry entry) && entry.HasMove
-                    && state.IsLegal(entry.Move))
+                    && MoveCandidates.IsLegal(state, entry.Move))
                 {
                     expected = entry.Move;
                 }
@@ -330,33 +375,77 @@ internal static class Program
 
                 if (replies++ % measureEvery == 0)
                 {
-                    // What the ponder was worth right here, measured in pairs: the same
-                    // real search from the same position, once warmed by a ponder on the
-                    // position the opponent was deciding from and once stone cold.
+                    // What each variant was worth right here, measured in pairs: the same
+                    // real search from the same position, once for each place a ponder
+                    // could have spent the opponent's time, and once stone cold.
                     GameState after = state;
                     after.Apply(actual);
 
                     var extended = new List<ulong>(history) { state.Hash };
                     ulong[] childHistory = extended.ToArray();
+                    ulong[] parentHistory = history.ToArray();
 
-                    (int cold, long coldNodes, _, _) =
+                    (int cold, long coldNodes, Move coldMove, _) =
                         Answer(after, childHistory, real, default, null, 0);
-                    (int warm, long warmNodes, _, _) =
-                        Answer(after, childHistory, real, state, history.ToArray(), ponderMs);
 
-                    // And the ceiling, on the very same position: a ponder that spent
-                    // the whole of the human's time on the position the human was about
-                    // to create. No design can arrange that, which is the point — it is
-                    // the most any amount of pondering could possibly be worth here.
+                    // Arm one, as shipped: the position the opponent is deciding from,
+                    // with the real game's history, every index of it exact.
+                    (int warm, long warmNodes, _, _) =
+                        Answer(after, childHistory, real, state, parentHistory, ponderMs);
+
+                    // Arm two: SearchAgent.Ponder written
+                    // out rather than called, because the agent's ponder returns nothing
+                    // and its table is private. Same three decisions it makes — root on
+                    // the predicted position, extend the history by the parent so every
+                    // index below the root stays exact, and fall back to the parent when
+                    // there is no prediction or when the predicted move ends the game.
+                    GameState predictRoot = state;
+                    ulong[] predictHistory = parentHistory;
+
+                    if (expected != default)
+                    {
+                        GameState guessed = state;
+                        guessed.Apply(expected);
+
+                        if (!guessed.IsGameOver)
+                        {
+                            predictRoot = guessed;
+
+                            // The real game up to and including the position the opponent
+                            // is deciding from, which is the same array the real search
+                            // gets — the two arms only ever differ in where they are
+                            // rooted, never in which positions they believe happened.
+                            predictHistory = childHistory;
+                        }
+                    }
+
+                    (int guess, long guessNodes, Move guessMove, _) =
+                        Answer(after, childHistory, real, predictRoot, predictHistory, ponderMs);
+
+                    // Arm three, the ceiling, on the very same position: a ponder that
+                    // spent the whole of the human's time on the position the human was
+                    // about to create. No design can arrange that, which is the point —
+                    // it is the most any amount of pondering could possibly be worth here.
+                    // On a hit, arm two is this arm, and the two printing the same number
+                    // on the hit rows is the check that the harness is honest.
                     (int perfect, _, _, _) =
                         Answer(after, childHistory, real, after, childHistory, ponderMs);
 
-                    ceiling.Add(perfect - cold);
+                    parentGain.Add(warm - cold);
+                    predictGain.Add(guess - cold);
+                    ceilingGain.Add(perfect - cold);
+                    wasHit.Add(hit);
+                    hadPrediction.Add(expected != default);
+                    parentNodes.Add(coldNodes > 0 ? (double)warmNodes / coldNodes : 1);
+                    predictNodes.Add(coldNodes > 0 ? (double)guessNodes / coldNodes : 1);
 
-                    double ratio = coldNodes > 0 ? (double)warmNodes / coldNodes : 1;
+                    if (guessMove != coldMove)
+                    {
+                        if (hit) movedOnHit++;
+                        else movedOnMiss++;
+                    }
 
-                    if (hit) { gainOnHit.Add(warm - cold); nodesOnHit.Add(ratio); }
-                    else { gainOnMiss.Add(warm - cold); nodesOnMiss.Add(ratio); }
+                    if (!hit) missSamples++;
                 }
 
                 history.Add(state.Hash);
@@ -364,38 +453,361 @@ internal static class Program
             }
         }
 
+        Console.WriteLine();
         Console.WriteLine(
             $"  {replies} opponent replies over {games} games; the engine held an expected reply for " +
             $"{predicted} of them and the opponent played it {hits} times " +
-            $"({(predicted > 0 ? 100.0 * hits / predicted : 0):F0}%)");
+            $"({(predicted > 0 ? 100.0 * hits / predicted : 0):F0}% of the times it had one, " +
+            $"{(replies > 0 ? 100.0 * hits / replies : 0):F0}% of all replies)");
+        Console.WriteLine();
 
-        Report("  gain when the reply was predicted", gainOnHit, nodesOnHit);
-        Report("  gain when it was not             ", gainOnMiss, nodesOnMiss);
-        Report("  gain overall                     ", gainOnHit.Concat(gainOnMiss).ToList(),
-               nodesOnHit.Concat(nodesOnMiss).ToList());
+        int n = parentGain.Count;
+        int[] all = Enumerable.Range(0, n).ToArray();
+        int[] onHit = all.Where(i => wasHit[i]).ToArray();
+        int[] onMiss = all.Where(i => !wasHit[i]).ToArray();
+        int[] noPrediction = all.Where(i => !hadPrediction[i]).ToArray();
 
-        if (ceiling.Count > 0)
+        Console.WriteLine("  the three arms, same positions, same budgets");
+        Arm("  ponder nothing (the baseline)   ", all, _ => 0, null);
+        Arm("  ponder the parent, as shipped   ", all, i => parentGain[i], parentNodes);
+        Arm("  ponder the prediction, pooled   ", all, i => predictGain[i], predictNodes);
+        Arm("  ceiling, the right position     ", all, i => ceilingGain[i], null);
+        Console.WriteLine();
+
+        Console.WriteLine("  the prediction arm split by what the opponent then did");
+        Arm("    on a hit                      ", onHit, i => predictGain[i], predictNodes);
+        Arm("    on a miss                     ", onMiss, i => predictGain[i], predictNodes);
+        Arm("    of which, no prediction at all", noPrediction, i => predictGain[i], predictNodes);
+        Console.WriteLine();
+
+        Console.WriteLine("  the parent arm over the same split, so the two can be read against each other");
+        Arm("    on a hit                      ", onHit, i => parentGain[i], parentNodes);
+        Arm("    on a miss                     ", onMiss, i => parentGain[i], parentNodes);
+        Console.WriteLine();
+
+        // The number the decision rests on. Each sample answers the same position on the
+        // same budget, so differencing the two arms sample by sample cancels the position
+        // — and the position is far and away the largest source of spread in the columns
+        // above. A pooled mean with an error bar that straddles zero is not a win however
+        // good the hit rows look.
+        Console.WriteLine("  prediction minus parent, paired on the same reply");
+        Paired("    overall (this is the verdict) ", all);
+        Paired("    on a hit                      ", onHit);
+        Paired("    on a miss                     ", onMiss);
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"  the real search changed its answer from the cold one on {movedOnHit} of " +
+            $"{onHit.Length} hits and {movedOnMiss} of {missSamples} misses");
+
+        // On a hit the prediction arm and the ceiling arm are the same call twice — same
+        // root, same history, same budget — so the rows where they disagree are the
+        // harness measuring itself. That is the noise floor every number above sits on,
+        // and it is printed rather than assumed because a time-budgeted search is not
+        // reproducible and pretending otherwise is how a run of luck becomes a decision.
+        if (onHit.Length > 0)
         {
+            double[] echo = onHit.Select(i => (double)(predictGain[i] - ceilingGain[i])).ToArray();
+
             Console.WriteLine(
-                $"  ceiling, same positions           n={ceiling.Count,3}, depth {ceiling.Average():+0.00;-0.00;0.00} ply, " +
-                $"{ceiling.Count(g => g > 0)} deeper / {ceiling.Count(g => g < 0)} shallower");
+                $"  noise floor: on the {onHit.Length} hits the prediction arm and the ceiling arm are " +
+                $"the same search run twice; they agreed {echo.Count(d => d == 0)} times, " +
+                $"mean difference {echo.Average():+0.00;-0.00;0.00} ply");
         }
 
         Console.WriteLine();
 
-        static void Report(string label, List<int> gains, List<double> ratios)
+        void Arm(string label, int[] rows, Func<int, int> gain, List<double>? ratios)
         {
-            if (gains.Count == 0)
+            if (rows.Length == 0)
             {
                 Console.WriteLine($"{label} no samples");
                 return;
             }
 
+            double mean = rows.Average(i => (double)gain(i));
+            string nodes = ratios is null
+                ? new string(' ', 18)
+                : $"nodes {rows.Average(i => ratios[i]):P0} of cold";
+
             Console.WriteLine(
-                $"{label} n={gains.Count,3}, depth {gains.Average():+0.00;-0.00;0.00} ply, " +
-                $"nodes {ratios.Average():P0} of cold, {gains.Count(g => g > 0)} deeper / " +
-                $"{gains.Count(g => g < 0)} shallower");
+                $"{label} n={rows.Length,3}, depth {mean,6:+0.00;-0.00;0.00} ply {nodes,-18} " +
+                $"{rows.Count(i => gain(i) > 0),3} deeper / {rows.Count(i => gain(i) < 0),3} shallower");
         }
+
+        void Paired(string label, int[] rows)
+        {
+            if (rows.Length == 0)
+            {
+                Console.WriteLine($"{label} no samples");
+                return;
+            }
+
+            double[] diff = rows.Select(i => (double)(predictGain[i] - parentGain[i])).ToArray();
+            double mean = diff.Average();
+
+            // Sample standard deviation over n-1, and the standard error of the mean from
+            // it. One sample has no spread to report, so it gets none rather than a zero
+            // that would read as certainty.
+            double error = double.NaN;
+
+            if (diff.Length > 1)
+            {
+                double variance = diff.Sum(d => (d - mean) * (d - mean)) / (diff.Length - 1);
+                error = Math.Sqrt(variance / diff.Length);
+            }
+
+            string bar = double.IsNaN(error) ? "" : $" +/- {error:0.00}";
+
+            Console.WriteLine(
+                $"{label} n={diff.Length,3}, {mean,6:+0.00;-0.00;0.00} ply{bar}, " +
+                $"{diff.Count(d => d > 0),3} better / {diff.Count(d => d < 0),3} worse / " +
+                $"{diff.Count(d => d == 0),3} level");
+        }
+    }
+
+    /// <summary>
+    /// Whether a ponder that guessed wrong can make the real search play worse. This
+    /// outranks every strength number in the file: a variant that is a ply stronger on
+    /// average and occasionally throws a game away is not stronger, it is broken.
+    ///
+    /// Everything here is fixed-depth with a budget it cannot spend, so nothing is timed
+    /// and the whole mode repeats exactly. That matters more than usual, because the
+    /// question is whether two searches give the same answer and a timed search does not
+    /// even give the same answer as itself.
+    ///
+    /// Three arms on real misses taken out of real games — positions where the engine
+    /// held an expected reply and the opponent played something else:
+    ///
+    ///   cold    — no ponder at all.
+    ///   parent  — the ponder that ships, whose history is exact in every index.
+    ///   wrong   — the prediction ponder on the reply that did not happen, with the
+    ///             extended history, which is the one speculative index the design
+    ///             admits to and the only place a repetition score can be a claim about
+    ///             a game that never occurred.
+    ///
+    /// A changed move is not by itself a fault. A warmed table changes answers on purpose
+    /// — an entry searched deeper than the running iteration is grafted in, and the
+    /// parent arm does that too. So the moves are adjudicated rather than merely
+    /// compared: each one is played and the position behind it searched deeper than
+    /// either arm managed, which says which move was actually better. The wrong arm is
+    /// safe if its adjudicated score is no worse than cold's, and it is no more dangerous
+    /// than what ships if it is no worse than the parent arm's — which is the bar that
+    /// matters, since the parent arm is today's behaviour and nobody calls that a defect.
+    ///
+    ///   pondermiss [games] [ponderDepth] [realDepth] [judgeDepth] [seed]
+    /// </summary>
+    private static void PonderMiss(string[] args)
+    {
+        int games = args.Length > 1 ? int.Parse(args[1]) : 10;
+        int ponderDepth = args.Length > 2 ? int.Parse(args[2]) : 7;
+        int realDepth = args.Length > 3 ? int.Parse(args[3]) : 5;
+        int judgeDepth = args.Length > 4 ? int.Parse(args[4]) : 8;
+        int seed = args.Length > 5 ? int.Parse(args[5]) : 0;
+
+        Console.WriteLine(
+            $"Miss safety over {games} games: ponder to depth {ponderDepth}, real search to depth " +
+            $"{realDepth}, moves adjudicated at depth {judgeDepth}. Nothing here is timed.");
+        Console.WriteLine();
+
+        int misses = 0, movedFromCold = 0, parentMovedFromCold = 0;
+        int wrongWorseThanCold = 0, wrongWorseThanParent = 0, wrongBetterThanCold = 0;
+        int scoreDiffered = 0;
+        int illegal = 0;
+        var wrongVersusCold = new List<int>();
+        var parentVersusCold = new List<int>();
+
+        for (int game = 0; game < games; game++)
+        {
+            var table = new TranspositionTable(64);
+            var reference = new SearchEngine(table);
+
+            // The heuristic is the opponent here rather than a second engine, for the
+            // reason it is the headline opponent everywhere else in this measurement: it
+            // is the more human-like stand-in, and it is also the one that misses more,
+            // which is what this mode needs a supply of.
+            IQuoridorAgent weak = new HeuristicAgent(BotStrength.Normal, seed: 7 + seed + game);
+
+            int engineSeat = game % 2;
+            GameState state = RandomOpening(new Random(2000 + seed + game), plies: 4);
+            var history = new List<ulong>();
+
+            for (int ply = 0; ply < 300 && !state.IsGameOver; ply++)
+            {
+                if (state.SideToMove == engineSeat)
+                {
+                    table.NewGeneration();
+
+                    SearchResult found = Fixed(reference, state, realDepth, history.ToArray());
+                    Move played = MoveCandidates.IsLegal(state, found.Move)
+                        ? found.Move
+                        : HeuristicAgent.Fallback(state);
+
+                    history.Add(state.Hash);
+                    state.Apply(played);
+                    continue;
+                }
+
+                Move expected = default;
+
+                if (table.TryGet(state.Hash, out TableEntry entry) && entry.HasMove
+                    && MoveCandidates.IsLegal(state, entry.Move))
+                {
+                    expected = entry.Move;
+                }
+
+                weak.SetGameHistory(CollectionsMarshal.AsSpan(history));
+                Move actual = weak.ChooseMove(state);
+
+                // Only real misses. A hit has nothing to be unsafe about, since the
+                // pondered position is the position the search then runs on, and a reply
+                // the engine had no opinion about falls back to the parent and is the
+                // shipped behaviour verbatim.
+                if (expected != default && expected != actual)
+                {
+                    GameState guessed = state;
+                    guessed.Apply(expected);
+
+                    if (!guessed.IsGameOver)
+                    {
+                        GameState after = state;
+                        after.Apply(actual);
+
+                        ulong[] parentHistory = history.ToArray();
+                        var extended = new List<ulong>(history) { state.Hash };
+                        ulong[] childHistory = extended.ToArray();
+
+                        misses++;
+
+                        SearchResult cold = FixedWithPonder(
+                            after, childHistory, realDepth, default, null, 0);
+
+                        SearchResult warm = FixedWithPonder(
+                            after, childHistory, realDepth, state, parentHistory, ponderDepth);
+
+                        SearchResult bad = FixedWithPonder(
+                            after, childHistory, realDepth, guessed, childHistory, ponderDepth);
+
+                        // The guarantee that has to hold whatever else does. Every move
+                        // out of the table is revalidated before it is searched and
+                        // ChooseMove checks its own answer again, so a poisoned table
+                        // must not be able to produce a move that is not a move.
+                        if (!MoveCandidates.IsLegal(after, bad.Move)
+                            || !MoveCandidates.IsLegal(after, warm.Move)
+                            || !MoveCandidates.IsLegal(after, cold.Move))
+                        {
+                            illegal++;
+                        }
+
+                        if (bad.Move != cold.Move) movedFromCold++;
+                        if (warm.Move != cold.Move) parentMovedFromCold++;
+                        if (bad.Score != cold.Score) scoreDiffered++;
+
+                        // Adjudicated only where there is something to adjudicate. Two
+                        // arms that chose the same move cannot differ in strength, and the
+                        // judge costs more than all three arms together.
+                        if (bad.Move != cold.Move || bad.Move != warm.Move)
+                        {
+                            int judgedCold = Judge(after, childHistory, cold.Move, judgeDepth);
+                            int judgedWarm = Judge(after, childHistory, warm.Move, judgeDepth);
+                            int judgedBad = Judge(after, childHistory, bad.Move, judgeDepth);
+
+                            wrongVersusCold.Add(judgedBad - judgedCold);
+                            parentVersusCold.Add(judgedWarm - judgedCold);
+
+                            if (judgedBad < judgedCold) wrongWorseThanCold++;
+                            if (judgedBad > judgedCold) wrongBetterThanCold++;
+                            if (judgedBad < judgedWarm) wrongWorseThanParent++;
+                        }
+                    }
+                }
+
+                history.Add(state.Hash);
+                state.Apply(actual);
+            }
+        }
+
+        Console.WriteLine($"  {misses} real misses found and measured");
+        Console.WriteLine(
+            $"  illegal moves produced by any arm: {illegal}" +
+            (illegal == 0 ? "" : "   *** DEFECT ***"));
+        Console.WriteLine(
+            $"  the real search moved away from its cold answer on {movedFromCold} of them after the " +
+            $"wrong ponder, and on {parentMovedFromCold} after the shipped one");
+        Console.WriteLine(
+            $"  its score differed from the cold score on {scoreDiffered} of them");
+        Console.WriteLine();
+
+        if (wrongVersusCold.Count == 0)
+        {
+            Console.WriteLine("  nothing to adjudicate: no arm ever chose a different move");
+            Console.WriteLine();
+            return;
+        }
+
+        Console.WriteLine(
+            $"  adjudicated at depth {judgeDepth} on the {wrongVersusCold.Count} positions where the arms disagreed");
+        Console.WriteLine(
+            $"    wrong ponder against cold : {wrongBetterThanCold} better, {wrongWorseThanCold} worse, " +
+            $"mean {wrongVersusCold.Average():+0.0;-0.0;0.0} centipawn-equivalents");
+        Console.WriteLine(
+            $"    shipped ponder against cold: mean {parentVersusCold.Average():+0.0;-0.0;0.0}, " +
+            $"which is the same kind of drift and is not called a defect");
+        Console.WriteLine(
+            $"    wrong ponder worse than the shipped ponder on {wrongWorseThanParent} of them");
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// One fixed-depth search with a budget it cannot spend, so the result is a property
+    /// of the position and not of the machine.
+    /// </summary>
+    private static SearchResult Fixed(SearchEngine engine, in GameState state, int depth, ulong[] history) =>
+        engine.Search(
+            state, depth, Stopwatch.StartNew(), TimeSpan.FromMinutes(10), history, CancellationToken.None);
+
+    /// <summary>
+    /// <see cref="Answer"/> with depth in place of the clock on both searches, for the
+    /// one question in this file that has to be answered the same way twice.
+    /// </summary>
+    private static SearchResult FixedWithPonder(
+        in GameState child,
+        ulong[] childHistory,
+        int realDepth,
+        in GameState ponderRoot,
+        ulong[]? ponderHistory,
+        int ponderDepth)
+    {
+        var table = new TranspositionTable(64);
+
+        if (ponderDepth > 0 && ponderHistory is not null)
+            Fixed(new SearchEngine(table), ponderRoot, ponderDepth, ponderHistory);
+
+        table.NewGeneration();
+
+        return Fixed(new SearchEngine(table), child, realDepth, childHistory);
+    }
+
+    /// <summary>
+    /// What <paramref name="move"/> is actually worth in <paramref name="state"/>, from
+    /// the mover's side, judged by a search deeper than the ones being adjudicated and on
+    /// a table of its own so no arm's leftovers can grade their own work.
+    /// </summary>
+    private static int Judge(in GameState state, ulong[] history, Move move, int depth)
+    {
+        GameState next = state;
+        next.Apply(move);
+
+        if (next.IsGameOver)
+            return next.Winner == state.SideToMove ? Evaluation.Mate : -Evaluation.Mate;
+
+        var extended = new ulong[history.Length + 1];
+        history.CopyTo(extended, 0);
+        extended[^1] = state.Hash;
+
+        // Negated because the search that follows answers from the other side's point of
+        // view: a good move for us is a bad position for them.
+        return -Fixed(new SearchEngine(new TranspositionTable(64)), next, depth, extended).Score;
     }
 
     /// <summary>

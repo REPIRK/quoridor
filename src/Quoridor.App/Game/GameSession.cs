@@ -356,11 +356,17 @@ public sealed class GameSession
     }
 
     /// <summary>
-    /// Sets the engine searching the position the human is looking at, on the thread it
+    /// Sets the engine searching while the human is looking at the board, on the thread it
     /// would otherwise spend idle. Nothing is played out of it and no answer is kept —
-    /// the one thing it leaves behind is a transposition table warmed on the subtree the
-    /// game is about to enter, whichever move the human settles on. So the engine's own
+    /// the one thing it leaves behind is a warmed transposition table. So the engine's own
     /// answer arrives exactly as fast as it does today, and rather better informed.
+    ///
+    /// What is handed over is the position the human is deciding from. Which position the
+    /// engine then searches is its own business: it searches the one after the reply it
+    /// expects, so on the roughly half of moves where the guess is right the game walks
+    /// into exactly the position that was analysed, and on the rest the work is wasted
+    /// rather than harmful. Measured at nearly twice the depth gain of searching the
+    /// handed-over position itself, which is what this used to do.
     ///
     /// Only against the engine, and only while a human really is on move. A local match
     /// and a network game have no engine to spare, and a watched game has no idle thread
