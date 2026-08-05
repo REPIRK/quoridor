@@ -69,6 +69,7 @@ public sealed class BoardView : UserControl
     private readonly Canvas _frame = new();
     private readonly Rectangle _backdrop = new();
     private readonly Canvas _pickupLayer = new();
+    private readonly Canvas _portalLayer = new();
 
     private UInt128 _holes;
 
@@ -294,6 +295,9 @@ public sealed class BoardView : UserControl
         _hintLayer.IsHitTestVisible = false;
         _root.Children.Add(_hintLayer);
 
+        _portalLayer.IsHitTestVisible = false;
+        _root.Children.Add(_portalLayer);
+
         _pickupLayer.IsHitTestVisible = false;
         _root.Children.Add(_pickupLayer);
 
@@ -412,6 +416,9 @@ public sealed class BoardView : UserControl
         // The gradient is mixed from the board colour, so it has to be mixed again when
         // that colour changes. The rest of the board rides DynamicResource and does not.
         _backdrop.Fill = BoardSheen();
+
+        // The portal inks are likewise raw colours rather than shared brushes.
+        RefreshPortals();
     }
 
     /// <summary>
@@ -557,6 +564,82 @@ public sealed class BoardView : UserControl
         }
     }
 
+    /// <summary>
+    /// The portal mouths. Both ends of a pair are drawn in one ink, because the only thing
+    /// a player wants from a mouth is where it comes out — and with two pairs on the board
+    /// a shared colour says that without a label or a line ruled across the middle.
+    ///
+    /// Read straight off the position, which is where the pairs live, so nothing has to be
+    /// carried here alongside the board the way the holes are.
+    /// </summary>
+    private void RefreshPortals()
+    {
+        _portalLayer.Children.Clear();
+
+        ulong pairs = _state.Portals;
+        int index = 0;
+
+        while (pairs != 0)
+        {
+            int low = System.Numerics.BitOperations.TrailingZeroCount(pairs);
+            pairs &= pairs - 1;
+
+            Color ink = PortalInk(index++);
+
+            DrawMouth(low, ink);
+            DrawMouth(GameState.PortalPartner(low), ink);
+        }
+
+        void DrawMouth(int cell, Color ink)
+        {
+            double x = CellCentreOf(Board.ColOf(cell));
+            double y = CellCentreOf(Board.RowOf(cell));
+
+            // Two rings about one centre, which reads as an opening rather than as a token
+            // lying on the square. The outer one is wider than a pawn, so a pawn standing
+            // on a mouth sits inside it instead of covering it up.
+            var outer = new Ellipse
+            {
+                Width = 46,
+                Height = 46,
+                Stroke = new SolidColorBrush(ink),
+                StrokeThickness = 2,
+                Fill = new SolidColorBrush(ink) { Opacity = 0.12 },
+                Opacity = 0.8,
+            };
+
+            Place(outer, x - 23, y - 23);
+            _portalLayer.Children.Add(outer);
+
+            var inner = new Ellipse
+            {
+                Width = 24,
+                Height = 24,
+                Stroke = new SolidColorBrush(ink),
+                StrokeThickness = 1.4,
+                Opacity = 0.5,
+            };
+
+            Place(inner, x - 12, y - 12);
+            _portalLayer.Children.Add(inner);
+        }
+    }
+
+    /// <summary>
+    /// The ink for one portal pair. Neither is a player's colour: a mouth belongs to the
+    /// board rather than to a side, and a violet mouth beside a teal pawn cannot be read as
+    /// that player's property. Mixed here rather than added to the palette because nothing
+    /// outside the board ever draws one.
+    /// </summary>
+    private static Color PortalInk(int pair)
+    {
+        bool dark = Palette.Current == AppTheme.Dark;
+
+        return (pair & 1) == 0
+            ? dark ? Color.FromRgb(0x9B, 0x87, 0xCF) : Color.FromRgb(0x5A, 0x46, 0x8F)
+            : dark ? Color.FromRgb(0xC9, 0xA7, 0x52) : Color.FromRgb(0x83, 0x63, 0x14);
+    }
+
     /// <summary>Snaps the board to a position with no animation (new game, undo, restart).</summary>
     public void Reset(GameState state, Move? lastMove = null)
     {
@@ -640,6 +723,16 @@ public sealed class BoardView : UserControl
     {
         Ellipse pawn = _pawnShapes[player];
 
+        // The board still shows the position before the move, so the square being left is
+        // the one the position records.
+        int from = _state.PawnOf(player);
+
+        if (_state.IsPortalMouth(from) && GameState.PortalPartner(from) == targetCell)
+        {
+            WarpPawn(player, targetCell, completed);
+            return;
+        }
+
         double x = CellCentreOf(Board.ColOf(targetCell)) - PawnRadius;
         double y = CellCentreOf(Board.RowOf(targetCell)) - PawnRadius;
 
@@ -665,6 +758,59 @@ public sealed class BoardView : UserControl
         var scale = (ScaleTransform)pawn.RenderTransform;
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, pulse);
         scale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
+    }
+
+    /// <summary>
+    /// The one pawn move that is not a slide. The two mouths of a portal are half a board
+    /// apart, so a pawn gliding between them would draw a diagonal over ground it never
+    /// walked and over walls it never passed. Instead it is drawn out at the near mouth and
+    /// back in at the far one, and nothing crosses the space between: leave, then arrive.
+    /// </summary>
+    private void WarpPawn(int player, int targetCell, Action completed)
+    {
+        Ellipse pawn = _pawnShapes[player];
+        var scale = (ScaleTransform)pawn.RenderTransform;
+
+        var duration = TimeSpan.FromMilliseconds(170);
+
+        var shrink = new DoubleAnimation(1, 0.28, duration)
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn },
+        };
+
+        // Hung on the fade rather than on the scale, because one animation object drives
+        // both axes and its Completed would otherwise run twice.
+        var fadeOut = new DoubleAnimation(0, duration);
+        fadeOut.Completed += (_, _) => Arrive();
+
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, shrink);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, shrink);
+        pawn.BeginAnimation(OpacityProperty, fadeOut);
+
+        void Arrive()
+        {
+            // Moved while it cannot be seen, so there is no motion between the mouths.
+            pawn.BeginAnimation(Canvas.LeftProperty, null);
+            pawn.BeginAnimation(Canvas.TopProperty, null);
+            Place(
+                pawn,
+                CellCentreOf(Board.ColOf(targetCell)) - PawnRadius,
+                CellCentreOf(Board.RowOf(targetCell)) - PawnRadius);
+
+            var back = TimeSpan.FromMilliseconds(240);
+
+            var grow = new DoubleAnimation(0.28, 1, back)
+            {
+                EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.8 },
+            };
+
+            var fadeIn = new DoubleAnimation(0, 1, back);
+            fadeIn.Completed += (_, _) => completed();
+
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+            pawn.BeginAnimation(OpacityProperty, fadeIn);
+        }
     }
 
     private Rectangle CreateWall(MoveKind kind, int row, int col, int owner)
@@ -942,12 +1088,13 @@ public sealed class BoardView : UserControl
             SetPulse(player, live && player == active);
 
         RefreshRoutes();
+        RefreshPortals();
         RefreshPickups();
         RefreshHover();
 
         if (!_interactive || !live) return;
 
-        Span<Move> buffer = stackalloc Move[8];
+        Span<Move> buffer = stackalloc Move[10];
         int count = _state.GeneratePawnMoves(buffer);
 
         SolidColorBrush brush = Palette.BrushOf(active == 0 ? Palette.Accent0 : Palette.Accent1);
@@ -1036,23 +1183,49 @@ public sealed class BoardView : UserControl
 
             if (cells.Count < 2) continue;
 
-            var points = new PointCollection(cells.Count);
-            foreach (int cell in cells)
-                points.Add(new Point(CellCentreOf(Board.ColOf(cell)), CellCentreOf(Board.RowOf(cell))));
+            // A route that goes through a portal is not a route across the board. Its two
+            // consecutive cells are half a board apart, and one line joining them would
+            // claim the pawn walks the ground — and the walls — in between. The line is cut
+            // at every hop and picked up again at the far mouth.
+            var line = new PointCollection();
+            int previous = -1;
 
-            _routeLayer.Children.Add(new Polyline
+            foreach (int cell in cells)
             {
-                Points = points,
-                Stroke = Palette.BrushOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
-                StrokeThickness = 2,
-                StrokeDashArray = new DoubleCollection { 1.4, 2.2 },
-                StrokeDashCap = PenLineCap.Round,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
-                StrokeLineJoin = PenLineJoin.Round,
-                Opacity = 0.6,
-            });
+                if (previous >= 0 && !AreNeighbours(previous, cell))
+                {
+                    AddRouteLine(line, player);
+                    line = new PointCollection();
+                }
+
+                line.Add(new Point(CellCentreOf(Board.ColOf(cell)), CellCentreOf(Board.RowOf(cell))));
+                previous = cell;
+            }
+
+            AddRouteLine(line, player);
         }
+
+        static bool AreNeighbours(int a, int b) =>
+            Math.Abs(Board.RowOf(a) - Board.RowOf(b)) + Math.Abs(Board.ColOf(a) - Board.ColOf(b)) == 1;
+    }
+
+    /// <summary>One unbroken stretch of a player's route. A single point is not a stretch.</summary>
+    private void AddRouteLine(PointCollection points, int player)
+    {
+        if (points.Count < 2) return;
+
+        _routeLayer.Children.Add(new Polyline
+        {
+            Points = points,
+            Stroke = Palette.BrushOf(player == 0 ? Palette.Accent0 : Palette.Accent1),
+            StrokeThickness = 2,
+            StrokeDashArray = new DoubleCollection { 1.4, 2.2 },
+            StrokeDashCap = PenLineCap.Round,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Opacity = 0.6,
+        });
     }
 
     private void SetPulse(int player, bool active)

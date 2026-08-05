@@ -15,6 +15,9 @@ public enum Sound
 
     /// <summary>A free move picked up: the turn comes round again.</summary>
     Again,
+
+    /// <summary>A step through a portal: out at one mouth and in at the other.</summary>
+    Portal,
 }
 
 /// <summary>
@@ -167,6 +170,7 @@ public static class Sfx
             Write("lose", Normalise(Lose(), 0.8));
             Write("collect", Normalise(Collect(), 0.85));
             Write("again", Normalise(Again(), 0.85));
+            Write("portal", Normalise(Portal(), 0.85));
 
             for (int track = 0; track < Tracks.Length; track++)
                 Write($"music{track}", Normalise(Ambient(track), 0.5));
@@ -214,6 +218,18 @@ public static class Sfx
         Tone(buffer, 0.00, 0.12, 587, 587, 0.26);
         Tone(buffer, 0.07, 0.12, 784, 784, 0.26);
         Tone(buffer, 0.14, 0.28, 1047, 1047, 0.28);
+        return buffer;
+    }
+
+    private static float[] Portal()
+    {
+        var buffer = new float[(int)(Rate * 0.42)];
+
+        // A step through a portal, in the two halves the board draws it in: a note falling
+        // away at the near mouth, a gap where nothing is crossing, then one rising at the
+        // far one. The silence in the middle is the part that says the pawn was not there.
+        Tone(buffer, 0.00, 0.12, 740, 300, 0.28, triangle: true);
+        Tone(buffer, 0.17, 0.22, 380, 1050, 0.30);
         return buffer;
     }
 

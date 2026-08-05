@@ -103,6 +103,8 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <TextBlock Grid.Row="0" Grid.Column="0"
@@ -165,6 +167,26 @@
                                 <ComboBoxItem Content="6 — a spare wall or a free move" />
                                 <ComboBoxItem Content="10 — a spare wall or a free move" />
                             </ComboBox>
+
+                            <!-- Counted in portals, not in squares: a portal's two mouths
+                                 are one object, unlike a pair of holes or of pickups. -->
+                            <TextBlock Grid.Row="5" Grid.Column="0"
+                                       Style="{StaticResource Text.Section}"
+                                       Text="Portals" VerticalAlignment="Center" Margin="0,10,0,0" />
+                            <ComboBox x:Name="PortalsPick" Grid.Row="5" Grid.Column="1"
+                                      Style="{StaticResource Pick}" Margin="0,10,0,0"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="None" />
+                                <ComboBoxItem Content="1 — one pair of linked squares" />
+                                <ComboBoxItem Content="2 — two pairs of linked squares" />
+                            </ComboBox>
+
+                            <!-- Filled in from the size, which is what decides whether there
+                                 is anything to explain. -->
+                            <TextBlock x:Name="PortalNote" Grid.Row="6" Grid.ColumnSpan="2"
+                                       Style="{StaticResource Text.Subtitle}"
+                                       Margin="0,8,0,0" TextWrapping="Wrap"
+                                       Visibility="Collapsed" />
                         </Grid>
                     </StackPanel>
                 </Grid>
@@ -401,6 +423,7 @@
                     Style="{StaticResource Card}"
                     MaxWidth="640"
                     Padding="36,32"
+                    Margin="0,24"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center"
                     RenderTransformOrigin="0.5,0.5">
@@ -408,6 +431,9 @@
                     <ScaleTransform x:Name="RulesScale" ScaleX="0.96" ScaleY="0.96" />
                 </Border.RenderTransform>
 
+                <!-- This card now says more than a short window is tall, and a rule the
+                     player cannot scroll to is a rule they do not have. -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <TextBlock Style="{StaticResource Text.Display}" FontSize="30" Text="How to play" />
 
@@ -465,6 +491,34 @@
 
                     <Rectangle Height="1" Fill="{DynamicResource Brush.Line}" Margin="0,24,0,20" />
 
+                    <!-- The mouth is drawn here at the size it appears on the board, for
+                         the same reason the pickups are: a ring explains nothing in words. -->
+                    <TextBlock Style="{StaticResource Text.Section}" Text="Portals" />
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="44" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Canvas Grid.Column="0" Width="30" Height="30"
+                                HorizontalAlignment="Left" VerticalAlignment="Center">
+                            <Ellipse Width="28" Height="28" Canvas.Left="1" Canvas.Top="1"
+                                     Stroke="{DynamicResource Brush.Text}" StrokeThickness="1.6"
+                                     Opacity="0.62" />
+                            <Ellipse Width="14" Height="14" Canvas.Left="8" Canvas.Top="8"
+                                     Stroke="{DynamicResource Brush.Text}" StrokeThickness="1.1"
+                                     Opacity="0.5" />
+                        </Canvas>
+                        <TextBlock Grid.Column="1" Style="{StaticResource Text.Body}"
+                                   Text="Two squares joined into one step. Stand on either mouth and the other one is next door: crossing costs a move and passes the turn, exactly as walking one square does. Nothing is used up, so a portal works all game, for whoever is standing on it." />
+                    </Grid>
+
+                    <TextBlock Style="{StaticResource Text.Subtitle}" Margin="0,12,0,0" TextWrapping="Wrap"
+                               Text="Both mouths of a pair are drawn in one colour, so the one you are standing on tells you where you would come out. They sit opposite each other under the same half turn as the pickups, and no wall can ever close one." />
+
+                    <Rectangle Height="1" Fill="{DynamicResource Brush.Line}" Margin="0,24,0,20" />
+
                     <TextBlock Style="{StaticResource Text.Section}" Text="Controls" />
                     <TextBlock Style="{StaticResource Text.Mono}" Margin="0,14,0,0"
                                Text="Click a highlighted square         move your pawn" />
@@ -481,6 +535,7 @@
                             HorizontalAlignment="Right"
                             Margin="0,26,0,0" />
                 </StackPanel>
+                </ScrollViewer>
             </Border>
         </Grid>
 

@@ -29,6 +29,16 @@ public partial class GameView : UserControl
     private CancellationTokenSource? _thinking;
     private bool _busy;
 
+    /// <summary>Whether the engine loop is in the air. There is never more than one of it.</summary>
+    private bool _engineRunning;
+
+    /// <summary>
+    /// Set when the view is on its way out. Cancelling the search only ends the move
+    /// being thought about, so without this the loop would answer the cancellation by
+    /// starting the next one and play a whole game nobody is watching.
+    /// </summary>
+    private bool _closed;
+
     /// <summary>Ply being looked at while stepping back through the game; null means live.</summary>
     private int? _reviewPly;
 
@@ -102,6 +112,7 @@ public partial class GameView : UserControl
         {
             Palette.Changed -= themeHandler;
             _clockTimer?.Stop();
+            _closed = true;
             _thinking?.Cancel();
             _peer?.Dispose();
         };
@@ -137,7 +148,7 @@ public partial class GameView : UserControl
                 return;
             }
 
-            await RunEngineAsync();
+            StartEngineIfItsTurn();
         }
         catch (OperationCanceledException)
         {
@@ -145,15 +156,29 @@ public partial class GameView : UserControl
         }
     }
 
-    /// <summary>Kicks the engine off when it is on move — the far seat, or both in spectate.</summary>
+    /// <summary>
+    /// Kicks the engine off when it is on move — the far seat, or both in spectate.
+    /// Does nothing while a loop is already in the air, even though the position it was
+    /// started on has just changed: the loop re-reads the session between searches, so
+    /// it finds the new position by itself, and a second loop would put two searches on
+    /// one agent.
+    /// </summary>
     private async void StartEngineIfItsTurn()
     {
+        if (_engineRunning) return;
+
+        _engineRunning = true;
+
         try
         {
             await RunEngineAsync();
         }
         catch (OperationCanceledException)
         {
+        }
+        finally
+        {
+            _engineRunning = false;
         }
     }
 
@@ -165,6 +190,7 @@ public partial class GameView : UserControl
         // most interesting move in the game sounds exactly like every other step.
         Sfx.Play(_session.LastMoveWentAgain ? Sound.Again
             : _session.LastMoveTookAWall ? Sound.Collect
+            : _session.LastMoveCrossedPortal ? Sound.Portal
             : move.Kind == MoveKind.Pawn ? Sound.Move
             : Sound.Wall);
 
@@ -179,13 +205,23 @@ public partial class GameView : UserControl
         if (_session.IsOver) Finish();
     }
 
+    /// <summary>
+    /// Plays the engine's moves for as long as it is on move. Cancelling a search does
+    /// not end this loop and does not start a new one anywhere else: the loop comes back
+    /// round, reads the session as it now stands, and either searches the new position
+    /// or stops. That is what keeps a restart from having two searches on one agent.
+    /// </summary>
     private async Task RunEngineAsync()
     {
-        while (_session.IsBotTurn && _reviewPly is null)
+        while (!_closed && _session.IsBotTurn && _reviewPly is null)
         {
             _thinking?.Dispose();
             _thinking = new CancellationTokenSource();
             CancellationToken token = _thinking.Token;
+
+            // What the answer will have to match to be worth playing.
+            GameSession asked = _session;
+            int ply = asked.Moves.Count;
 
             SetThinking(true);
 
@@ -200,16 +236,33 @@ public partial class GameView : UserControl
                     ? Settings.Current.WatchPace
                     : TimeSpan.FromMilliseconds(280);
 
+                // WhenAll waits for every task and not just the first to fail, so once
+                // this returns — cancelled or not — the search is over and the agent is
+                // free for the next turn round the loop.
                 await Task.WhenAll(search, Task.Delay(floor, token));
                 move = search.Result;
             }
             catch (OperationCanceledException)
             {
                 SetThinking(false);
-                return;
+                continue;
             }
 
             SetThinking(false);
+
+            // An abandoned search still answers: the engine returns the best move it had
+            // rather than throwing, and the floor above may already have elapsed, so the
+            // cancellation goes unnoticed. The answer belongs to the position it was
+            // asked about, so it is only played if that is still the position in front of
+            // us — a restart or an undo makes it a move for a game that no longer exists.
+            if (token.IsCancellationRequested ||
+                !ReferenceEquals(asked, _session) ||
+                asked.Moves.Count != ply ||
+                _reviewPly is not null)
+            {
+                continue;
+            }
+
             await PlayAsync(move);
         }
     }
@@ -231,8 +284,12 @@ public partial class GameView : UserControl
 
             string[] parts = line.Split('|');
 
+            // The seat test is the one that matters: legality alone is checked against
+            // whoever is on move, so without it a message arriving on our own turn is
+            // applied as our move, and the other copy gets to play both colours.
             if (parts.Length != 3 ||
                 parts[0] != "move" ||
+                _session.State.SideToMove == _session.Options.HumanSeat ||
                 !int.TryParse(parts[1], out int ply) ||
                 ply != _session.Moves.Count ||
                 !Notation.TryParse(parts[2], out Move move, _session.State.GoalRow(0)))
@@ -252,6 +309,10 @@ public partial class GameView : UserControl
         if (_busy) return;
 
         _thinking?.Cancel();
+
+        // Before the move list gets shorter, not after: the review ply is an index into it.
+        LeaveReview();
+
         if (!_session.Undo()) return;
 
         HideResult();
@@ -308,7 +369,13 @@ public partial class GameView : UserControl
         // Over the network a restart is a joint decision, so tell the other side.
         if (broadcast && _peer is not null) _ = _peer.SendAsync(swap ? "restart|swap" : "restart");
 
+        // Asking, not waiting: a search can take seconds to notice, and this runs on the
+        // UI thread. The board below is rebuilt straight away and the engine loop finds
+        // it when the abandoned search finally answers.
         _thinking?.Cancel();
+
+        // Before the move list is emptied, not after: the review ply is an index into it.
+        LeaveReview();
 
         if (swap)
         {
@@ -335,6 +402,7 @@ public partial class GameView : UserControl
 
     private void LeaveToMenu()
     {
+        _closed = true;
         _thinking?.Cancel();
         _clockTimer?.Stop();
         _host.ShowMenu();
@@ -428,6 +496,14 @@ public partial class GameView : UserControl
         UpdateReviewChrome();
     }
 
+    /// <summary>
+    /// Drops out of review without redrawing anything. Restarting and undoing both cut
+    /// the move list the review ply points into, so the ply has to go before the session
+    /// changes under it. Both callers redraw and re-enable the board themselves through
+    /// <see cref="UpdateUi"/>, which is what turns interaction back on.
+    /// </summary>
+    private void LeaveReview() => _reviewPly = null;
+
     private void ReturnToLive()
     {
         if (_reviewPly is null) return;
@@ -443,6 +519,11 @@ public partial class GameView : UserControl
     private void UpdateReviewChrome()
     {
         int played = _session.Moves.Count;
+
+        // A review ply past the end of the list means something shortened it while the
+        // review was open. Treat the review as finished rather than indexing off the end:
+        // this runs inside click and key handlers, where an exception closes the app.
+        if (_reviewPly > played) _reviewPly = null;
 
         ReviewPrevButton.IsEnabled = played > 0 && (_reviewPly ?? played) > 0;
         ReviewNextButton.IsEnabled = _reviewPly is not null;
@@ -651,6 +732,8 @@ public partial class GameView : UserControl
             ? "Free move — the turn does not pass. Go again."
             : _session.LastMoveTookAWall
                 ? "Two spare walls picked up, on top of what you started with."
+                : _session.LastMoveCrossedPortal
+                ? "Through the portal — one step to the square it is linked to."
                 : state.WallsOf(side) == 0
                     ? "No walls left — it is a straight race now."
                     : "Click a square to step, or hover a groove between squares to place a wall.";

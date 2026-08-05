@@ -57,6 +57,9 @@ public partial class MenuView : UserControl
 
         ApplyFlavour();
 
+        SizePick.SelectionChanged += (_, _) => ApplySize();
+        ApplySize();
+
         NetworkButton.Click += (_, _) => ShowNetwork(true);
         CloseNetworkButton.Click += (_, _) => ShowNetwork(false);
         HostButton.Click += (_, _) => StartHosting();
@@ -156,13 +159,20 @@ public partial class MenuView : UserControl
                 int[] walls = { 0, 3, 5, 7, 10, 14, 20 };
                 int[] holes = { 0, 2, 4, 6, 10 };
                 int[] pickups = { 0, 4, 6, 10 };
+                int size = SelectedSize();
+
+                // Counted in portals rather than in squares, because a portal's two mouths
+                // are one object. Read off the size's own list rather than a copy of it, so
+                // a number this board cannot carry is never the one sent over a link.
+                int[] portals = GameSetup.PortalOptions(size);
 
                 return new GameSetup
                 {
-                    Size = SizePick.SelectedIndex switch { 1 => 7, 2 => 5, _ => Board.Size },
+                    Size = size,
                     Walls = walls[Math.Clamp(WallsPick.SelectedIndex, 0, walls.Length - 1)],
                     Holes = holes[Math.Clamp(HolesPick.SelectedIndex, 0, holes.Length - 1)],
                     Pickups = pickups[Math.Clamp(PickupsPick.SelectedIndex, 0, pickups.Length - 1)],
+                    Portals = portals[Math.Clamp(PortalsPick.SelectedIndex, 0, portals.Length - 1)],
                     Seed = seed,
                 };
 
@@ -185,10 +195,53 @@ public partial class MenuView : UserControl
 
         FlavourNote.Text = flavour switch
         {
-            GameFlavour.Random => "Board, walls, holes, pickups and who moves first — all rolled for you.",
+            GameFlavour.Random => "Board, walls, holes, pickups, portals and who moves first — all rolled for you.",
             GameFlavour.Custom => "Everything is yours to set.",
             _ => "Nine by nine, ten walls each. The game as it is normally played.",
         };
+    }
+
+    /// <summary>The board the size dropdown names.</summary>
+    private int SelectedSize() => SizePick.SelectedIndex switch { 1 => 7, 2 => 5, _ => Board.Size };
+
+    /// <summary>
+    /// Stops the portal control offering a number the chosen board cannot carry, and says
+    /// why. A five has nowhere at all to put a mouth, and a seven has one usable pairing,
+    /// so a second portal there would share it and the two would be one objective rather
+    /// than two. Leaving the number selectable and quietly building fewer would read as the
+    /// generator being unreliable rather than as a rule of the size.
+    /// </summary>
+    private void ApplySize()
+    {
+        int[] offered = GameSetup.PortalOptions(SelectedSize());
+
+        // Taken out of the list rather than merely disabled: the dropdown's rows are drawn
+        // by one template with no disabled state, so a row left in place would look exactly
+        // like one that can be picked.
+        for (int i = 0; i < PortalsPick.Items.Count; i++)
+        {
+            var row = (ComboBoxItem)PortalsPick.Items[i];
+
+            row.IsEnabled = i < offered.Length;
+            row.Visibility = i < offered.Length ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (PortalsPick.SelectedIndex >= offered.Length)
+            PortalsPick.SelectedIndex = offered.Length - 1;
+
+        // Nothing to choose between is not a choice, so the whole control goes quiet — and
+        // visibly so, since the pick's own template does not draw a disabled state either.
+        PortalsPick.IsEnabled = offered.Length > 1;
+        PortalsPick.Opacity = offered.Length > 1 ? 1 : 0.45;
+
+        PortalNote.Text = offered.Length switch
+        {
+            1 => "No portals on a five. A mouth may not stand on a goal row, next to one, or on the middle row — and on a five that is every row there is.",
+            2 => "One portal on a seven. Its two usable rows are a single mirrored pair, and two portals sharing that pair would be one objective rather than two.",
+            _ => string.Empty,
+        };
+
+        PortalNote.Visibility = PortalNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateThemeButton() =>

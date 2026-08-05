@@ -176,7 +176,10 @@ public sealed class NetPeer : IDisposable
 
             string[] terms = hello?.Split('|') ?? Array.Empty<string>();
 
-            if (terms.Length == 7 &&
+            // Seven terms is a board without portals and eight is one with: the portal
+            // count is only sent when it is not zero, so every game that could have been
+            // played against a build predating portals still can be.
+            if (terms.Length is 7 or 8 &&
                 terms[0] == "seat" &&
                 int.TryParse(terms[1], out int seat) && seat is 0 or 1 &&
                 GameSetup.TryDecode(terms.AsSpan(2), out GameSetup setup))

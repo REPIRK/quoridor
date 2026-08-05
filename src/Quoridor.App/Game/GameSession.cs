@@ -80,6 +80,13 @@ public sealed class GameSession
 
     private int _flagged = -1;
 
+    /// <summary>
+    /// The tail of the chain of engine searches: completed when no agent is thinking.
+    /// See <see cref="ThinkAsync"/> for why the searches have to be a chain and not a
+    /// crowd.
+    /// </summary>
+    private Task _agentIdle = Task.CompletedTask;
+
     public GameSession(GameOptions options)
     {
         Options = options;
@@ -170,12 +177,26 @@ public sealed class GameSession
     /// <summary>Whether the move just played picked a spare wall up off the board.</summary>
     public bool LastMoveTookAWall { get; private set; }
 
+    /// <summary>
+    /// Whether the move just played went through a portal rather than across the board.
+    /// Without saying so, a pawn arriving half a board away reads as the game losing its
+    /// place rather than as the move it was.
+    /// </summary>
+    public bool LastMoveCrossedPortal { get; private set; }
+
     public bool Apply(Move move)
     {
         if (IsOver || !State.IsLegal(move)) return false;
 
         int mover = State.SideToMove;
         int wallsBefore = State.WallsOf(mover);
+
+        // Asked before the move: afterwards the pawn is at the far mouth and the two
+        // ends of a portal look exactly alike.
+        bool crossedPortal = move.Kind == MoveKind.Pawn &&
+            State.HasPortals &&
+            State.IsPortalMouth(State.PawnOf(mover)) &&
+            GameState.PortalPartner(State.PawnOf(mover)) == move.Cell;
 
         _positions.Add(State);
         _moves.Add(move);
@@ -187,6 +208,7 @@ public sealed class GameSession
         // Placing a wall spends one, so a supply that went up can only mean a pickup.
         LastMoveWentAgain = !IsOver && State.SideToMove == mover;
         LastMoveTookAWall = State.WallsOf(mover) > wallsBefore;
+        LastMoveCrossedPortal = crossedPortal;
 
         if (HasClock) _remaining[mover] += Options.Clock.Increment;
 
@@ -242,9 +264,43 @@ public sealed class GameSession
     /// Runs the engine for the side to move, off the UI thread. When a clock is
     /// running the search budget is cut to a share of what is left, so the engine
     /// cannot think its way into losing on time.
+    ///
+    /// An agent keeps the whole of its search state in instance fields — move stack,
+    /// killers, history, and the flag that says to stop — so two searches running on one
+    /// at the same time would overwrite each other's working buffers, and starting the
+    /// second would clear the stop flag the first is watching and so un-cancel the very
+    /// search that was being abandoned. Cancelling is therefore a request and not an
+    /// event: each search waits for the one before it to put the agent down before it
+    /// touches the agent at all.
     /// </summary>
     public Task<Move> ThinkAsync(CancellationToken cancellationToken)
     {
+        // The chain is extended before the caller can await it, so a second call made
+        // while this one is still queued lines up behind it rather than beside it.
+        Task<Move> search = ThinkAfterAsync(_agentIdle, cancellationToken);
+        _agentIdle = search;
+        return search;
+    }
+
+    private async Task<Move> ThinkAfterAsync(Task previous, CancellationToken cancellationToken)
+    {
+        if (!previous.IsCompleted)
+        {
+            // How the search before this one ended is its own caller's business; all
+            // this one needs is for it to be over.
+            try
+            {
+                await previous;
+            }
+            catch
+            {
+            }
+        }
+
+        // Waiting for the agent can take as long as the abandoned search does, by which
+        // time this one may have been given up on too.
+        cancellationToken.ThrowIfCancellationRequested();
+
         IQuoridorAgent agent = _agents[State.SideToMove]
             ?? throw new InvalidOperationException("No engine plays this side.");
 
@@ -261,7 +317,7 @@ public sealed class GameSession
         for (int i = 0; i < _positions.Count; i++) history[i] = _positions[i].Hash;
         agent.SetGameHistory(history);
 
-        return Task.Run(() => agent.ChooseMove(snapshot, cancellationToken), cancellationToken);
+        return await Task.Run(() => agent.ChooseMove(snapshot, cancellationToken), cancellationToken);
     }
 
     /// <summary>Distance to goal for each player, for the side panels.</summary>
