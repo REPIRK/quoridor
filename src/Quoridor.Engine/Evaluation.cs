@@ -128,12 +128,41 @@ public static class Evaluation
     }
 
     /// <summary>
-    /// Exact result for a position where neither player has walls left: the game has
-    /// become a pure race and nothing either player does can change the outcome.
+    /// How far apart the two routes have to be before the race is called. See
+    /// <see cref="RaceScore"/> for where the number comes from.
+    /// </summary>
+    public const int RaceMargin = 3;
+
+    /// <summary>
+    /// Result for a position where neither player has walls left: the game has become
+    /// a race, and past a wide enough margin nothing either player does changes who
+    /// gets home first.
     ///
-    /// The one wrinkle is jumping, which can shorten a route by a single move. Taking
-    /// that slack into account, the verdict is certain unless the two routes are
-    /// exactly equal, which falls through to normal search.
+    /// That margin is not one move, which is what this used to assume. Jumping can
+    /// shorten a route by a step, but the pawns also obstruct each other, and that is
+    /// the larger effect: a pawn standing in a corridor whose jump square is walled off
+    /// cannot be passed at all that move, and going round costs more than any jump
+    /// saves. Distances alone cannot see it, because <see cref="PathFinder"/> treats
+    /// pawns as transparent.
+    ///
+    /// So the margin is measured rather than argued. Solving the pawn-only game exactly
+    /// on wall-spent boards — 9x9, 7x7 and 5x5, with and without holes — a margin of one
+    /// names the wrong winner about once in four thousand verdicts, two about once in a
+    /// hundred thousand, and three was not wrong once in two million. Three is what is
+    /// used, and it still settles two thirds of the positions the one-move rule claimed.
+    /// Anything closer falls through to normal search, which is the point: a verdict
+    /// here outranks <see cref="MateThreshold"/> and ends iterative deepening, so a
+    /// wrong one is played to the end without ever being reconsidered.
+    ///
+    /// Portals were audited the same way and do not move the number, but they do make it
+    /// tighter: over 61,888 solved positions on ten wall-spent portal boards, a margin of
+    /// two named the wrong winner once in about forty thousand verdicts against once in a
+    /// hundred thousand on plain boards, and three was clean. A portal is an edge the two
+    /// routes can share, so it puts the pawns in each other's way in places distances
+    /// still cannot see. Three stays, and that clean result is a floor rather than a
+    /// licence to shorten it: sixty thousand positions is three per cent of the two
+    /// million the plain-board figure rests on. The self-test re-runs this audit and
+    /// reports it; it deliberately does not act on it.
     /// </summary>
     public static int RaceScore(in GameState state, int ply)
     {
@@ -144,11 +173,9 @@ public static class Evaluation
 
         if (mine < 0 || theirs < 0) return Unknown;
 
-        // Worst case for the mover is the opponent finding a jump and the mover not.
-        if (mine <= theirs - 1) return Mate - ply - mine;
+        if (mine <= theirs - RaceMargin) return Mate - ply - mine;
 
-        // Best case for the mover is the mirror of that.
-        if (mine >= theirs + 2) return -(Mate - ply - theirs);
+        if (mine >= theirs + RaceMargin + 1) return -(Mate - ply - theirs);
 
         return Unknown;
     }

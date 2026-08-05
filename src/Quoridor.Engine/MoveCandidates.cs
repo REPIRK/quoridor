@@ -21,7 +21,7 @@ internal static class MoveCandidates
     public const int MaxWalls = 48;
 
     /// <summary>Size a per-ply slice of the move stack must have.</summary>
-    public const int MaxMoves = 8 + MaxWalls;
+    public const int MaxMoves = 10 + MaxWalls;
 
     /// <summary>
     /// Writes legal moves for the side to move into <paramref name="destination"/>,
@@ -66,13 +66,13 @@ internal static class MoveCandidates
 
     private static int GeneratePawnMoves(in GameState state, Span<Move> destination, Span<byte> myDistances)
     {
-        Span<Move> buffer = stackalloc Move[8];
+        Span<Move> buffer = stackalloc Move[10];
         int count = state.GeneratePawnMoves(buffer);
 
-        Span<int> keys = stackalloc int[8];
+        Span<int> keys = stackalloc int[10];
         for (int i = 0; i < count; i++) keys[i] = myDistances[buffer[i].Cell];
 
-        // Selection sort over at most five entries: closest to goal first.
+        // Selection sort over at most eight entries: closest to goal first.
         for (int i = 0; i < count; i++)
         {
             int best = i;
@@ -155,6 +155,23 @@ internal static class MoveCandidates
                 {
                     best = d;
                     next = neighbour;
+                }
+            }
+
+            // A portal is an edge like any other and the distances already price it, so a
+            // route can leave through one. Without this the walk stops dead at a mouth and
+            // the slots beside the far half of the route are never offered as candidates —
+            // which would make "a wall on the portal approach adds two to their trip" a
+            // move the search cannot even see. On a board with no portals the mask is zero
+            // and this is one predicted-not-taken branch per traced cell.
+            if (state.IsPortalMouth(cell))
+            {
+                int partner = GameState.PortalPartner(cell);
+                int d = distances[partner];
+                if (d != PathFinder.Unreachable && d < best)
+                {
+                    best = d;
+                    next = partner;
                 }
             }
 

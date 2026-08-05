@@ -83,6 +83,12 @@ public static class Notation
                 if (state.PawnOf(0) == cell) glyph = '1';
                 else if (state.PawnOf(1) == cell) glyph = '2';
 
+                // A portal's two mouths are the same square drawn twice, so a reader can
+                // find the other one by turning the page half round. A pawn standing on a
+                // mouth still prints as a pawn: where the pieces are is the first thing
+                // anyone reads a dump for.
+                else if (state.IsPortalMouth(cell)) glyph = 'o';
+
                 sb.Append(glyph);
                 if (col < Board.Size - 1)
                     sb.Append(state.Blocked(cell, Board.East) ? '|' : ' ');

@@ -9,7 +9,7 @@ namespace Quoridor.Bench;
 /// how deep does it get, does thinking longer actually make it play better, and does
 /// adding threads buy anything.
 ///
-///   dotnet run -c Release --project tests/Quoridor.Bench -- [depth|ladder|smp|all]
+///   dotnet run -c Release --project tests/Quoridor.Bench -- [depth|ladder|smp|portals|all]
 /// </summary>
 internal static class Program
 {
@@ -31,6 +31,7 @@ internal static class Program
         if (mode is "duel") Duel();
         if (mode is "pickups") PickupDuel();
         if (mode is "holes") HoleDuel();
+        if (mode is "portals") PortalCost();
         if (mode is "smpduel") ThreadDuel();
 
         return 0;
@@ -136,6 +137,66 @@ internal static class Program
         }
 
         Console.WriteLine();
+    }
+
+    /// <summary>
+    /// What portals cost the search, kept as its own number and never folded into an
+    /// average with anything else.
+    ///
+    /// A portal is an ordinary undirected edge, so the flood fill has to follow it: one
+    /// AND against the mouths that have not fired yet at every breadth-first step, plus a
+    /// short loop per portal per fill. Wall legality runs that fill twice for each of
+    /// about thirty candidate walls at every node, so the whole cost lands on nodes per
+    /// second — a portal game simply searches a slower board. Both numbers are printed
+    /// side by side rather than one blended one, because a single averaged figure would
+    /// hide the price of the feature in the boards that do not have it.
+    ///
+    /// Matched pairs: the same four-ply random opening is played on a plain board and on a
+    /// portal board built from the same seed, so the only thing that differs is the edges.
+    /// </summary>
+    private static void PortalCost()
+    {
+        const int milliseconds = 1000;
+
+        Console.WriteLine($"Portal cost, {milliseconds} ms per search, single thread");
+        Console.WriteLine("  board               depth      nodes        nodes/s");
+
+        double plainTotal = 0, portalTotal = 0;
+        int pairs = 0;
+
+        foreach (int seed in new[] { 19, 20, 26 })
+        {
+            double plain = Measure($"plain seed {seed}", RandomOpening(new Random(seed), plies: 4));
+            double warped = Measure($"portals seed {seed}", PortalOpening(new Random(seed), seed, plies: 4));
+
+            plainTotal += plain;
+            portalTotal += warped;
+            pairs++;
+        }
+
+        if (pairs > 0 && plainTotal > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"  a portal board searched {100 * (plainTotal - portalTotal) / plainTotal:F0}% " +
+                              "fewer nodes per second than the plain board beside it");
+        }
+
+        Console.WriteLine();
+
+        static double Measure(string name, GameState state)
+        {
+            var agent = new SearchAgent(maxDepth: 40, moveTime: TimeSpan.FromMilliseconds(milliseconds), threads: 1);
+
+            var clock = Stopwatch.StartNew();
+            agent.ChooseMove(state);
+            clock.Stop();
+
+            SearchResult result = agent.LastResult;
+            double nps = result.Nodes / Math.Max(0.001, clock.Elapsed.TotalSeconds);
+
+            Console.WriteLine($"  {name,-18} {result.Depth,7} {result.Nodes,10:N0} {nps,14:N0}");
+            return nps;
+        }
     }
 
     private static void SweepRaceVerdict()
@@ -459,6 +520,18 @@ internal static class Program
         }
 
         yield return ("holes", holed);
+
+        // A board with portals, opened the same way. Its own row wherever this list is
+        // printed, and never averaged with the others: the flood fill follows a fifth edge
+        // out of every mouth, so this is the slowest board the engine ever searches, and
+        // burying that in a mean would be hiding the price of the feature.
+        GameState warped = new GameSetup { Portals = 2, Seed = 19 }.Build().State;
+        foreach (string text in new[] { "e2", "e8", "e3", "e7" })
+        {
+            if (Notation.TryParse(text, out Move move) && warped.IsLegal(move)) warped.Apply(move);
+        }
+
+        yield return ("portals", warped);
     }
 
     private static GameState RandomOpening(Random random, int plies)
@@ -492,6 +565,20 @@ internal static class Program
     private static GameState PickupOpening(Random random, int seed, int plies)
     {
         GameState state = new GameSetup { Pickups = 8, Seed = seed }.Build().State;
+
+        for (int i = 0; i < plies; i++)
+        {
+            var moves = state.LegalMoves();
+            state.Apply(moves[random.Next(moves.Count)]);
+        }
+
+        return state;
+    }
+
+    /// <summary>Two portals and nothing else, so the measurement is of the edges alone.</summary>
+    private static GameState PortalOpening(Random random, int seed, int plies)
+    {
+        GameState state = new GameSetup { Portals = 2, Seed = seed }.Build().State;
 
         for (int i = 0; i < plies; i++)
         {

@@ -243,7 +243,18 @@ public sealed class SearchEngine
         // With no walls left the game is a settled race; no amount of search changes it.
         // Unless there are pickups still lying about, which can hand out both a wall and
         // an extra move — and then the race is not settled at all.
-        if (state.WallsOf(0) == 0 && state.WallsOf(1) == 0 && !state.HasPickups)
+        //
+        // Portals are excluded for a different reason. The margin the race verdict allows
+        // itself was measured against pawns obstructing each other, whose worst case is a
+        // corridor where the blocked player cannot get past — and a portal is a corridor
+        // of degree one: stand on one mouth with the opponent on the other and all four
+        // of its sides walled, and there is no move through it at all, while the fill
+        // treats pawns as transparent and routes straight through. That is the measured
+        // case in its most extreme form, so the measured margin is not entitled to cover
+        // it. A verdict here outranks the mate threshold and ends iterative deepening, so
+        // a wrong one is played out to the end and never looked at again; until the exact
+        // solver has been re-run over portal boards, portals simply do not get a verdict.
+        if (state.WallsOf(0) == 0 && state.WallsOf(1) == 0 && !state.HasPickups && !state.HasPortals)
         {
             int race = Evaluation.RaceScore(state, ply);
             if (race != Evaluation.Unknown) return race;

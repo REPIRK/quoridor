@@ -93,7 +93,7 @@ public sealed class HeuristicAgent : IQuoridorAgent
     /// </summary>
     internal static Move Fallback(in GameState state)
     {
-        Span<Move> buffer = stackalloc Move[8];
+        Span<Move> buffer = stackalloc Move[10];
         int count = state.GeneratePawnMoves(buffer);
         if (count > 0) return buffer[0];
 

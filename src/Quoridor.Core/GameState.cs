@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace Quoridor.Core;
 
 /// <summary>
-/// A complete Quoridor position. Deliberately a mutable struct of ~96 bytes: the
+/// A complete Quoridor position. Deliberately a mutable struct of 160 bytes: the
 /// search copies it (<c>var next = state; next.Apply(move);</c>) instead of
 /// implementing undo, which removes a whole class of bugs and still costs less
 /// than a cache line pair per node.
@@ -33,6 +33,26 @@ public struct GameState
     /// differ only in that bookkeeping share a transposition entry.
     /// </summary>
     public ulong WallsByPlayer1;
+
+    /// <summary>
+    /// Portal pairs, one bit per pair, indexed by the pair's lower cell. A portal links
+    /// cell <c>c</c> to <c>Board.CellCount - 1 - c</c> — the half turn that maps one
+    /// player's half onto the other's, so a portal board is fair by its geometry rather
+    /// than by the placement having been careful. The centre cell is its own mirror and
+    /// is never set.
+    ///
+    /// Deliberately outside the Zobrist hash, for the same reason a hole is: portals are
+    /// permanent, so two positions in one game always share them and they separate
+    /// nothing. Making a portal one-shot or cooling-down would give it state, and then it
+    /// needs its own Zobrist table — the same edit that would break repetition detection,
+    /// because the two are one fact.
+    ///
+    /// One <c>ulong</c> rather than a mouth bitboard on purpose: it lands in the eight
+    /// bytes of padding the 16-byte-aligned pickup boards leave behind, so the struct the
+    /// search copies at every node does not grow. A <c>UInt128</c> here would widen every
+    /// node of every search, including on boards that have no portals at all.
+    /// </summary>
+    public ulong Portals;
 
     /// <summary>Squares still holding a spare wall to pick up. Cleared as they are taken.</summary>
     public UInt128 WallPickups;
@@ -238,6 +258,44 @@ public struct GameState
     /// <summary>Whether any pickup is still lying on the board.</summary>
     public readonly bool HasPickups => (WallPickups | SkipPickups) != 0;
 
+    /// <summary>
+    /// Whether the board has portals at all. Every portal-aware path is guarded by this,
+    /// so a board without them runs the code it ran before portals existed.
+    /// </summary>
+    public readonly bool HasPortals => Portals != 0;
+
+    /// <summary>The square a portal at this one leads to. Meaningless off a portal.</summary>
+    public static int PortalPartner(int cell) => Board.CellCount - 1 - cell;
+
+    /// <summary>Whether a portal has one of its two mouths on this square.</summary>
+    public readonly bool IsPortalMouth(int cell)
+    {
+        // Either mouth names the pair, so normalise to the lower of the two and the
+        // caller never has to know which end it is standing on.
+        int partner = Board.CellCount - 1 - cell;
+        return (Portals & (1UL << (cell < partner ? cell : partner))) != 0;
+    }
+
+    /// <summary>Both mouths of every portal, as a cell bitboard. Built once per fill.</summary>
+    public readonly UInt128 PortalMouths()
+    {
+        UInt128 mouths = 0;
+        ulong pairs = Portals;
+
+        while (pairs != 0)
+        {
+            int low = System.Numerics.BitOperations.TrailingZeroCount(pairs);
+            pairs &= pairs - 1;
+            mouths |= Board.Bit(low) | Board.Bit(Board.CellCount - 1 - low);
+        }
+
+        return mouths;
+    }
+
+    /// <summary>Links a square to its opposite number under a half turn. Build time only.</summary>
+    public void PlacePortal(int cell) =>
+        Portals |= 1UL << Math.Min(cell, Board.CellCount - 1 - cell);
+
     /// <summary>The player who has reached their goal row, or -1 if the game is live.</summary>
     public readonly int Winner
     {
@@ -332,7 +390,9 @@ public struct GameState
 
     /// <summary>
     /// Writes every legal pawn step for the side to move into <paramref name="dest"/>
-    /// and returns the count. At most 5 moves exist, so a 8-wide stack buffer is plenty.
+    /// and returns the count. At most 8 moves exist — 5 without portals, and 4 plain
+    /// steps plus the far mouth's 4 free sides when a portal's other end is occupied —
+    /// so a 10-wide stack buffer is plenty.
     /// </summary>
     public readonly int GeneratePawnMoves(Span<Move> dest)
     {
@@ -367,6 +427,30 @@ public struct GameState
             }
         }
 
+        // A portal is an ordinary undirected edge, so travelling it is one step and it
+        // passes the turn like any other. The Portals test comes first so a board without
+        // them pays a single predicted-not-taken branch per generation.
+        if (Portals != 0 && IsPortalMouth(me))
+        {
+            int far = PortalPartner(me);
+
+            if (far != opponent)
+            {
+                dest[count++] = Move.ToCell(far);
+            }
+            else
+            {
+                // The portal edge has no axis, so "hop straight over" has no meaning —
+                // which is the case the side-step branch above already exists for. All
+                // four sides count, since none of them is back the way you came. No free
+                // side and the portal is simply not on offer this turn, exactly as a jump
+                // with nowhere to land is not.
+                for (int side = 0; side < 4; side++)
+                    if (!Blocked(far, side))
+                        dest[count++] = Move.ToCell(far + Board.Delta[side]);
+            }
+        }
+
         return count;
     }
 
@@ -374,7 +458,7 @@ public struct GameState
     {
         if (!Board.InBounds(row, col)) return false;
 
-        Span<Move> buffer = stackalloc Move[8];
+        Span<Move> buffer = stackalloc Move[10];
         int count = GeneratePawnMoves(buffer);
         int cell = Board.Index(row, col);
 
@@ -394,7 +478,7 @@ public struct GameState
     {
         var moves = new List<Move>(64);
 
-        Span<Move> pawn = stackalloc Move[8];
+        Span<Move> pawn = stackalloc Move[10];
         int count = GeneratePawnMoves(pawn);
         for (int i = 0; i < count; i++) moves.Add(pawn[i]);
 
