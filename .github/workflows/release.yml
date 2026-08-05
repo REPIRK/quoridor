@@ -9,7 +9,55 @@ permissions:
   contents: write
 
 jobs:
+  # The phone build goes first and the Windows job waits for it, so a release is never
+  # half a release: either both files are attached or neither is.
+  android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '9.0.x'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Workloads
+        run: dotnet workload restore src/Quoridor.Droid/Quoridor.Droid.csproj
+
+      - name: Android SDK
+        run: >
+          dotnet build src/Quoridor.Droid/Quoridor.Droid.csproj
+          -t:InstallAndroidDependencies -f net9.0-android
+          -p:AndroidSdkDirectory=$ANDROID_SDK_ROOT
+          -p:AcceptAndroidSDKLicenses=true
+
+      # The same checks the desktop build has to pass. The rules and the engine are the
+      # same assemblies on both, so a phone release earns its way out the same way.
+      - name: Checks
+        run: dotnet run --project tests/Quoridor.Selftest -c Release
+
+      - name: Publish
+        run: >
+          dotnet publish src/Quoridor.Droid/Quoridor.Droid.csproj
+          -c Release -f net9.0-android
+          -p:AndroidSdkDirectory=$ANDROID_SDK_ROOT
+          -o release
+
+      - name: Name it after the tag
+        run: mv release/*-Signed.apk Quoridor.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: Quoridor.apk
+
   windows:
+    needs: android
     runs-on: windows-latest
 
     steps:
@@ -35,18 +83,24 @@ jobs:
           -p:DebugType=none
           -o release
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create ${{ github.ref_name }} release/Quoridor.exe
+          gh release create ${{ github.ref_name }} release/Quoridor.exe Quoridor.apk
           --title "Quoridor ${{ github.ref_name }}"
-          --notes "### Download **Quoridor.exe** below — that one file is the game.
+          --notes "### Windows: download **Quoridor.exe**. Android: download **Quoridor.apk**.
 
-          Run it and play. Nothing to install, no .NET needed.
+          Either one is the whole game. Nothing to install alongside it, no .NET needed.
 
           The two *Source code* archives are added by GitHub automatically. They are this repository, not the game — you do not need them.
 
-          Local play, three engine strengths, a chess clock, engine against engine, game review, and play against someone else over your network.
+          Local play, three engine strengths, a chess clock, engine against engine, game review, portals and the other board settings, and play against someone else — over your network on Windows, over a link on Android and in the browser.
+
+          The APK is signed with the debug key, which is what sideloading wants and what Android will accept from a file you downloaded yourself. Your phone will ask you to allow installing it. It is not signed for Play, which would need a private key this repository does not hold.
 
           Prefer not to download anything? The browser version is at https://repirk.github.io/quoridor/"
