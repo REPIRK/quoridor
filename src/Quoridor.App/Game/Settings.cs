@@ -27,6 +27,15 @@ public sealed class Settings
     /// <summary>How long the hard bot may think about one move.</summary>
     public int EngineMoveTimeMs { get; set; } = 1200;
 
+    /// <summary>
+    /// Whether the engine keeps searching while you are deciding. Its answer comes back
+    /// no slower either way — the thinking happens in time that would otherwise be spent
+    /// idle — but it costs a processor core for as long as you take, which on a laptop
+    /// is battery. That is a cost the game cannot see, so it is a switch rather than a
+    /// decision made for you.
+    /// </summary>
+    public bool Ponder { get; set; } = true;
+
     /// <summary>Minimum time one move takes in a watched engine game.</summary>
     public int WatchPaceMs { get; set; } = 1400;
 

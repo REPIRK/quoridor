@@ -114,6 +114,7 @@ public partial class GameView : UserControl
             _clockTimer?.Stop();
             _closed = true;
             _thinking?.Cancel();
+            _session.StopPondering();
             _peer?.Dispose();
         };
 
@@ -124,6 +125,9 @@ public partial class GameView : UserControl
             UpdateUi();
             StartClock();
             StartEngineIfItsTurn();
+
+            // The first move of the game is often the longest anyone thinks about it.
+            StartPonderingIfItIsYourMove();
         };
 
         PreviewKeyDown += OnPreviewKeyDown;
@@ -203,6 +207,20 @@ public partial class GameView : UserControl
         UpdateUi();
 
         if (_session.IsOver) Finish();
+
+        StartPonderingIfItIsYourMove();
+    }
+
+    /// <summary>
+    /// Hands the time the human is about to spend to the engine, when there is a human
+    /// on move to spend it. This side only decides when a ponder is worth starting:
+    /// everything that moves the game on ends it by itself, inside the session.
+    /// </summary>
+    private void StartPonderingIfItIsYourMove()
+    {
+        if (_closed || _busy || _reviewPly is not null) return;
+
+        _session.StartPondering();
     }
 
     /// <summary>
@@ -319,6 +337,7 @@ public partial class GameView : UserControl
         _board.Reset(_session.State, LastMove);
         UpdateUi();
         StartClock();
+        StartPonderingIfItIsYourMove();
     }
 
     /// <summary>
@@ -374,6 +393,11 @@ public partial class GameView : UserControl
         // it when the abandoned search finally answers.
         _thinking?.Cancel();
 
+        // Restarting in place stops the ponder by itself; swapping sides replaces the
+        // whole session, and the one being left behind would otherwise go on thinking
+        // about a game nobody is playing any more.
+        _session.StopPondering();
+
         // Before the move list is emptied, not after: the review ply is an index into it.
         LeaveReview();
 
@@ -398,12 +422,14 @@ public partial class GameView : UserControl
         UpdateUi();
         StartClock();
         StartEngineIfItsTurn();
+        StartPonderingIfItIsYourMove();
     }
 
     private void LeaveToMenu()
     {
         _closed = true;
         _thinking?.Cancel();
+        _session.StopPondering();
         _clockTimer?.Stop();
         _host.ShowMenu();
     }
@@ -485,7 +511,15 @@ public partial class GameView : UserControl
             return;
         }
 
-        if (_reviewPly is null) _thinking?.Cancel();
+        if (_reviewPly is null)
+        {
+            _thinking?.Cancel();
+
+            // Review leaves the position alone, so the session has no reason to stop the
+            // ponder on its own — but a search nobody can act on is a core spent on
+            // nothing while you read the game back.
+            _session.StopPondering();
+        }
 
         _reviewPly = target;
         _clockTimer?.Stop();
@@ -514,6 +548,7 @@ public partial class GameView : UserControl
         UpdateUi();
         StartClock();
         StartEngineIfItsTurn();
+        StartPonderingIfItIsYourMove();
     }
 
     private void UpdateReviewChrome()

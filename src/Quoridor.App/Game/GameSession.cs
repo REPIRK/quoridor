@@ -87,6 +87,20 @@ public sealed class GameSession
     /// </summary>
     private Task _agentIdle = Task.CompletedTask;
 
+    /// <summary>
+    /// Stops the search the engine is running on the human's time. It is a second token
+    /// and not the one above because a ponder runs on its own engine, so the two are
+    /// never the same search and are never cancelled for the same reason: this one ends
+    /// because the position moved on, that one because the answer is no longer wanted.
+    /// </summary>
+    private CancellationTokenSource? _ponderStop;
+
+    /// <summary>
+    /// The tail of the chain of ponders, completed when the ponder engine is free. One
+    /// engine means one search at a time here as much as it does above.
+    /// </summary>
+    private Task _ponderIdle = Task.CompletedTask;
+
     public GameSession(GameOptions options)
     {
         Options = options;
@@ -94,8 +108,8 @@ public sealed class GameSession
         switch (options.Mode)
         {
             case GameMode.VersusBot:
-                _agents[options.HumanSeat ^ 1] =
-                    AgentFactory.Create(options.Strength, Settings.Current.EngineMoveTime);
+                _agents[options.HumanSeat ^ 1] = AgentFactory.Create(
+                    options.Strength, Settings.Current.EngineMoveTime, ponder: Settings.Current.Ponder);
                 break;
 
             case GameMode.Spectate:
@@ -188,6 +202,8 @@ public sealed class GameSession
     {
         if (IsOver || !State.IsLegal(move)) return false;
 
+        StopPondering();
+
         int mover = State.SideToMove;
         int wallsBefore = State.WallsOf(mover);
 
@@ -237,6 +253,8 @@ public sealed class GameSession
     {
         if (!CanUndo) return false;
 
+        StopPondering();
+
         int rewind = Options.Mode == GameMode.Hotseat ? 1 : 2;
         int target = _positions.Count - rewind;
 
@@ -250,6 +268,8 @@ public sealed class GameSession
 
     public void Restart()
     {
+        StopPondering();
+
         _positions.Clear();
         _moves.Clear();
         _flagged = -1;
@@ -297,6 +317,23 @@ public sealed class GameSession
             }
         }
 
+        // The ponder is on its own engine and the table is lock-free, so this is not a
+        // matter of correctness — it is a matter of speed. Pondering is only free if the
+        // engine's answer comes back no slower than it does without it, and that is only
+        // true if the ponder is off the processor before the real search is on it.
+        StopPondering();
+
+        if (!_ponderIdle.IsCompleted)
+        {
+            try
+            {
+                await _ponderIdle;
+            }
+            catch
+            {
+            }
+        }
+
         // Waiting for the agent can take as long as the abandoned search does, by which
         // time this one may have been given up on too.
         cancellationToken.ThrowIfCancellationRequested();
@@ -313,11 +350,75 @@ public sealed class GameSession
 
         GameState snapshot = State;
 
-        var history = new ulong[_positions.Count];
-        for (int i = 0; i < _positions.Count; i++) history[i] = _positions[i].Hash;
-        agent.SetGameHistory(history);
+        agent.SetGameHistory(HistoryHashes());
 
         return await Task.Run(() => agent.ChooseMove(snapshot, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Sets the engine searching the position the human is looking at, on the thread it
+    /// would otherwise spend idle. Nothing is played out of it and no answer is kept —
+    /// the one thing it leaves behind is a transposition table warmed on the subtree the
+    /// game is about to enter, whichever move the human settles on. So the engine's own
+    /// answer arrives exactly as fast as it does today, and rather better informed.
+    ///
+    /// Only against the engine, and only while a human really is on move. A local match
+    /// and a network game have no engine to spare, and a watched game has no idle thread
+    /// to fill because the engine is the one thinking in it.
+    /// </summary>
+    public void StartPondering()
+    {
+        if (!Settings.Current.Ponder || Options.Mode != GameMode.VersusBot || !IsHumanTurn) return;
+        if (_agents[State.SideToMove ^ 1] is not SearchAgent engine || !engine.CanPonder) return;
+
+        StopPondering();
+
+        // Cancelled and dropped rather than disposed: the ponder being cancelled goes on
+        // reading the token it was handed until it notices, and a source with no
+        // registrations and no wait handle has nothing to release.
+        var stop = new CancellationTokenSource();
+        _ponderStop = stop;
+
+        CancellationToken token = stop.Token;
+        GameState snapshot = State;
+        ulong[] history = HistoryHashes();
+
+        // Chained behind the previous ponder for the same reason the real searches are
+        // chained: one engine, one search at a time. The one before this has already
+        // been asked to stop, so the wait is milliseconds.
+        Task previous = _ponderIdle;
+
+        _ponderIdle = Task.Run(async () =>
+        {
+            if (!previous.IsCompleted)
+            {
+                try
+                {
+                    await previous;
+                }
+                catch
+                {
+                }
+            }
+
+            engine.Ponder(snapshot, history, token);
+        });
+    }
+
+    /// <summary>
+    /// Asks the ponder to stop, without waiting for it to notice. Every method that
+    /// moves the position on calls this, which is what stops a ponder outliving the
+    /// position it was rooted at: the view has only to decide when to start one, and
+    /// cannot forget to end it.
+    /// </summary>
+    public void StopPondering() => _ponderStop?.Cancel();
+
+    /// <summary>The hash of every position the game has already stood in, oldest first.</summary>
+    private ulong[] HistoryHashes()
+    {
+        var history = new ulong[_positions.Count];
+        for (int i = 0; i < _positions.Count; i++) history[i] = _positions[i].Hash;
+        return history;
     }
 
     /// <summary>Distance to goal for each player, for the side panels.</summary>

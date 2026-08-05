@@ -859,6 +859,11 @@
         if (ply is null || ply >= played)
         {
             _reviewPly = null;
+
+            // Reading back through the game is not deciding what to play, so the move
+            // starts again here. Counting it would have the engine answer a long look
+            // at the opening with a long search of its own.
+            _handedOver = System.Diagnostics.Stopwatch.GetTimestamp();
             return;
         }
 
@@ -888,7 +893,12 @@
         get
         {
             if (_session.IsOver) return WinnerLabel;
-            if (_saidThinking) return "Thinking";
+
+            // The one chance to say it. Nothing repaints while the search holds the only
+            // thread, so a wait that is longer than usual cannot be shown as it happens —
+            // it has to be promised beforehand, or it is just a page that has stopped.
+            if (_saidThinking)
+                return _budgetMs > WebSession.FastBudgetMs ? "Taking a longer look" : "Thinking";
 
             if (_session.Mode == WebMode.Online)
                 return _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
@@ -1529,6 +1539,14 @@
         // one: the full engine is worth announcing, and the two handicapped bots answer
         // faster than the word could be read.
         _lastThinkMs = _session.Strength == BotStrength.Hard ? SlowSearchMs : 0;
+
+        // A position nobody has looked at yet owes the engine nothing. Set here rather
+        // than at each of the several places a game can begin again from — a new game, a
+        // rematch, a move taken back, a board arriving over the network — because what
+        // they have in common is that the thinking done before them was about something
+        // else.
+        _handedOver = System.Diagnostics.Stopwatch.GetTimestamp();
+        _budgetMs = WebSession.FastBudgetMs;
     }
 
     // ================================================================ the finish ==
@@ -1705,6 +1723,11 @@
     {
         if (_thinking || !_session.IsHumanTurn) return;
 
+        // Settled here, at the click, because everything after it belongs to somebody
+        // else: the pawn's animation and then the search itself are not the player's
+        // thinking, and neither is the move they are about to watch land.
+        _budgetMs = _session.BudgetFor(SinceHandover());
+
         int ply = _session.Moves.Count;
         if (!_session.Apply(move)) return;
 
@@ -1772,7 +1795,11 @@
             while (_session.IsBotTurn)
             {
                 _thinking = true;
-                _saidThinking = _lastThinkMs >= SlowSearchMs;
+
+                // A search that has been given extra time is always worth announcing,
+                // whatever the last one cost: the whole point of the extra time is that
+                // the player can tell it was taken on purpose.
+                _saidThinking = _lastThinkMs >= SlowSearchMs || _budgetMs > WebSession.FastBudgetMs;
 
                 // A wait worth mentioning is announced and then paid for; one that is
                 // over before it can be read is simply taken. Easy answers in a few
@@ -1789,9 +1816,14 @@
                 // this one will take, and it costs nothing to keep.
                 long started = System.Diagnostics.Stopwatch.GetTimestamp();
 
-                Move move = _session.Think();
+                Move move = _session.Think(_budgetMs);
 
                 _lastThinkMs = (int)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
+                // The extra time was earned once, by one think. An engine that has found a
+                // free move plays again immediately, and spending the same allowance on
+                // every move of that chain is how a bounded pause becomes an unbounded one.
+                _budgetMs = WebSession.FastBudgetMs;
 
                 _session.Apply(move);
                 _ = SoundFor(move);
@@ -1804,6 +1836,10 @@
                 // again — it found a free move — its pawn has to arrive first.
                 await Task.Delay(MoveAnimationMs);
             }
+
+            // The board is the player's again from here, and how long they keep it is what
+            // the engine's next answer is measured against.
+            _handedOver = System.Diagnostics.Stopwatch.GetTimestamp();
         }
         finally
         {
@@ -1828,6 +1864,24 @@
     /// The engine having the thread is <see cref="_thinking"/>; this is only whether the
     /// panel says so.</summary>
     private bool _saidThinking;
+
+    /// <summary>
+    /// When the board last became the player's. Nothing runs against this — there is one
+    /// thread and the engine is not on it while the player is deciding. It is read once,
+    /// at the moment they commit, to work out what the engine gets in return.
+    /// </summary>
+    private long _handedOver = System.Diagnostics.Stopwatch.GetTimestamp();
+
+    /// <summary>What the next search may spend, decided before the page goes quiet.</summary>
+    private int _budgetMs = WebSession.FastBudgetMs;
+
+    /// <summary>
+    /// How long the board has been the player's. Anything past ten minutes is a tab that
+    /// was left open rather than a think, and the rule treats it as one: everything above
+    /// the ceiling already means the same thing.
+    /// </summary>
+    private int SinceHandover() => (int)Math.Clamp(
+        System.Diagnostics.Stopwatch.GetElapsedTime(_handedOver).TotalMilliseconds, 0, 600_000);
 
     private async Task SelectAll(FocusEventArgs _) =>
         await Js.InvokeVoidAsync("document.execCommand", "selectAll", false, null);

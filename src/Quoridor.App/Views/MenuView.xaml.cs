@@ -522,6 +522,12 @@ public partial class MenuView : UserControl
         Bind(value => settings.EngineMoveTimeMs = value,
             (EngineFastOption, 400), (EngineNormalOption, 1200), (EngineDeepOption, 3000));
 
+        // Takes effect on the next game rather than this one: which engine a session
+        // plays with, and how large a table it plays over, are decided when it is built.
+        (settings.Ponder ? PonderOnOption : PonderOffOption).IsChecked = true;
+        PonderOnOption.Checked += (_, _) => Store(() => settings.Ponder = true);
+        PonderOffOption.Checked += (_, _) => Store(() => settings.Ponder = false);
+
         Choose(settings.WatchPaceMs, (PaceBriskOption, 500), (PaceSteadyOption, 1400), (PaceCalmOption, 2800));
         Bind(value => settings.WatchPaceMs = value,
             (PaceBriskOption, 500), (PaceSteadyOption, 1400), (PaceCalmOption, 2800));

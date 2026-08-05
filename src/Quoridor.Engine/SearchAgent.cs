@@ -15,9 +15,34 @@ namespace Quoridor.Engine;
 /// </summary>
 public sealed class SearchAgent : IQuoridorAgent
 {
+    /// <summary>
+    /// The longest one ponder is allowed to run, however long the opponent takes over the
+    /// rest of their turn. The deepening loop stops starting iterations it cannot finish
+    /// in half the budget, so in practice a ponder ends between seven and fifteen seconds
+    /// — which is the intent rather than an accident. This engine writes on the order of
+    /// a million entries a second, so somewhere around here a ponder fills the table and
+    /// begins competing with itself for slots, evicting its own earlier work and the
+    /// previous real search's along with it. A human who thinks for a minute is not made
+    /// any better off by the last forty-five seconds of it.
+    /// </summary>
+    private static readonly TimeSpan PonderBudget = TimeSpan.FromSeconds(15);
+
     private readonly TranspositionTable _table;
     private readonly SearchEngine[] _engines;
     private readonly int _maxDepth;
+
+    /// <summary>
+    /// The engine that searches while the opponent is on move. It is deliberately not
+    /// one of <see cref="_engines"/>: a <see cref="SearchEngine"/> keeps the whole of
+    /// its working state in instance fields — move stack, killers, history, and the flag
+    /// that says to stop — so the only way a ponder can be unable to corrupt a real
+    /// search is for the two never to be the same object. Null unless pondering was
+    /// asked for, so an agent that will never ponder allocates exactly what it did before.
+    /// </summary>
+    private readonly SearchEngine? _ponderEngine;
+
+    /// <summary>0 while the ponder engine is free, 1 while it is searching.</summary>
+    private int _pondering;
 
     private ulong[] _positionHistory = Array.Empty<ulong>();
 
@@ -27,7 +52,8 @@ public sealed class SearchAgent : IQuoridorAgent
         int threads = 1,
         int tableMegabytes = 64,
         EvaluationWeights? weights = null,
-        EngineOptions? options = null)
+        EngineOptions? options = null,
+        bool ponder = false)
     {
         _maxDepth = Math.Clamp(maxDepth, 1, SearchEngine.MaxPly - 4);
         DefaultMoveTime = moveTime ?? TimeSpan.FromMilliseconds(1000);
@@ -37,6 +63,12 @@ public sealed class SearchAgent : IQuoridorAgent
         int count = Math.Clamp(threads, 1, Math.Max(1, Environment.ProcessorCount));
         _engines = new SearchEngine[count];
         for (int i = 0; i < count; i++) _engines[i] = new SearchEngine(_table, weights, options, threadIndex: i);
+
+        // Thread index zero: a non-zero one makes the root swap its second move for a
+        // different one, which is how lazy SMP helpers avoid repeating the main thread.
+        // Nobody else is searching this root, so there is nothing to differ from and an
+        // honest move order is worth more than a varied one.
+        if (ponder) _ponderEngine = new SearchEngine(_table, weights, options, threadIndex: 0);
     }
 
     public string Name => "Bot · Hard";
@@ -54,6 +86,9 @@ public sealed class SearchAgent : IQuoridorAgent
     public SearchResult LastResult { get; private set; }
 
     public int Threads => _engines.Length;
+
+    /// <summary>Whether this agent was built with an engine to spare for pondering.</summary>
+    public bool CanPonder => _ponderEngine is not null;
 
     public void SetGameHistory(ReadOnlySpan<ulong> positionHashes)
     {
@@ -80,6 +115,42 @@ public sealed class SearchAgent : IQuoridorAgent
         // A move can only reach here after being generated and validated, but the
         // table is shared and lock-free, so make the guarantee explicit.
         return MoveCandidates.IsLegal(root, result.Move) ? result.Move : HeuristicAgent.Fallback(root);
+    }
+
+    /// <summary>
+    /// Searches <paramref name="state"/> for as long as the token allows, purely to fill
+    /// the shared table for the search that will follow. Meant for the opponent's own
+    /// position while they are deciding what to do with it: whatever they play, the game
+    /// descends into a subtree this has already been through, so there is no prediction
+    /// to get wrong and nothing to restart on a miss.
+    ///
+    /// It returns nothing on purpose. There is no result here that could reach the board
+    /// because there is no result at all — nothing is written to <see cref="LastResult"/>,
+    /// nothing to <see cref="MoveTime"/>, nothing to the stored game history, and no new
+    /// table generation is opened. All of those belong to the move actually being played.
+    ///
+    /// The history is a parameter rather than a call to <see cref="SetGameHistory"/>
+    /// because that method replaces the array <see cref="ChooseMove"/> reads, and a
+    /// ponder has no business touching what the next real search will be given.
+    /// </summary>
+    public void Ponder(in GameState state, ReadOnlySpan<ulong> positionHistory, CancellationToken token)
+    {
+        if (_ponderEngine is null || token.IsCancellationRequested) return;
+
+        // Two searches on one engine is the bug this whole arrangement exists to make
+        // impossible, so a second ponder is refused here rather than left to every
+        // caller to sequence for itself.
+        if (Interlocked.Exchange(ref _pondering, 1) != 0) return;
+
+        try
+        {
+            _ponderEngine.Search(
+                state, _maxDepth, Stopwatch.StartNew(), PonderBudget, positionHistory, token);
+        }
+        finally
+        {
+            Volatile.Write(ref _pondering, 0);
+        }
     }
 
     private SearchResult SearchInParallel(GameState root, ulong[] history, Stopwatch clock, CancellationToken cancellationToken)

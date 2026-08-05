@@ -36,7 +36,13 @@ public interface IQuoridorAgent
 
 public static class AgentFactory
 {
-    public static IQuoridorAgent Create(BotStrength strength, TimeSpan? moveTime = null, int? seed = null) =>
+    /// <summary>
+    /// Builds the agent for a strength. <paramref name="ponder"/> asks the hard bot for
+    /// an engine it can run while the opponent is on move; only a caller that will
+    /// actually drive it should ask.
+    /// </summary>
+    public static IQuoridorAgent Create(
+        BotStrength strength, TimeSpan? moveTime = null, int? seed = null, bool ponder = false) =>
         strength switch
         {
             BotStrength.Easy => new HeuristicAgent(BotStrength.Easy, seed),
@@ -47,6 +53,18 @@ public static class AgentFactory
             _ => new SearchAgent(
                 maxDepth: 32,
                 moveTime: moveTime ?? TimeSpan.FromMilliseconds(1200),
-                threads: 1),
+                threads: 1,
+
+                // The table stays 64 MB whether or not the bot ponders, and that is a
+                // measured decision rather than an obvious one. The argument for growing
+                // it was good: a ponder writes about a million entries a second for as
+                // long as the human takes, so at 64 MB a long think spends its back half
+                // evicting its own front half. The games disagreed. A 256 MB table with
+                // pondering never switched on scored 39:56 over 96 games against the
+                // ordinary one, losing or drawing all four independent runs — enough to
+                // cancel the roughly +0.4 ply the ponder itself is worth. Whatever the
+                // eviction costs, being four times the size costs more.
+                tableMegabytes: 64,
+                ponder: ponder),
         };
 }
