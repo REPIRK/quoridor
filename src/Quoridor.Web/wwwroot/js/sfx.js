@@ -134,6 +134,15 @@ export function play(kind) {
             tone(now + 0.14, { from: 1047, gain: 0.45, length: 0.26 });
             break;
 
+        case 'portal':
+            // A step through a portal, in the two halves the board draws it in: a note
+            // falling away at the near mouth, a gap where nothing is crossing, then one
+            // rising at the far one. The silence in the middle is the part that says the
+            // pawn was not anywhere while it went.
+            tone(now, { type: 'triangle', from: 740, to: 300, gain: 0.4, length: 0.12 });
+            tone(now + 0.17, { from: 380, to: 1050, gain: 0.44, length: 0.22 });
+            break;
+
         case 'win':
             tone(now, { from: 523, gain: 0.45, length: 0.18 });
             tone(now + 0.12, { from: 659, gain: 0.45, length: 0.18 });

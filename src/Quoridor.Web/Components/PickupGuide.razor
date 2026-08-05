@@ -2,10 +2,16 @@
    explain nothing on their own, so they are drawn here at the size they appear at,
    next to the sentence that says what taking one gets you. *@
 
-<div class="guide">
+<div class="guide @(Carved ? "carved" : "")">
     <div class="line">
         <svg class="glyph" viewBox="0 0 40 28" aria-hidden="true">
-            <rect class="pickup wall" x="7" y="10" width="26" height="8" rx="2" />
+            @* The same three faces at the same offsets the board draws them at, around a
+               centre of its own, so the legend shows the object and not a diagram of it. *@
+            <g class="pickup wall" transform="translate(20 14)">
+                <rect class="cast" rx="2" x="-9" y="1" width="26" height="8" />
+                <rect class="side" rx="2" x="-13" y="-4" width="26" height="8" />
+                <rect class="top" rx="2" x="-17" y="-8" width="26" height="8" />
+            </g>
         </svg>
         <div>
             <b>Two spare walls.</b>
@@ -16,7 +22,26 @@
 
     <div class="line">
         <svg class="glyph" viewBox="0 0 40 28" aria-hidden="true">
+            @* Its own copies of the two gradients rather than the board's: this legend is
+               read on the setup screen, and whether a board happens to be behind it is not
+               something the picture of a token should depend on. *@
+            <defs>
+                <radialGradient id="guide-dome" cx="50%" cy="50%" r="62%" fx="33%" fy="27%">
+                    <stop offset="0%" stop-color="var(--lit)" stop-opacity="0.34" />
+                    <stop offset="52%" stop-color="var(--lit)" stop-opacity="0" />
+                    <stop offset="100%" stop-color="var(--shade)" stop-opacity="0.26" />
+                </radialGradient>
+
+                <radialGradient id="guide-contact">
+                    <stop offset="0%" stop-color="var(--shadow)" stop-opacity="0.55" />
+                    <stop offset="100%" stop-color="var(--shadow)" stop-opacity="0" />
+                </radialGradient>
+            </defs>
+
             <g class="pickup skip" transform="translate(20 14)">
+                <ellipse class="contact" cx="3" cy="5" rx="12" ry="5" />
+                <circle class="token" r="13" />
+                <circle class="dome" r="13" />
                 <path class="arc" d="M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36" />
                 <path class="head" d="M -2.83 -9.90 L -4.10 -4.10 L -8.63 -8.63 Z" />
             </g>
@@ -35,3 +60,13 @@
         and it is gone.
     </p>
 </div>
+
+@code {
+    /// <summary>
+    /// Follows the board's own switch, so the legend draws the thing the player is about
+    /// to see rather than a second opinion about it. The glyphs are the board's pieces at
+    /// the size the board draws them, and a flat legend beside a carved board would be
+    /// explaining a picture that is not on the screen.
+    /// </summary>
+    [Parameter] public bool Carved { get; set; }
+}

@@ -1,5 +1,5 @@
-/* Ink on paper — the same palette the desktop build uses, as custom properties so
-   the two themes are one set of swaps rather than two stylesheets. */
+/* One lamp, fixed above and to the left of the table. Every gradient, offset and
+   shadow below agrees with it; nothing here is a filter or a per-frame recompute. */
 
 :root,
 [data-theme="dark"] {
@@ -9,20 +9,66 @@
 
     --bg: #171714;
     --surface: #1f1e1b;
-    --board: #1c1b18;
 
-    /* The two ends of the board's gradient, a shade either side of --board. */
-    --board-top: #211f1b;
-    --board-bottom: #191815;
+    /* The rim of the tray is the raised part, so it is the lightest wood here. */
+    --board-top: #2b2823;
+    --board-bottom: #1e1c18;
 
+    /* The field the tiles are set into, and the dark directly under its top edge. */
+    --field: #131210;
+    --field-deep: #0b0a09;
+
+    /* A tile catches light along its top edge and loses it along its bottom one.
+       The body between them is --cell, so the three are guaranteed to agree. */
+    --tile-lit: #322f28;
     --cell: #262420;
+    --tile-shade: #1e1c19;
     --cell-edge: #2f2c27;
+
+    /* The flat board's own two tones, held apart from the rim and field above because they
+       are read only with the material board switched off: one tone under plain squares, and
+       the hairline of light along the edge of a wall lying on it. */
+    --board: #1c1b18;
+    --wall-edge: #e6dfd1;
+
     --line: #35322c;
     --text: #ede7da;
     --muted: #8b8375;
+
+    /* Light in the room, not paint on the board — which is why it is held apart. */
+    --lit: #fff6e6;
+    --lit-a: 0.055;
+    --shade: #000000;
+    --shade-a: 0.16;
+    --shadow: #070605;
+
+    /* The top face of a piece is the player's colour; the side is the same colour
+       with the light off it. */
     --p0: #6baaa6;
+    --p0-side: #3c6c6a;
     --p1: #d96c4a;
-    --wall-edge: #e6dfd1;
+    --p1-side: #8b3e2b;
+
+    /* Down through the board: the near wall, and the far one the light reaches. */
+    --pit: #0a0908;
+    --pit-lit: #1e1b17;
+
+    /* Both mouths of a portal pair are drawn in one ink, because where a mouth comes
+       out is the only thing anyone wants from it. Neither ink is a player's: a mouth
+       belongs to the board rather than to a side, and a violet opening beside a teal
+       pawn would otherwise read as that player's property. The deep of each is the
+       same hue taken down toward --pit, since the middle of a mouth is the part
+       furthest from the surface. The desktop board draws these two hues; it is the
+       same board. */
+    --portal-a: #9b87cf;
+    --portal-a-deep: #2a2340;
+    --portal-b: #c9a752;
+    --portal-b-deep: #3a2c0d;
+
+    /* The seam between the two reaches. Neither player's colour, because it is not
+       a piece — it is the shape the pieces make. */
+    --front: #b8ab90;
+
     --overlay: rgba(23, 23, 20, 0.93);
 }
 
@@ -31,20 +77,80 @@
 
     --bg: #e8e3d8;
     --surface: #f4f1e9;
+
+    --board-top: #e8e2d3;
+    --board-bottom: #d2cbba;
+
+    --field: #c9c1ae;
+    --field-deep: #b5ac96;
+
+    --tile-lit: #f8f5ed;
+    --cell: #ece7dc;
+    --tile-shade: #dcd5c5;
+    --cell-edge: #d3cbba;
+
+    /* On paper the light falls the other way round: the board is the darker of the two and
+       the edge along a wall is the ink, not the highlight. */
     --board: #dcd5c6;
+    --wall-edge: #2a2622;
 
-    --board-top: #e2dccd;
-    --board-bottom: #d5cebe;
-
-    --cell: #ede8dd;
-    --cell-edge: #ded7c8;
     --line: #c9c0ad;
     --text: #1c1a17;
     --muted: #6b6357;
+
+    /* A shadow on warm paper is a warm brown. Pure black here is the single thing
+       that would make the light theme look like a mistake. */
+    --lit: #ffffff;
+    --lit-a: 0.34;
+    --shade: #4a3f2c;
+    --shade-a: 0.12;
+    --shadow: #5d5340;
+
     --p0: #2d5b5d;
+    --p0-side: #17383a;
     --p1: #a6432a;
-    --wall-edge: #2a2622;
+    --p1-side: #67281a;
+
+    --pit: #8b8170;
+    --pit-lit: #a49a86;
+
+    /* Darker than the dark theme's rather than lighter, and deliberately so: on paper an
+       opening is the one thing that is not paper, and a pale mouth on a pale board is a
+       coin lying on it instead of a hole through it. */
+    --portal-a: #5a468f;
+    --portal-a-deep: #3b2d5e;
+    --portal-b: #836314;
+    --portal-b-deep: #4a3708;
+
+    --front: #6f6552;
+
     --overlay: rgba(232, 227, 216, 0.93);
+}
+
+/* ---- motion ------------------------------------------------------------------
+   This build has one thread and the engine takes it 330ms after a move. Every
+   duration below is stated so that nothing is still running when that happens —
+   an animation frozen at its own first frame is frozen at nothing visible.
+   --t-move and --t-place are the two that must never exceed the budget, and both
+   are named again in Play.razor as MoveAnimationMs / BoardEntranceMs. */
+
+:root {
+    --t-move:   0.30s;   /* the pawn slide, the arc, the contact shadow settling */
+    --t-place:  0.26s;   /* a wall landing, a pit opening, the front arriving     */
+    --t-quick:  0.16s;   /* a pickup laid down, a hint dot                        */
+    --t-panel:  0.35s;   /* off the board, off the budget: the tape, the overlay  */
+    --t-win:    0.60s;   /* only after IsGameOver, when nothing is thinking       */
+
+    /* Weight. Pieces decelerate into place; nothing overshoots except the one
+       thing that is meant to feel light. */
+    --ease-set:  cubic-bezier(0.2, 0.85, 0.35, 1);    /* a piece being set down  */
+    --ease-move: cubic-bezier(0.4, 0, 0.2, 1);        /* travel, both ends eased */
+    --ease-arc:  cubic-bezier(0.3, 0, 0.7, 1);        /* up and back down again  */
+    --ease-pop:  cubic-bezier(0.2, 0.9, 0.3, 1.15);   /* hints and rings only    */
+
+    /* Lift, in the board's own 728-unit space, so it scales with the board and is
+       identical on a 5x5. Mirrored by `Lift` in BoardView.razor. */
+    --lift: 4;
 }
 
 * { box-sizing: border-box; }
@@ -127,20 +233,40 @@ body {
     padding: 10px 28px 28px;
 }
 
-.board-wrap { display: flex; justify-content: center; }
+/* Pinned to the top of its row rather than centred in it. A grid row is as tall as its
+   tallest column, and the panel beside the board grows and shrinks by a line every time the
+   sentence under the status appears or changes — with the board centred, that sentence moves
+   the board under the cursor that asked for it. Whenever the board is the tallest thing in
+   the row, which is the ordinary case, this is the position it already had; it differs only
+   in exactly the case that was moving it. */
+.board-wrap { display: flex; justify-content: center; align-self: start; }
 
 .board {
     width: 100%;
     max-width: min(72vh, 100%);
     height: auto;
     display: block;
+
+    /* A board is a thing you tap. Without these a double tap zooms the page instead of
+       playing two moves, a drag across the board selects the coordinate labels, and the
+       browser paints its own grey box over the square under a thumb before the move it is
+       asking for has even been played. */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 /* ================================================================ players ==== */
 
+/* A column, so the figure that describes both seats can sit under both of them rather
+   than beside one. The breakpoints below lay the same three children out differently
+   without either seat having to know the figure exists. */
+.players { display: flex; flex-direction: column; }
+
 .player {
     display: grid;
-    grid-template-columns: 3px minmax(0, 1fr) auto;
+    grid-template-columns: 3px minmax(0, 1fr);
     gap: 14px;
     align-items: center;
     padding: 14px 0;
@@ -158,7 +284,9 @@ body {
 
 .player.on-move { opacity: 1; }
 
-.turn { width: 2px; height: 0; border-radius: 1px; transition: height 0.3s; }
+/* Short enough to read as the turn arriving rather than as a bar being animated: this
+   plays on every ply, and anything long enough to watch is long enough to wait for. */
+.turn { width: 2px; height: 0; border-radius: 1px; transition: height var(--t-quick) var(--ease-set); }
 
 .player.on-move .turn { height: 46px; }
 
@@ -183,14 +311,66 @@ body {
     color: var(--muted);
 }
 
-.steps {
+/* ---- the tape ----------------------------------------------------------------
+
+   The race, as one shape. Two grey monospace strings on opposite sides of a panel are
+   two numbers nobody subtracts; a bar leaning toward whoever gets home first is the
+   subtraction already done, and the size of the lean is the size of the lead. */
+
+.tape { display: flex; align-items: center; gap: 10px; padding: 14px 0 2px; }
+
+.tape .end {
     font-family: ui-monospace, Consolas, monospace;
     font-size: 12px;
-    color: var(--muted);
-    align-self: start;
-    padding-top: 4px;
+    min-width: 32px;
     white-space: nowrap;
 }
+
+/* Each player's own colour, at their own end. Which end is which is the whole of how
+   the bar is read, so it is said twice: by position and by ink. */
+.tape .end.p0 { color: var(--p0); text-align: left; }
+.tape .end.p1 { color: var(--p1); text-align: right; }
+
+.tape .rail {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--cell);
+    box-shadow: inset 0 0 0 1px var(--line);
+    overflow: hidden;
+}
+
+/* The middle, drawn after the bar so it is never buried by it: a bar leaning slightly
+   is only legible as leaning if there is something to lean away from. */
+.tape .rail::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--line);
+}
+
+/* Half the rail, scaled from the middle outward. A transform and not a width: this
+   moves every time the turn passes, and a width relaunches layout on the whole panel
+   for each frame of it while a transform composites what is already painted. */
+.tape .wedge {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 50%;
+    border-radius: 3px;
+    transform: scaleX(var(--edge, 0));
+    transition: transform var(--t-panel) var(--ease-move), background-color var(--t-panel);
+}
+
+/* One element, not two: which side it grows to is the origin it grows from, so the turn
+   passing slides the same bar across the middle rather than swapping one for another. */
+.tape .wedge.p0 { right: 50%; transform-origin: right center; background: var(--p0); }
+.tape .wedge.p1 { left: 50%; transform-origin: left center; background: var(--p1); }
 
 /* ================================================================== panel ==== */
 
@@ -217,8 +397,10 @@ body {
 
 .panel .heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 
-/* The only thing left where the instructions used to be. */
+/* The only thing left where the instructions used to be. Positioned because on a phone it
+   grows a hit area it does not grow into — see the narrow layout at the foot of the file. */
 .ask {
+    position: relative;
     font: inherit;
     font-size: 12px;
     line-height: 1;
@@ -257,6 +439,14 @@ body {
     font-family: ui-monospace, Consolas, monospace;
     font-size: 12.5px;
     color: var(--muted);
+
+    /* The gutter is held open whether or not there is a bar in it, so the three columns do
+       not step sideways on the move the list first outgrows its box — which is a move you
+       are looking at when it happens. And the scroll stops here: reaching the end of the
+       list should not hand the gesture on to the page and take the board off the screen. */
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    overscroll-behavior: contain;
 }
 
 .moves li {
@@ -286,6 +476,11 @@ body {
 
 /* ================================================================ buttons ==== */
 
+/* `touch-action` on everything that is pressed rather than only on the board: it is what
+   takes the browser's wait-and-see delay off a tap, and the delay is the whole of why a
+   button on a phone can feel like it did not register the first time. */
+button, .moves li { touch-action: manipulation; }
+
 button.ghost {
     font: inherit;
     font-size: 12.5px;
@@ -295,7 +490,10 @@ button.ghost {
     border-radius: 4px;
     padding: 8px 14px;
     cursor: pointer;
-    transition: background 0.15s, opacity 0.15s;
+
+    /* The border changes on hover as well as the background, and it used to snap while the
+       background faded — one gesture drawn in two speeds. Both now answer at once. */
+    transition: background var(--t-quick), border-color var(--t-quick), opacity var(--t-quick);
 }
 
 button.ghost:hover:not(:disabled) { background: var(--surface); border-color: var(--muted); }
@@ -305,14 +503,28 @@ button.ghost.on { color: var(--p0); border-color: var(--p0); }
 button.ghost.primary { padding: 10px 26px; }
 
 /* One focus ring for everything that takes focus. Without it a keyboard is left
-   guessing, and the browser's default ring does not belong on this page. */
+   guessing, and the browser's default ring does not belong on this page.
+
+   No border-radius here any more. An outline already follows the corners of whatever it is
+   drawn around, so the declaration bought nothing and quietly reshaped what it landed on:
+   a move row is rounded by 3 and was being squared up to 4 for as long as it held focus. */
 button:focus-visible,
 select:focus-visible,
 input:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible,
 .moves li:focus-visible {
     outline: 2px solid var(--p0);
     outline-offset: 2px;
-    border-radius: 4px;
+}
+
+/* And the same ring inside the board, drawn with a stroke rather than an outline: engines
+   still disagree about outlines on SVG shapes, and a hit target is a shape. It is drawn on
+   the target itself, which is exactly the square or the groove the key would play. */
+.board .hit:focus-visible {
+    outline: none;
+    stroke: var(--p0);
+    stroke-width: 3;
 }
 
 button.seg {
@@ -399,6 +611,13 @@ body:has(.overlay) { overflow: hidden; }
 
 .setup .fine { color: var(--muted); font-size: 12.5px; margin: 22px 0 0; line-height: 1.5; }
 
+/* Why a control is offering less than it did a moment ago. The 22px above is the gap
+   between one section and the next, and this belongs to the single row directly over it,
+   so it sits tight underneath and indented to the control rather than to the label — it
+   is answering for the control. The indent is the label's own width, and it goes away
+   with the label's column at the narrow layout below. */
+.setup .fine.why { margin: -4px 0 11px; padding-left: 100px; }
+
 .setup a { color: var(--p0); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 .setup a:hover { color: var(--p1); }
 
@@ -448,9 +667,22 @@ button.ghost.copy { padding: 7px 13px; font-size: 12.5px; white-space: nowrap; }
 
 .guide .glyph { width: 40px; height: 28px; flex: 0 0 40px; margin-top: 2px; }
 
-/* The board's own pickup styles are scoped under .board, so the copies drawn here
-   need their own — same ink, a little more of it since they are small and alone. */
-.guide .pickup.wall { fill: var(--text); stroke: none; opacity: 0.5; }
+/* The board's own pickup styles are scoped under .board, so the copies drawn here need
+   their own. The same pieces in the same ink, only with a little more of it on the arc,
+   since a single small glyph beside a sentence has nothing around it to read against.
+
+   Flat, like the board it is a legend for: the legend has to show the thing the reader is
+   about to see, and what the reader sees by default is the flat board. The carved copies
+   are below under `.guide.carved`, ready for whoever hands the setup screen the same switch
+   the board is given — nothing does today, and until something does this stays flat. */
+.guide .pickup.wall .cast,
+.guide .pickup.wall .top { fill: none; }
+
+.guide .pickup.wall .side { fill: var(--text); opacity: 0.5; }
+
+.guide .pickup.skip .token,
+.guide .pickup.skip .dome,
+.guide .pickup.skip .contact { fill: none; }
 
 .guide .pickup.skip .arc {
     fill: none;
@@ -461,6 +693,47 @@ button.ghost.copy { padding: 7px 13px; font-size: 12.5px; white-space: nowrap; }
 }
 
 .guide .pickup.skip .head { fill: var(--text); stroke: none; opacity: 0.62; }
+
+/* The same two pieces as objects, for a setup screen told that the board behind it is the
+   carved one. Nothing but the shading differs, which is the point of the switch. */
+.guide.carved .pickup.wall .cast { fill: var(--shadow); opacity: 0.34; }
+.guide.carved .pickup.wall .top { fill: var(--muted); stroke: var(--lit); stroke-width: 0.75; stroke-opacity: 0.22; }
+
+.guide.carved .pickup.wall .side {
+    fill: var(--muted);
+    fill: color-mix(in oklab, var(--muted) 55%, black);
+    opacity: 1;
+}
+
+.guide.carved .pickup.skip .token { fill: var(--muted); }
+.guide.carved .pickup.skip .dome { fill: url(#guide-dome); }
+.guide.carved .pickup.skip .contact { fill: url(#guide-contact); opacity: 0.7; }
+.guide.carved .pickup.skip .arc { opacity: 0.8; }
+.guide.carved .pickup.skip .head { opacity: 0.8; }
+
+/* The portal legend. Flat rings and no gradient: the board's two throats are painted from
+   #portal-a and #portal-b, which live in the board's own <defs>, and this glyph is read on
+   a setup screen where there may well be no board at all — the same reason the token above
+   carries its own copies of the dome and the contact shadow.
+
+   One ink for both rings, and the first pair's, because "both ends in one colour" is the
+   whole of the sentence this picture is illustrating; a second hue here would say the
+   opposite of what the words beside it say. */
+.guide .portal .rim { fill: none; stroke: var(--portal-a); stroke-width: 1.5; opacity: 0.75; }
+.guide .portal .iris { fill: none; stroke: var(--portal-a); stroke-width: 1.1; opacity: 0.45; }
+
+/* The tie between the two mouths, which the board itself does not draw and does not need
+   to: on the board the shared ink is enough, while here the two rings sit side by side
+   with nothing to say they are one object. Faint and dashed, so it reads as a relation
+   rather than as a third thing lying on the square. */
+.guide .portal .link {
+    fill: none;
+    stroke: var(--portal-a);
+    stroke-width: 1;
+    opacity: 0.35;
+    stroke-dasharray: 2 3;
+}
+
 .guide b { font-weight: 600; }
 .guide em { font-style: italic; }
 .guide .fine { margin: 0; }
@@ -488,8 +761,13 @@ select.pick {
     background-repeat: no-repeat;
 }
 
-select.pick:hover { border-color: var(--p1); }
-select.pick:focus-visible { outline: 1px solid var(--p1); outline-offset: 1px; }
+select.pick:hover:not(:disabled) { border-color: var(--p1); }
+
+/* A size that can carry only one number is still offered the control, so the number it
+   can carry is visible rather than absent — but it must not look like a choice, and the
+   sentence under it says why. Matches the slider, which is the other control here that
+   goes dead when the setup leaves it nothing to say. */
+select.pick:disabled { opacity: 0.35; cursor: default; }
 
 /* The option list is drawn by the browser, not by this stylesheet — `color-scheme`
    above is what makes it follow the theme. These are a belt-and-braces fallback for
@@ -552,15 +830,32 @@ input.slider::-moz-range-thumb {
 
    Every selector here is scoped under .board. The page and the board both have a
    thing called a hint and a thing called a ghost, and an unscoped `.ghost` with
-   pointer-events: none once made every button on the page unclickable. */
+   pointer-events: none once made every button on the page unclickable.
 
-/* A shallow top-to-bottom gradient rather than one flat tone: enough for the board to
-   sit on the page as an object, not so much that it becomes a texture. */
-.board .backdrop { fill: url(#board-sheen); stroke: var(--line); stroke-width: 1; }
+   TWO BOARDS, ONE MARKUP. What follows is the flat board, and it is the default: plain
+   fills, a plain bar for a wall, a darker square for a gap, a disc and a ring for a piece.
+   Everything that makes the board a lit physical object — the bevel, the well, the lamp,
+   the extrusions and their shadows, the domes, the shafts down a portal — is in the
+   `.board.carved` section below and is opt-in. The board draws the same elements either
+   way, so the flat mode is written by giving the faces that only mean something on a solid
+   piece no fill at all rather than by taking them out of the markup. The carved section is
+   the later of the two on purpose: where the two rules for one property are equally
+   specific, source order is what decides, and it decides in favour of the switch. */
 
-/* The squares get a hairline of their own so the grid has edges rather than only gaps. */
-.board .cell { stroke: var(--cell-edge); stroke-width: 0.75; }
-.board .cell { fill: var(--cell); opacity: 0.9; }
+/* The tray. One tone and a hairline: the field is drawn inside the rim but carries nothing
+   of its own here, so what is left is the single flat rectangle with the coordinate labels
+   sitting on it — which is the board this game had before it was lit. */
+.board .rim { fill: var(--board); stroke: var(--line); stroke-width: 1; }
+.board .field { fill: none; }
+
+/* The lamp is a thing only the carved board has. `display: none` rather than a transparent
+   fill, so the browser is not asked to composite a board-sized rect over every redraw for
+   nothing at all. */
+.board .board-light { display: none; pointer-events: none; }
+
+/* The squares get a hairline of their own so the grid has edges rather than only gaps, and
+   let a little of the board through — which is the whole of the relief a flat board has. */
+.board .cell { fill: var(--cell); opacity: 0.9; stroke: var(--cell-edge); stroke-width: 0.75; }
 
 /* Something lying on a square waiting to be stepped on. Drawn in the neutral ink
    rather than either player's colour, because it belongs to whoever gets there, and
@@ -570,7 +865,17 @@ input.slider::-moz-range-thumb {
    board is one SVG, so there is no cheap corner of it to animate. */
 .board .pickup { pointer-events: none; }
 
-.board .pickup.wall rect { fill: var(--text); stroke: none; opacity: 0.38; }
+/* A spare wall is drawn as a wall, so it is drawn the way a wall is drawn on this board:
+   the one face that lies in the plane of it, in the board's neutral ink because the piece
+   belongs to whoever reaches it rather than to either player. */
+.board .pickup.wall .side { fill: var(--text); opacity: 0.38; }
+
+/* And a free move is an arrow going round again, printed on the square: three quarters of a
+   circle and an arrowhead, saying "go again" without a word on it. The token it is stamped
+   on and the shadow that token stands in belong to the carved board. */
+.board .pickup.skip .token,
+.board .pickup.skip .dome,
+.board .pickup.skip .contact { fill: none; }
 
 .board .pickup.skip .arc {
     fill: none;
@@ -588,7 +893,7 @@ input.slider::-moz-range-thumb {
 .board .pickup-burst {
     pointer-events: none;
     transform-origin: 0 0;
-    animation: pickup-taken 0.26s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+    animation: pickup-taken var(--t-place) cubic-bezier(0.2, 0.8, 0.3, 1) both;
 }
 
 .board .pickup-burst .halo { fill: none; stroke-width: 3; }
@@ -601,15 +906,33 @@ input.slider::-moz-range-thumb {
 }
 
 
-/* A square out of play reads as a gap in the board rather than a darker square: no
-   fill at all, only a faint outline where the square would have been. */
-.board .cell.hole {
-    fill: none;
-    stroke: var(--line);
-    stroke-width: 1;
-    stroke-dasharray: 3 5;
-    opacity: 0.5;
-}
+/* A square out of play is a darker square: the mouth of the opening carries the whole of
+   it, and the floor that a carved board lets you see down to is not drawn. The hairline is
+   the cell's, so a gap keeps its place in the grid instead of becoming a hole in it. */
+.board .pit { pointer-events: none; }
+.board .pit .mouth { fill: var(--pit); stroke: var(--cell-edge); stroke-width: 0.75; }
+.board .pit .floor { fill: none; }
+
+/* A portal is two rings in the pair's ink, and the ink is the whole of the information:
+   where a mouth comes out is the only thing anyone wants from it, and both ends of one pair
+   share a colour so that question is answered at a glance. Neither ink is a player's, since
+   a mouth belongs to the board rather than to a side.
+
+   Flat there is no shaft to look down, so the bore and the throat carry nothing and what is
+   left is the edge where the board breaks and one ring inside it. Two rings and not one:
+   a single circle in a strong colour reads as a counter someone left on the square.
+
+   `lip` and not `rim`. The tray of the board is already `.board .rim`, and every mouth on
+   the board would otherwise be edged in the tray's own fill. */
+.board .portal { pointer-events: none; }
+.board .portal .bore,
+.board .portal .throat { fill: none; }
+
+.board .portal .lip { fill: none; stroke-width: 2; opacity: 0.85; }
+.board .portal .iris { fill: none; stroke-width: 1.2; opacity: 0.5; }
+
+.board .portal.pair-a .lip, .board .portal.pair-a .iris { stroke: var(--portal-a); }
+.board .portal.pair-b .lip, .board .portal.pair-b .iris { stroke: var(--portal-b); }
 
 .board .coord {
     fill: var(--muted);
@@ -624,25 +947,40 @@ input.slider::-moz-range-thumb {
 .board .goal.p0, .board .finish.p0 { fill: var(--p0); }
 .board .goal.p1, .board .finish.p1 { fill: var(--p1); }
 
-.board .wall { stroke: var(--wall-edge); stroke-width: 0.75; }
-.board .wall.p0 { fill: var(--p0); }
-.board .wall.p1 { fill: var(--p1); }
+/* A placed wall is a plain bar lying in its groove. Of the three faces the markup draws,
+   only the one at the slot's own geometry is filled — the face that would stand proud of
+   the board and the shadow it would throw are the carved board's, and both are left empty
+   here. The bar therefore occupies exactly the footprint the preview does, which is what
+   keeps meant and played the same shape at two weights. */
+.board .wall .cast,
+.board .wall .top { fill: none; }
 
-/* The lit edge. Drawn in the board's own highlight rather than either player's
-   colour, because it is light falling on the piece, not part of the piece. */
-.board .wall-lip { fill: var(--wall-edge); opacity: 0.3; pointer-events: none; }
+.board .wall.p0 .side { fill: var(--p0); }
+.board .wall.p1 .side { fill: var(--p1); }
+
+/* The lit edge along the piece: light falling on it rather than part of it, which is why
+   it is the room's ink and not the player's. Not on a spare wall lying loose on a square,
+   which is drawn in the board's neutral ink and has no edge to catch. */
+.board .wall:not(.pickup) .side { stroke: var(--wall-edge); stroke-width: 0.75; }
 
 /* Pointer, pending confirmation, and queued premove — same shapes, different weight. */
 .board .mark { pointer-events: none; }
 
 .board .mark.aim.square { opacity: 0.16; }
-.board .mark.aim.bar { opacity: 0.5; }
 .board .mark.aim.p0 { fill: var(--p0); }
 .board .mark.aim.p1 { fill: var(--p1); }
 
 .board .mark.chosen { opacity: 0.34; stroke-width: 2.5; }
 .board .mark.chosen.p0 { fill: var(--p0); stroke: var(--p0); }
 .board .mark.chosen.p1 { fill: var(--p1); stroke: var(--p1); }
+
+/* A wall you are only pointing at lies in the groove at exactly the footprint a played one
+   occupies, and is told from it by weight. On the carved board that difference is also the
+   difference between a flat shape and a solid piece with a shadow under it; here it is the
+   ink alone, which is what a laconic board has to say it with — and is enough, because the
+   two are the same shape in the same place and only one of them is faint. */
+.board .mark.aim.bar { opacity: 0.42; }
+.board .mark.chosen.bar { opacity: 0.7; }
 
 .board .mark.premove {
     fill: none;
@@ -661,7 +999,7 @@ input.slider::-moz-range-thumb {
     pointer-events: none;
     transform-origin: center;
     transform-box: fill-box;
-    animation: hint-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
+    animation: hint-in var(--t-quick) var(--ease-pop) both;
 }
 
 .board .hint-dot.p0 { fill: var(--p0); }
@@ -678,17 +1016,103 @@ input.slider::-moz-range-thumb {
 .board .last.p0 { stroke: var(--p0); fill: var(--p0); }
 .board .last.p1 { stroke: var(--p1); fill: var(--p1); }
 
-.board .route { fill: none; stroke-width: 2; stroke-dasharray: 1.4 2.2; stroke-linecap: round; opacity: 0.6; pointer-events: none; }
-.board .route.p0 { stroke: var(--p0); }
-.board .route.p1 { stroke: var(--p1); }
+/* ---- reading mode -----------------------------------------------------------
+
+   A tile and a stain of who gets there first are the same pixel, so they are states and not
+   layers. This overrides the tile fill outright, on either board: for as long as the reading
+   is held up the board is a chart and says so, and when it is put down what was there comes
+   back whole. Written above both the flat fill and the carved one, and more specific than
+   either, so neither has to know the reading exists. An engine without color-mix drops the
+   declaration and is left with the board it already had, which is the right thing to be
+   left with. */
+.board.reading .cell.reach.p0 {
+    fill: color-mix(in oklab, var(--cell) calc(100% - var(--stain)), var(--p0) var(--stain));
+}
+
+.board.reading .cell.reach.p1 {
+    fill: color-mix(in oklab, var(--cell) calc(100% - var(--stain)), var(--p1) var(--stain));
+}
+
+/* The seam between the two reaches, in an ink belonging to neither player: it is not a
+   piece, it is the shape the pieces make. Drawn twice off one path — a broad haze that
+   gives it a place on the board and a thin line that gives it a position. */
+.board .front { pointer-events: none; animation: front-in var(--t-place) var(--ease-move) both; }
+.board .front .haze { fill: none; stroke: var(--front); stroke-width: 10; opacity: 0.13; }
+.board .front .seam { fill: none; stroke: var(--front); stroke-width: 1.6; opacity: 0.62; }
+
+/* It arrives where it now is rather than sliding there: when the turn passes, the
+   contested squares change hands and the seam is somewhere else, not on its way. */
+@keyframes front-in { from { opacity: 0; } }
+
+/* A route is a way home. A body under a spine reads as one; the dashed hairline this
+   replaces read as a debug overlay somebody had left switched on. */
+.board .ribbon { fill: none; pointer-events: none; stroke-linecap: round; stroke-linejoin: round; }
+.board .ribbon.body { stroke-width: 9; opacity: 0.1; }
+.board .ribbon.spine { stroke-width: 2.25; opacity: 0.55; }
+.board .ribbon.p0 { stroke: var(--p0); }
+.board .ribbon.p1 { stroke: var(--p1); }
+
+/* ---- the detour --------------------------------------------------------------
+
+   Hovering a groove says what the wall costs. These two draw it: the stretch of route
+   that dies, and the way round. Both belong to the player being walled in, so both are
+   in that player's colour — the difference between them is weight, not hue. */
+.board .detour { fill: none; pointer-events: none; stroke-linecap: round; stroke-linejoin: round; }
+.board .detour.gone { stroke-width: 2; stroke-dasharray: 3 5; opacity: 0.34; }
+.board .detour.p0 { stroke: var(--p0); }
+.board .detour.p1 { stroke: var(--p1); }
+
+/* The new way draws itself in rather than appearing, because the point is that it is
+   longer and a line you watch being drawn is a line you have felt the length of. Every
+   segment of a route is exactly one pitch, so its length is arithmetic in the component
+   and needs no getTotalLength() and no measurement pass. */
+.board .detour.now {
+    stroke-width: 3;
+    opacity: 0.9;
+    stroke-dasharray: var(--len);
+    stroke-dashoffset: var(--len);
+    animation: detour-draw var(--t-move) var(--ease-move) both;
+}
+
+@keyframes detour-draw { to { stroke-dashoffset: 0; } }
+
+/* Said out loud rather than pretended universal: a touch screen has no hover, so there is
+   no pointing at a groove to answer and the sentence in the panel is the whole of what a
+   phone gets. Drawing it on a tap would flash a route away under the thumb that asked. */
+@media (hover: none) {
+    .board .detour { display: none; }
+}
 
 /* The piece itself, and the ring that says it is on move. The ring is drawn for both
-   and revealed for one, so nothing is added or removed as the turn changes. */
-.board .pawn-holder .disc { opacity: 0.66; }
-.board .pawn-holder.active .disc { opacity: 1; }
+   and revealed for one, so nothing is added or removed as the turn changes.
+
+   The whole piece dims when it is not on move, rather than the disc alone: the dome and
+   the shadow belong to the same object and fading one of the three would take it apart. */
+.board .pawn-holder .lift { opacity: 0.66; }
+.board .pawn-holder.active .lift { opacity: 1; }
 
 .board .pawn-holder.p0 .disc { fill: var(--p0); }
 .board .pawn-holder.p1 .disc { fill: var(--p1); }
+
+/* A disc and a ring is the whole of a piece here. The top that catches the lamp and the
+   shadow the piece stands in are the carved board's; both elements are still drawn and both
+   are empty, which is what lets one switch put the volume back without touching the markup. */
+.board .pawn-holder .dome { fill: none; }
+
+.board .pawn-holder .contact {
+    fill: none;
+
+    /* Stated whichever board this is. The rise a jump plays and the shadow's half of it are
+       written against this origin, and the two have to cancel exactly rather than
+       approximately — including on the board where one of them is not painted. */
+    transform-box: fill-box;
+    transform-origin: center;
+}
+
+/* The copy of each pawn that is in the wrong layer this move. Hidden rather than removed:
+   both copies carry the same transform and so make the same slide, and swapping which one
+   is painted costs nothing and interrupts nothing. */
+.board .pawn-holder.spare { visibility: hidden; }
 
 /* Switched, not faded. Whose turn it is has to be unambiguous at every instant, and a
    fade is a window in which it is neither — a window that widens to half a second
@@ -708,6 +1132,113 @@ input.slider::-moz-range-thumb {
    `pointer-events: all` keeps them catching the mouse without being drawn at all. */
 .board .hit { fill: none; pointer-events: all; cursor: pointer; }
 
+/* ================================================================= carved ====
+
+   The board as a made object, lit by one lamp fixed above and to the left of the table.
+   Every rule in this section is scoped to `.board.carved` and there is no material rule
+   anywhere above it, so with the switch off none of this reaches any element: the reader
+   gets the flat board and nothing is merely hidden behind something.
+
+   Nothing here is a filter or a per-frame recompute. The extrusions are three rects at
+   fixed offsets, the light is one gradient painted once, and the same markup carries both
+   boards — every rule below is a fill the flat board leaves empty or a flat fill it
+   replaces. Motion is shared and lives in the transitions section, because how a wall
+   arrives is not a question about what it is made of. */
+
+/* The tray: a raised rim with the playing field recessed into it. The rim is the part
+   nearest the lamp, so it is the lighter of the two, and the field carries the dark that
+   collects under an edge you are looking down past. */
+.board.carved .rim { fill: url(#board-sheen); }
+.board.carved .field { fill: url(#field-well); }
+
+/* One lamp over the whole view, in the board's own coordinates so it crosses the board once
+   rather than repeating inside every element it covers. The stops are styled here rather
+   than in the markup because how much light a room has is a property of the theme, and only
+   stop-opacity can say so. */
+.board.carved #board-light .lit { stop-color: var(--lit); stop-opacity: var(--lit-a); }
+.board.carved #board-light .clear { stop-color: var(--lit); stop-opacity: 0; }
+.board.carved #board-light .shade { stop-color: var(--shade); stop-opacity: var(--shade-a); }
+
+.board.carved .board-light { display: block; fill: url(#board-light); }
+
+/* Every tile is bevelled by its own fill — lit along the top edge, shaded along the bottom.
+   The bevel is the depth, so there is no second element per square; and the field must not
+   show through it, or the two edges the bevel is made of are washed straight back out. */
+.board.carved .cell { fill: url(#tile-face); opacity: 1; }
+
+/* A square out of play becomes an opening you can see down into. The mouth is the wall of
+   it, running dark on the side nearest the lamp — the side you are looking down past — to
+   lit on the far one; the floor is what is at the bottom. */
+.board.carved .pit .mouth { fill: url(#pit-wall); stroke: none; }
+.board.carved .pit .floor { fill: var(--pit); }
+
+/* A portal is the other kind of opening, and a board that has one way of saying "this
+   square is not solid" should say it once: the same wall of the same gradient, lit by the
+   same lamp. What differs is what is at the bottom. A gap has a floor; a mouth has a throat
+   with the far end of the pair down it, which is why a throat is the pair's ink and a floor
+   is nobody's. The iris goes back to being the fainter of two rings at different depths
+   rather than the second of two rings on a surface. */
+.board.carved #portal-a .deep { stop-color: var(--portal-a-deep); }
+.board.carved #portal-a .glow { stop-color: var(--portal-a); }
+.board.carved #portal-b .deep { stop-color: var(--portal-b-deep); }
+.board.carved #portal-b .glow { stop-color: var(--portal-b); }
+
+.board.carved .portal .bore { fill: url(#pit-wall); }
+.board.carved .portal.pair-a .throat { fill: url(#portal-a); }
+.board.carved .portal.pair-b .throat { fill: url(#portal-b); }
+.board.carved .portal .iris { opacity: 0.45; }
+
+/* A placed wall stands proud of its groove. The side face fills the slot itself, the top
+   face is offset toward the lamp by the same Lift the markup uses, and the shadow falls the
+   other way — three rects and no filter, because a blur would have to be re-rasterised
+   every time the board redraws, and there are up to twenty of these.
+
+   The hairline moves from the face in the plane of the board to the face that is out of it:
+   on a solid piece the lit edge is along the top. */
+.board.carved .wall .cast { fill: var(--shadow); opacity: 0.34; }
+
+.board.carved .wall.p0 .side { fill: var(--p0-side); }
+.board.carved .wall.p1 .side { fill: var(--p1-side); }
+
+.board.carved .wall.p0 .top { fill: var(--p0); }
+.board.carved .wall.p1 .top { fill: var(--p1); }
+
+.board.carved .wall:not(.pickup) .side { stroke: none; }
+.board.carved .wall .top { stroke: var(--lit); stroke-width: 0.75; stroke-opacity: 0.22; }
+
+/* A spare wall gets the same three faces at the same lift with its shadow falling the same
+   way — a wall lying loose on the square, which is exactly what it is, and nothing about it
+   has to be explained twice. There is no side-face token for the neutral ink, so the side is
+   that ink with the light taken off it; the flat fill is stated first so an engine without
+   color-mix drops back to a plain grey piece rather than to black. */
+.board.carved .pickup.wall .top { fill: var(--muted); }
+
+.board.carved .pickup.wall .side {
+    fill: var(--muted);
+    fill: color-mix(in oklab, var(--muted) 55%, black);
+    opacity: 1;
+}
+
+/* And the free move becomes a token lying on the square rather than a mark printed on it.
+   The arc and the arrowhead are the same at the same coordinates; what is new is that they
+   are stamped on something with a top and a shadow, and so carry a little more ink. */
+.board.carved .pickup.skip .token { fill: var(--muted); }
+.board.carved .pickup.skip .dome { fill: url(#dome); }
+.board.carved .pickup.skip .contact { fill: url(#contact); opacity: 0.7; }
+.board.carved .pickup.skip .arc { opacity: 0.72; }
+.board.carved .pickup.skip .head { opacity: 0.72; }
+
+/* Volume, in one element and one gradient shared by both players. A piece with a top
+   catches the same lamp as the walls and the tiles, which is the only reason it looks like
+   it is on the board rather than printed onto it. */
+.board.carved .pawn-holder .dome { fill: url(#dome); }
+
+/* And what it is standing on. It spreads while the piece travels and tightens under it as
+   it lands — the shadow is the whole of how a slide reads as weight rather than as a sprite
+   being moved. The animations that do the spreading are shared; they simply have nothing to
+   move on the flat board. */
+.board.carved .pawn-holder .contact { fill: url(#contact); opacity: 0.8; }
+
 /* ============================================================ transitions ==== */
 
 /* The pawn slides on a transform, not on cx/cy. Animating the geometry attributes
@@ -715,36 +1246,151 @@ input.slider::-moz-range-thumb {
    moves an already-painted thing, and `will-change` gives it a layer of its own so
    the three hundred other elements are left alone while it travels. */
 .board .pawn-holder {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--t-move) var(--ease-move);
     will-change: transform;
 }
 
-/* The lip arrives with the wall it sits on, or it would blink into place while the
-   wall was still growing.
+/* A rise is a rise on the screen, and the second seat plays on a board that has been
+   turned a half turn — so the sign of every vertical in the two arcs below comes from
+   here rather than from the keyframes. */
+.board { --flip: 1; }
+.board.turned { --flip: -1; }
+
+/* The other half of a jump. The holder above carries the piece across; this carries it
+   over, on an inner group so the two compose without either needing to know about the
+   other. A step gets no rise at all — it never leaves the board. */
+.board .pawn-holder .lift.leap { animation: pawn-leap var(--t-move) var(--ease-arc) both; }
+.board .pawn-holder .lift.slip { animation: pawn-slip var(--t-move) var(--ease-arc) both; }
+
+@keyframes pawn-leap {
+    from { transform: none; }
+    45%  { transform: translateY(calc(var(--flip) * -17px)); }
+    to   { transform: none; }
+}
+
+@keyframes pawn-slip {
+    from { transform: none; }
+    45%  { transform: translateY(calc(var(--flip) * -7px)); }
+    to   { transform: none; }
+}
+
+/* The shadow stays on the board while the piece is off it, which is the whole of what
+   makes a jump read as height: the rise the group above is playing is subtracted here,
+   and what is left is a shadow drawing in and darkening under a piece that is no longer
+   touching. The keyframe sits at the same 45% on the same easing, so the two cancel
+   exactly rather than approximately. */
+.board .pawn-holder .contact { animation: contact-settle var(--t-move) var(--ease-move) both; }
+.board .pawn-holder .lift.leap .contact { animation: contact-leap var(--t-move) var(--ease-arc) both; }
+.board .pawn-holder .lift.slip .contact { animation: contact-slip var(--t-move) var(--ease-arc) both; }
+
+@keyframes contact-settle {
+    from { transform: scale(1.4); opacity: 0.5; }
+    to   { transform: none; opacity: 0.8; }
+}
+
+@keyframes contact-leap {
+    from { transform: scale(1.4); opacity: 0.5; }
+    45%  { transform: translateY(calc(var(--flip) * 17px)) scale(0.62); opacity: 1; }
+    to   { transform: none; opacity: 0.8; }
+}
+
+@keyframes contact-slip {
+    from { transform: scale(1.4); opacity: 0.5; }
+    45%  { transform: translateY(calc(var(--flip) * 7px)) scale(0.82); opacity: 0.92; }
+    to   { transform: none; opacity: 0.8; }
+}
+
+/* And the one pawn move that is not travel at all. The two mouths of a portal are half a
+   board apart, so there is no ground between them to be carried across: the slide is what
+   would draw a diagonal over squares the pawn never walked and walls it never passed, and
+   the holder's transition is switched off in the same render as the transform changes.
+   That is the whole job of `warping` — a class whose only purpose is to be there at the
+   moment the position moves.
+
+   What is left is the piece leaving the mouth it was on and arriving at the one it is now
+   on. It starts drawn back at the near mouth, because by the time anything is painted the
+   position already says the far one; the offset is set per move in the markup. */
+.board .pawn-holder.warping { transition: none; }
+
+.board .pawn-holder .lift.warp {
+    /* The group's own centre, which is the piece's (0,0) — the r26 ring is the widest thing
+       in it. A percentage against the view-box would shrink the pawn toward a corner of the
+       board instead of into itself. */
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pawn-warp var(--t-move) var(--ease-move) both;
+}
+
+/* The shadow goes down the mouth with the piece rather than settling under it: there is
+   no landing here to settle from, and a shadow left standing on an empty square is the one
+   thing that would say the piece is still there. */
+.board .pawn-holder .lift.warp .contact { animation: none; }
+
+/* No opacity on the last frame, deliberately: the fill then lands on whatever the rules
+   above say the piece should be — 0.66 waiting, 1 on move — so a pawn that warped does not
+   stay lit after the turn has passed. */
+@keyframes pawn-warp {
+    0%   { transform: translate(var(--from-x), var(--from-y)); opacity: 1; }
+    38%  { transform: translate(var(--from-x), var(--from-y)) scale(0.2); opacity: 0; }
+    39%  { transform: scale(0.2); opacity: 0; }
+    100% { transform: none; }
+}
+
+/* The turn arriving, drawn on the board where the eye already is rather than only in the
+   panel beside it. The ring stays switched and never faded — whose move it is has to be
+   unambiguous at every instant — but the one that is now on lands as it appears. It is a
+   new element every ply, so this plays once, and only for the pawn the turn passed to.
+   Opacity is named at the start alone, so the fill lands on the 0.55 the rule above sets
+   instead of on a number repeated here and left to drift from it. */
+.board .pawn-holder.active .ring {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: ring-land var(--t-place) var(--ease-pop) both;
+}
+
+@keyframes ring-land {
+    from { opacity: 0; transform: scale(1.28); }
+}
+
+/* A wall is dropped into its groove rather than grown out of nothing, and the shadow
+   tightens under it as it lands. A pure translate is what keeps the three faces
+   together: rects of different sizes each scaling about their own centre drift apart
+   mid-flight and the piece visibly tears, and a translate needs no transform-origin at
+   all, so there is nothing left to desynchronise.
 
    Kept shorter than the pause the engine waits out before it starts thinking: an
    animation still running when the only thread is taken freezes where it stands, and
-   a wall frozen at the start of this one is a wall you cannot see. */
-.board .wall,
-.board .wall-lip {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation: wall-in 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
-}
+   a wall frozen at the start of this one is a wall you cannot see.
+
+   A spare wall lying on a square is the same three faces and carries the same class, so
+   it would otherwise land here too — and it has an entrance of its own, being laid out
+   with the rest of the board rather than played into a groove. */
+.board .wall:not(.pickup) .top,
+.board .wall:not(.pickup) .side { animation: wall-in var(--t-place) var(--ease-set) both; }
+
+.board .wall:not(.pickup) .cast { animation: wall-cast-in var(--t-place) var(--ease-set) both; }
 
 @keyframes wall-in {
-    from { opacity: 0; transform: scale(0.5); }
+    from { opacity: 0; transform: translateY(-6px); }
+}
+
+@keyframes wall-cast-in {
+    from { opacity: 0; transform: translate(4px, 5px); }
 }
 
 /* A rolled board is a different board every time, and its gaps and prizes are the whole
    of what makes it different. Arriving with the rest of the furniture they are scenery;
    arriving after it, one at a time, they are the briefing. Both run off delays set per
    element in the markup, so the board is read in the order it matters: the ground, then
-   what is missing from it, then what is on it. */
-.board .cell.hole {
+   what is missing from it, then what is on it.
+
+   The mouth and the floor each scale about their own centre, which keeps them concentric
+   for the whole of the sink; the delay comes down from the group, since animation-delay
+   is not inherited and a custom property is. */
+.board .pit > rect {
     transform-box: fill-box;
     transform-origin: center;
-    animation: hole-open 0.22s cubic-bezier(0.4, 0, 0.2, 1) both;
+    animation: hole-open var(--t-place) var(--ease-move) var(--delay, 0ms) both;
 }
 
 /* Sinking rather than fading: a hole is an absence in the board, and something that
@@ -754,12 +1400,26 @@ input.slider::-moz-range-thumb {
     60%  { opacity: 1; }
 }
 
+/* A mouth is bored through the board in the same pass the gaps are cut out of it, so it
+   opens the same way and inside the same window: both are what this board has that the
+   last one did not, and the ground is read before what is lying on it. The four circles
+   each scale about their own centre, which is what keeps them concentric for the whole
+   of the sink; the delay rides down from the group, since animation-delay does not
+   inherit and a custom property does. */
+.board .portal > circle {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: hole-open var(--t-place) var(--ease-move) var(--delay, 0ms) both;
+}
+
 /* The last of these starts 170ms in and must be finished by 330, which is the pause the
    engine waits out before it takes the thread. Both numbers are stated in the component
    that sets the delays; changing one without the other leaves a board that arrives
    half-drawn and stays that way until the search returns. */
+/* Its own curve rather than --ease-pop: a prize is the one thing on this board that is
+   meant to feel light, so it overshoots further than a hint dot or a ring does. */
 .board .pickup-holder {
-    animation: pickup-laid 0.16s cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
+    animation: pickup-laid var(--t-quick) cubic-bezier(0.2, 0.9, 0.3, 1.3) both;
 }
 
 /* Walls picked up off the board land in this row. The pips run left to right as the
@@ -785,18 +1445,92 @@ input.slider::-moz-range-thumb {
     from { opacity: 0; transform: scale(0.3); }
 }
 
+/* The move that won, before anything is drawn over the top of it. The line the pawn has
+   just crossed floods outward from the column it crossed in — the origin is set on the
+   element, because only the component knows which column that was — and settles back to
+   the hairline it has been all game. The card is held back the same beat, so the winning
+   move is seen before it is covered.
+
+   The one animation here that may run long: the game is over, nothing is thinking, and
+   there is no thread left to be taken from it. As above, the last frame names no opacity,
+   so it lands on the 0.7 the line already has. */
+.board .finish.won {
+    transform-box: fill-box;
+    animation: finish-flood var(--t-win) var(--ease-set) both;
+}
+
+@keyframes finish-flood {
+    from { transform: scaleX(0.04); opacity: 0.7; }
+    55%  { transform: scaleX(1) scaleY(3.4); opacity: 1; }
+}
+
+/* ---- the past ----------------------------------------------------------------
+
+   Stepping back through a game is not the game happening again. A wall stepped back over
+   and forward over is not being placed; a board that re-announces every one of forty moves
+   on the way through them is a board you are fighting rather than reading. So every
+   one-shot entrance is switched off here, and only the pawns keep moving — which is the
+   whole of what stepping through a game is for.
+
+   Each of these is a `both`-filled one-shot, so stopping it lands on the state the move
+   ended in and not on the state it began from. The burst is the exception and is hidden
+   outright: its entire content is a ring on its way out, and a ring that is not going out
+   is a ring that never left.
+
+   The warp is deliberately absent. A pawn that took a portal did not walk the ground
+   between the two mouths at any speed, and drawing that diagonal would be as wrong in a
+   review as it is in a game. */
+.board.past .wall .top,
+.board.past .wall .side,
+.board.past .wall .cast,
+.board.past .pit > rect,
+.board.past .portal > circle,
+.board.past .hint-dot,
+.board.past .pickup-holder,
+.board.past .front,
+.board.past .finish.won,
+.board.past .pawn-holder.active .ring,
+.board.past .pawn-holder .contact { animation: none; }
+
+.board.past .pickup-burst { display: none; }
+
 .overlay { animation: fade-in 0.22s ease both; }
 .result, .setup { animation: rise 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
-@media (prefers-reduced-motion: reduce) {
-    .board .pawn-holder, .board .wall, .board .wall-lip, .board .hint-dot,
-    .board .pickup-burst, .board .cell.hole, .board .pickup-holder,
-    .walls.gained i, .walls.gained .count,
-    .overlay, .result, .setup { transition: none; animation: none; }
+/* Every animation on this page is a `both`-filled one-shot, so switching it off lands
+   on the correct final state rather than stranding the element at its own first frame.
 
+   `!important`, which is used nowhere else here, and for a reason worth stating: this is a
+   preference and not a style, so it has to win against every rule above it whatever that
+   rule's specificity happens to be. Written as a plain list it had already quietly lost
+   three of them — `.wall:not(.pickup) .top`, `.lift.leap` and `.lift.leap .contact` each
+   outrank the selector that was meant to switch them off, so a wall still dropped and a
+   pawn still arced for a reader who had asked for neither. A list that can be outranked by
+   the next rule anybody adds is a list that will silently stop working again. */
+@media (prefers-reduced-motion: reduce) {
+    .board .pawn-holder, .board .pawn-holder .lift, .board .pawn-holder .contact,
+    .board .pawn-holder .ring,
+    .board .wall .top, .board .wall .side, .board .wall .cast,
+    .board .pit > rect, .board .portal > circle, .board .hint-dot,
+    .board .pickup-holder,
+    .board .front, .board .detour.now, .board .finish,
+    .walls.gained i, .walls.gained .count, .tape .wedge, .turn,
+    .player, .ask, .moves li, button.ghost,
+    .overlay, .result, .setup { transition: none !important; animation: none !important; }
+
+    /* The draw is the whole of how this one appears; without it the path is offset
+       by its own length and simply is not there. */
+    .board .detour.now { stroke-dasharray: none; stroke-dashoffset: 0; }
+
+    /* And this one is the whole of a ring on its way out, so stopping it leaves a hard
+       ring standing on the square instead of nothing. There is no still frame of it worth
+       having: what it announces has already happened. */
+    .board .pickup-burst { display: none; }
+
+    button.ghost:active:not(:disabled) { transform: none; }
     .moves { scroll-behavior: auto; }
 }
 
@@ -808,8 +1542,18 @@ input.slider::-moz-range-thumb {
 
 @media (max-width: 1080px) {
     .layout { grid-template-columns: 1fr; gap: 18px; }
-    .players { display: flex; gap: 24px; }
-    .player { flex: 1; }
+
+    /* The strip under the board is wide and shallow, so the two seats go side by side in
+       it — and the figure that describes both of them wraps onto its own line under both,
+       which is where it sits in the tall layout too. A row that wraps, rather than a grid,
+       because that is the whole of the arrangement: two things that share a line and one
+       that takes the next.
+
+       `flex: 1 1 200px` and not `flex: 1`: seats that will not shrink below their content
+       push the figure off the row entirely on a narrow phone. */
+    .players { flex-direction: row; flex-wrap: wrap; gap: 0 24px; }
+    .player { flex: 1 1 200px; }
+    .tape { flex: 1 0 100%; }
     .player + .player { border-top: none; }
     .moves { height: 120px; }
 }
@@ -830,8 +1574,14 @@ input.slider::-moz-range-thumb {
 
     /* Order: the board, then who is on move, then the rest. */
     .board-wrap { order: 1; }
-    .players { order: 2; gap: 14px; }
+    .players { order: 2; gap: 0 14px; }
     .panel { order: 3; }
+
+    /* The figure is about the board, so on a phone it goes directly under the board and
+       the two seats follow it. `order` on the one child that moves rather than reversing
+       the column: the seats must stay in the order they are written in, and only the
+       figure is being relocated. */
+    .tape { order: -1; padding: 6px 0 4px; }
 
     .player { padding: 10px 0; }
     .name { font-size: 16px; }
@@ -842,13 +1592,30 @@ input.slider::-moz-range-thumb {
     .status { font-size: 19px; }
     .hint { min-height: 0; }
 
-    /* Comfortable to hit with a thumb. */
-    button.ghost { padding: 11px 16px; }
-    button.seg { padding: 8px 4px 9px; margin-right: 14px; }
-    input.code { width: 100%; margin: 0 0 8px; }
+    /* Comfortable to hit with a thumb. Forty-four pixels is the smallest target a finger
+       lands on reliably, and every control on this page reaches it here and nowhere else —
+       a pointer is precise and a desktop laid out for a thumb is a desktop with holes in it.
+       Buttons, selects and inputs centre their own contents, so a floor on the height moves
+       nothing inside them: they grow downward into space the phone layout already has. */
+    button.ghost { padding: 11px 16px; min-height: 44px; }
+    button.seg { padding: 8px 4px 9px; margin-right: 14px; min-height: 44px; }
+    input.code { width: 100%; margin: 0 0 8px; min-height: 44px; }
+    select.pick { min-height: 44px; }
+
+    /* The rail stays two pixels and the thumb stays thirteen; what grows is the height of
+       the control around them, which is the part a finger has to find. */
+    input.slider { height: 44px; }
+
+    /* And the question mark stays a nineteen-pixel circle, because that is all the room
+       there is beside the heading — so it grows a hit area instead of growing. The
+       pseudo-element belongs to the button, so what is being pressed is still the button. */
+    .ask::after { content: ""; position: absolute; inset: -13px; }
 
     .result, .setup { padding: 24px 20px; }
     .result h1, .setup h1 { font-size: 30px; }
     .setup .row { align-items: flex-start; flex-direction: column; gap: 4px; }
     .setup .label { width: auto; margin-bottom: 4px; }
+
+    /* The label has lost its column, so there is nothing left to indent past. */
+    .setup .fine.why { padding-left: 0; }
 }

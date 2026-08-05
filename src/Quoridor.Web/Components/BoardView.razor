@@ -10,18 +10,120 @@
 
 @* A smaller game is played on a centred square of the same grid, so the geometry below
    never changes — the view simply looks at less of it. *@
-<svg class="board" viewBox="@ViewBox" preserveAspectRatio="xMidYMid meet" @onmouseleave="ClearHover">
+@* `turned` is not decoration: everything below is drawn inside a group that is rotated a
+   half turn for the second seat, and a pawn told to rise would then dip instead. The
+   class carries the sign so the arc stays a rise on the screen either way.
 
-    @* A board is a physical thing; a flat rectangle of one colour is not. The sheen is
-       one gradient painted once — no animation, nothing per frame. *@
+   `reading` says the board has stopped being a made object and become a chart. It is a
+   state and not a layer: a bevelled tile and a stain are the same pixel, and eighty-one
+   translucent rects laid over the board to have both would be a diagram pretending to be
+   material. For as long as the reading is up, the tiles are the reading.
+
+   `past` says this position is being looked at rather than played. Nothing that arrives
+   is news any more: a wall stepped back to and forward again is not being placed, and a
+   board that re-announces every move on the way through forty of them is a board you are
+   fighting. Only the pawns keep moving, because that is what stepping through a game is
+   for.
+
+   `carved` is the board as a made object — lit, bevelled, walls standing proud of their
+   grooves. It is the second way of drawing the same board and not the default one: the
+   flat board is what this game is, and every rule that gives it a material lives under
+   this class in the stylesheet so that a viewer with the switch off gets none of it.
+
+   The keydown is on the board itself rather than on the document, because by the time it
+   fires something inside the board is focused and the keys are the board's own. *@
+<svg class="board @(Carved ? "carved" : "") @(Flipped ? "turned" : "") @(Reading ? "reading" : "") @(Reviewing ? "past" : "")" viewBox="@ViewBox" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Quoridor board" @onmouseleave="ClearHover" @onkeydown="OnKeyDown">
+
+    @* A board is a physical thing; a flat rectangle of one colour is not. Every gradient
+       here is painted once — no animation, nothing per frame. *@
     <defs>
+        @* The rim, which is the raised part of the tray and so the part nearest the lamp. *@
         <linearGradient id="board-sheen" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="var(--board-top)" />
             <stop offset="100%" stop-color="var(--board-bottom)" />
         </linearGradient>
+
+        @* The field is sunk into the rim, and the dark of a recess collects in a narrow
+           band directly under its top edge rather than washing evenly down the whole. *@
+        <linearGradient id="field-well" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--field-deep)" />
+            <stop offset="10%" stop-color="var(--field)" />
+            <stop offset="100%" stop-color="var(--field)" />
+        </linearGradient>
+
+        @* Every tile is bevelled by its own fill: lit along the top edge, shaded along the
+           bottom, flat between. Object-bound, so this one gradient bevels all eighty-one
+           squares at whatever size they are drawn, and adds no element to the board. *@
+        <linearGradient id="tile-face" x1="0" y1="0" x2="0" y2="1" gradientTransform="@TurnedPaint">
+            <stop offset="0%" stop-color="var(--tile-lit)" />
+            <stop offset="9%" stop-color="var(--cell)" />
+            <stop offset="88%" stop-color="var(--cell)" />
+            <stop offset="100%" stop-color="var(--tile-shade)" />
+        </linearGradient>
+
+        @* The lamp itself, running corner to corner of the view. In user space rather than
+           object space so it crosses the board once, instead of repeating inside every
+           shape it is laid over. The stops are coloured from CSS because how much light a
+           room has differs between the themes and only stop-opacity can say so. *@
+        <linearGradient id="board-light" gradientUnits="userSpaceOnUse"
+                        x1="@ViewX" y1="@ViewY" x2="@(ViewX + ViewSize)" y2="@(ViewY + ViewSize)">
+            <stop class="lit" offset="0%" />
+            <stop class="clear" offset="50%" />
+            <stop class="shade" offset="100%" />
+        </linearGradient>
+
+        @* A piece with a top rather than a disc cut out of paper: the light collects up
+           and to the left of it and falls away to the far edge. One gradient serves both
+           players and both themes, because how a piece is lit belongs to the room and
+           not to whoever owns it. *@
+        <radialGradient id="dome" cx="50%" cy="50%" r="62%" fx="33%" fy="27%" gradientTransform="@TurnedPaint">
+            <stop offset="0%" stop-color="var(--lit)" stop-opacity="0.34" />
+            <stop offset="52%" stop-color="var(--lit)" stop-opacity="0" />
+            <stop offset="100%" stop-color="var(--shade)" stop-opacity="0.26" />
+        </radialGradient>
+
+        @* What a piece standing on the board puts underneath itself. A gradient and not a
+           blur: a filter would be re-rasterised on every frame of the slide, and the
+           slide is the one thing on this board that actually moves. *@
+        <radialGradient id="contact">
+            <stop offset="0%" stop-color="var(--shadow)" stop-opacity="0.55" />
+            <stop offset="100%" stop-color="var(--shadow)" stop-opacity="0" />
+        </radialGradient>
+
+        @* Looking down into a square that is not there. The near wall of the opening is in
+           its own shadow and the far one is the part the lamp still reaches, so this runs
+           the same way across the board as every other gradient here. *@
+        <linearGradient id="pit-wall" x1="0" y1="0" x2="1" y2="1" gradientTransform="@TurnedPaint">
+            <stop offset="0%" stop-color="var(--pit)" />
+            <stop offset="100%" stop-color="var(--pit-lit)" />
+        </linearGradient>
+
+        @* And down through a portal, which is an opening that is not a well: what is at the
+           bottom of it is the far mouth, so the light that comes back up the shaft is the
+           pair's own and the dark is in the middle rather than at the edges.
+
+           One gradient per pair and not one per mouth. A gradient cannot be re-tinted by
+           whatever refers to it — its stops read the custom properties of where it is
+           defined, not of where it is used — and there are at most two pairs on any board,
+           so two of them is the whole of the cost. The stops are coloured from CSS, like
+           the lamp's, because which two hues these are is a decision about the theme. *@
+        <radialGradient id="portal-a">
+            <stop class="deep" offset="0%" />
+            <stop class="glow" offset="100%" />
+        </radialGradient>
+
+        <radialGradient id="portal-b">
+            <stop class="deep" offset="0%" />
+            <stop class="glow" offset="100%" />
+        </radialGradient>
     </defs>
 
-    <rect class="backdrop" x="@ViewX" y="@ViewY" width="@ViewSize" height="@ViewSize" rx="6" />
+    @* The tray: a raised rim with the field recessed into it. The coordinate labels below
+       already sit inside the rim band, which is the whole point of the inset — they stop
+       floating beside the board and start reading as printed on its frame. *@
+    <rect class="rim" x="@ViewX" y="@ViewY" width="@ViewSize" height="@ViewSize" rx="6" />
+    <rect class="field" x="@(ViewX + Frame)" y="@(ViewY + Frame)"
+          width="@(ViewSize - Frame * 2)" height="@(ViewSize - Frame * 2)" rx="4" />
 
     @* Razor claims <text> for its own block syntax, so the coordinate labels are the
        one part of the board that has to be emitted through the render tree directly. *@
@@ -41,17 +143,36 @@
     {
         for (int col = From; col <= Last; col++)
         {
-            bool hole = (Holes & Board.Bit(Board.Index(row, col))) != 0;
+            int cell = Board.Index(row, col);
+            bool hole = (Holes & Board.Bit(cell)) != 0;
 
             @* Only the gaps are keyed on the game. A plain square is the same square in
                every game and rebuilding it would buy nothing; a gap is what this board
                has that the last one did not, so it gets a fresh element and opens. They
                open in turn rather than at once — a dozen things moving together read as
-               one flicker, and the point is to be able to count them. *@
-            <rect @key="(hole ? Generation : 0, row, col)"
-                  class="cell @(hole ? "hole" : "")"
-                  style="@(hole ? $"animation-delay: {Stagger(opened++, HoleCount, 0, 90)}ms" : null)"
-                  x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell" rx="3" />
+               one flicker, and the point is to be able to count them.
+
+               A gap is an opening you can see down into: the mouth carries the wall you
+               are looking past and the floor is the bottom of it. The delay rides on the
+               group as a custom property because animation-delay does not inherit and the
+               two rects have to sink together. *@
+            @if (hole)
+            {
+                <g @key="(Generation, row, col)" class="pit"
+                   style="--delay: @(Stagger(opened++, HoleCount, 0, 90))ms">
+                    <rect class="mouth" x="@Origin(col)" y="@Origin(row)"
+                          width="@Cell" height="@Cell" rx="3" />
+                    <rect class="floor" x="@(Origin(col) + PitDepth)" y="@(Origin(row) + PitDepth)"
+                          width="@(Cell - PitDepth * 2)" height="@(Cell - PitDepth * 2)" rx="2" />
+                </g>
+            }
+            else
+            {
+                @* Outside reading mode the class and the style are both empty and this is
+                   the plain bevelled tile. Inside it, the same rect is the chart. *@
+                <rect @key="(0, row, col)" class="cell @Territory(cell)" style="@Stain(cell)"
+                      x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell" rx="3" />
+            }
         }
     }
 
@@ -66,46 +187,73 @@
             <rect class="goal @accent" x="@Origin(col)" y="@Origin(goal)" width="@Cell" height="@Cell" rx="3" />
         }
 
-        <rect class="finish @accent" x="@(Origin(From))" y="@(goal == From ? Origin(goal) : Origin(goal) + Cell - 3)"
+        @* Winning is currently a card that arrives over the move that won. The line the
+           pawn has just crossed floods outward from the column it crossed in, so the move
+           is seen before anything is drawn on top of it. This is the one animation in the
+           build that may run long: the game is over and nothing is thinking. *@
+        bool won = State.Winner == player;
+
+        <rect class="finish @accent @(won ? "won" : "")" style="@(won ? Crossing(player) : null)"
+              x="@(Origin(From))" y="@(goal == From ? Origin(goal) : Origin(goal) + Cell - 3)"
               width="@(Span * Cell + (Span - 1) * Gap)" height="3" />
     }
 
-    @if (LastMove is { } last)
+    @* The portal mouths, bored through the board where the gaps are cut out of it — the
+       same wall of an opening lit the same way, because the board should have one way of
+       saying "this square is not solid" and then one way of saying what is under it. A gap
+       has a floor; a mouth has a throat with the far end's light coming up it.
+
+       Both mouths of a pair are drawn in one ink, and the only thing a player wants from a
+       mouth is where it comes out: with two pairs on the board a shared colour answers that
+       at a glance, where two labels or a line ruled across the middle would not. Neither
+       ink is a player's, since a mouth belongs to the board rather than to a side.
+
+       Wide enough that a pawn standing in one sits inside it rather than on top of it, so
+       the square goes on saying where it leads while it is occupied — which is exactly the
+       moment the question is being asked.
+
+       They open with the gaps rather than with the prizes: both are what this board has
+       that the last one did not, and the ground is read before what is lying on it. *@
+    @{ int bored = 0; List<(int Cell, int Pair)> mouths = Mouths(); }
+    @foreach ((int cell, int pair) in mouths)
     {
-        <rect class="last @(LastMoverClass)" rx="3"
-              x="@(LastX(last) - 3)" y="@(LastY(last) - 3)"
-              width="@(LastWidth(last) + 6)" height="@(LastHeight(last) + 6)" />
+        <g @key="@($"portal-{Generation}-{cell}")" class="portal @(pair == 0 ? "pair-a" : "pair-b")"
+           style="--delay: @(Stagger(bored++, mouths.Count, 30, 60))ms"
+           transform="translate(@Centre(Board.ColOf(cell)) @Centre(Board.RowOf(cell)))">
+            @* The wall of the opening, what is down it, the edge where the board's surface
+               breaks, and one ring further down — which is what makes the last of them read
+               as depth rather than as a coloured disc lying on the square.
+
+               `lip` rather than `rim` because the tray of the board is already the board's
+               rim, and `.board .rim` would otherwise paint the edge of every mouth in the
+               tray's own sheen. *@
+            <circle class="bore" r="24" />
+            <circle class="throat" r="17" />
+            <circle class="lip" r="24" />
+            <circle class="iris" r="9" />
+        </g>
     }
 
-    @if (ShowRoutes)
-    {
-        @foreach ((string accent, string points) in Routes())
-        {
-            <polyline class="route @accent" points="@points" />
-        }
-    }
-
-    @foreach (int cell in Hints())
-    {
-        <circle class="hint-dot @(State.SideToMove == 0 ? "p0" : "p1")"
-                cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="7" />
-    }
-
+    @* A placed wall is a solid piece standing proud of its groove, and a previewed one is
+       a flat shape lying in it — the one difference this board teaches without a word of
+       explanation. The shadow falls away from the lamp, the side face fills the slot the
+       preview would occupy, and the top face is lifted toward the lamp by Lift. Offsets
+       do the whole of the extrusion: a blur here would be re-rasterised on every redraw
+       of the board, and there are up to twenty of these. *@
     @foreach ((MoveKind kind, int row, int col, int owner) in PlacedWalls())
     {
         bool flat = kind == MoveKind.HorizontalWall;
 
-        <rect class="wall @(owner == 0 ? "p0" : "p1")" rx="2"
-              x="@WallX(kind, col)" y="@WallY(kind, row)"
-              width="@(flat ? WallLength : Gap)"
-              height="@(flat ? Gap : WallLength)" />
+        int x = WallX(kind, col);
+        int y = WallY(kind, row);
+        int width = flat ? WallLength : Gap;
+        int height = flat ? Gap : WallLength;
 
-        @* A lit edge along the top, or the left of an upright one. A wall is a piece
-           standing on the board, and a flat rectangle of colour does not say so. *@
-        <rect class="wall-lip" rx="1"
-              x="@(WallX(kind, col) + 1)" y="@(WallY(kind, row) + 1)"
-              width="@(flat ? WallLength - 2 : 2)"
-              height="@(flat ? 2 : WallLength - 2)" />
+        <g class="wall @(owner == 0 ? "p0" : "p1")">
+            <rect class="cast" rx="2" x="@(x + Lift)" y="@(y + Lift + 1)" width="@width" height="@height" />
+            <rect class="side" rx="2" x="@x" y="@y" width="@width" height="@height" />
+            <rect class="top" rx="2" x="@(x - Lift)" y="@(y - Lift)" width="@width" height="@height" />
+        </g>
     }
 
     @* Whatever is still lying on the board to be picked up. A spare wall is drawn as
@@ -125,15 +273,24 @@
            transform="translate(@cx @cy)">
             @if (isWall)
             {
+                @* The same three faces a played wall stands on, in neutral ink and at the
+                   same Lift — a spare wall lying loose on the square, which is exactly
+                   what it is. Nothing about it has to be explained twice. *@
                 <g class="pickup wall">
-                    <rect x="-13" y="-4" width="26" height="8" rx="2" />
+                    <rect class="cast" rx="2" x="@(-13 + Lift)" y="@(-4 + Lift + 1)" width="26" height="8" />
+                    <rect class="side" rx="2" x="-13" y="-4" width="26" height="8" />
+                    <rect class="top" rx="2" x="@(-13 - Lift)" y="@(-4 - Lift)" width="26" height="8" />
                 </g>
             }
             else
             {
                 @* A turn coming round again: three quarters of a circle with an arrowhead
-                   at the end of it. It says "go again" without a word on it. *@
+                   at the end of it. It says "go again" without a word on it — now stamped
+                   on a token sitting on the square rather than drawn onto the square. *@
                 <g class="pickup skip">
+                    <ellipse class="contact" cx="3" cy="5" rx="12" ry="5" />
+                    <circle class="token" r="13" />
+                    <circle class="dome" r="13" />
                     <path class="arc" d="M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36" />
                     <path class="head" d="M -2.83 -9.90 L -4.10 -4.10 L -8.63 -8.63 Z" />
                 </g>
@@ -150,6 +307,80 @@
            transform="translate(@Centre(Board.ColOf(taken.Cell)) @Centre(Board.RowOf(taken.Cell)))">
             <circle class="halo" r="15" />
         </g>
+    }
+
+    @* The lamp, laid over the furniture and nothing else. Everything above this line is
+       something the board is made of — the tray, the tiles, the walls, the pickups — and
+       everything below it is something the board is telling you, which has to be exactly
+       as loud in the far corner as in the near one. Hence the order: a hint dot in the
+       shaded corner would otherwise be dimmer than the same dot in the lit one.
+
+       It sits inside the flip group, so the group's rotation is cancelled here rather
+       than the light turning upside down with the board. 364 is the centre of the view
+       on every board size, since a smaller game is a centred square of the same grid. *@
+    <rect class="board-light" x="@ViewX" y="@ViewY" width="@ViewSize" height="@ViewSize" rx="6"
+          transform="@(Flipped ? "rotate(180 364 364)" : "")" />
+
+    @if (Reading)
+    {
+        @* The Front: the line where the two reaches meet. It is not a game object and
+           neither player owns it, which is why it is drawn in an ink of its own — it is
+           the shape the pieces make rather than a piece. Two passes of the same path, a
+           broad haze under a thin seam, so it carries at a glance without becoming a
+           border drawn on the board.
+
+           Keyed on the path itself: when the turn passes, the squares both pawns reach in
+           the same number of steps change hands, the seam moves a square, and it should
+           arrive where it now is rather than slide there from where it was. *@
+        @if (_front.Length > 0)
+        {
+            <g @key="_front" class="front">
+                <path class="haze" d="@_front" />
+                <path class="seam" d="@_front" />
+            </g>
+        }
+
+        @* Ribbons rather than the dashed hairline they replace: a route is a way home and
+           a body under a spine reads as one, where a dotted line reads as an overlay
+           somebody left switched on. *@
+        @foreach ((string accent, string points) in Routes())
+        {
+            <polyline class="ribbon body @accent" points="@points" />
+            <polyline class="ribbon spine @accent" points="@points" />
+        }
+    }
+
+    @* And what the groove under the pointer would actually do. The panel already says what
+       it costs; this is the same sentence drawn on the board — the stretch of route that
+       dies goes faint and dashed, and the way round draws itself in. Independent of the
+       reading, because it answers a question you asked with the mouse. *@
+    @if (Detour() is { } detour)
+    {
+        @if (detour.Gone.Length > 0)
+        {
+            <polyline class="detour gone @detour.Accent" points="@detour.Gone" />
+        }
+
+        @* Keyed on the groove, or crossing to the next one would update the path in place
+           and the draw — which is the whole of how this arrives — would never play again. *@
+        @if (detour.Now.Length > 0)
+        {
+            <polyline @key="_pointerWall" class="detour now @detour.Accent"
+                      style="--len: @detour.Length" points="@detour.Now" />
+        }
+    }
+
+    @if (LastMove is { } last)
+    {
+        <rect class="last @(LastMoverClass)" rx="3"
+              x="@(LastX(last) - 3)" y="@(LastY(last) - 3)"
+              width="@(LastWidth(last) + 6)" height="@(LastHeight(last) + 6)" />
+    }
+
+    @foreach (int cell in Hints())
+    {
+        <circle class="hint-dot @(State.SideToMove == 0 ? "p0" : "p1")"
+                cx="@Centre(Board.ColOf(cell))" cy="@Centre(Board.RowOf(cell))" r="7" />
     }
 
     @* What the pointer is aiming at, what is waiting to be confirmed, and what is
@@ -170,28 +401,72 @@
         }
     }
 
-    @for (int player = 0; player < 2; player++)
+    @* Each pawn is drawn twice, once in each of two layers, and shown in exactly one of
+       them. A jump has to pass over the piece it is jumping and an SVG has no z-index, so
+       the piece that is moving must come later in the document than the one standing
+       still — and reordering the two groups is not open to us: Blazor would move the
+       element, and a moved element loses the transition the whole slide is made of.
+       Two fixed copies with one of each pair never drawn buy an order that changes every
+       move for four elements that are never painted. *@
+    @for (int layer = 0; layer < 2; layer++)
     {
-        int cell = State.PawnOf(player);
-        bool active = !State.IsGameOver && State.SideToMove == player;
+        @* The layer is a real group rather than only an order, so that each pawn is keyed
+           against the other copy of itself and not against a square: keys are compared
+           among siblings, and the squares above are already keyed on a triple. *@
+        <g class="pawns">
+            @for (int player = 0; player < 2; player++)
+            {
+                int cell = State.PawnOf(player);
+                bool active = !State.IsGameOver && State.SideToMove == player;
+                bool drawn = (_over == player) == (layer == 1);
 
-        @* Placed by a transform on the group rather than by the circle's own centre:
-           that is what the slide animates, and moving a transform is far cheaper for
-           the browser than moving geometry.
+                @* Placed by a transform on the group rather than by the circle's own
+                   centre: that is what the slide animates, and moving a transform is far
+                   cheaper for the browser than moving geometry.
 
-           Keyed on the board as well as the player: a pawn slides to where it moved,
-           but starting a different-sized game is not a move, and sliding across the
-           whole board for it would be nonsense. A new key means a new element, which
-           simply appears where it belongs. *@
-        <g @key="(player, From)"
-           class="pawn-holder @(player == 0 ? "p0" : "p1") @(active ? "active" : "")"
-           transform="translate(@Centre(Board.ColOf(cell)) @Centre(Board.RowOf(cell)))">
+                   Keyed on the board as well as the player: a pawn slides to where it
+                   moved, but starting a different-sized game is not a move, and sliding
+                   across the whole board for it would be nonsense. A new key means a new
+                   element, which simply appears where it belongs. *@
+                @* `warping` is the one move the holder must not carry: a portal's two
+                   mouths are half a board apart, and the slide below would draw a diagonal
+                   across ground the pawn never walked and walls it never passed. The class
+                   arrives in the same render as the transform it cancels, which is what
+                   lets the piece simply be at the far mouth while the group below plays
+                   the leaving and the arriving. *@
+                <g @key="(player, From)"
+                   class="pawn-holder @(player == 0 ? "p0" : "p1") @(active ? "active" : "") @(drawn ? "" : "spare") @(_hop[player] == "warp" ? "warping" : "")"
+                   transform="translate(@Centre(Board.ColOf(cell)) @Centre(Board.RowOf(cell)))">
 
-            @* Whose turn it is should be legible from the board, not only from the
-               panel beside it. A ring is a clearer answer than a difference in
-               opacity you have to compare two pieces to notice. *@
-            <circle class="ring" r="26" />
-            <circle class="disc" r="20" />
+                    @* The rise, which is the arc's half of a jump — the holder above
+                       carries the piece across and this carries it over. Keyed on the
+                       count of moves this pawn has made so a new one replaces the group
+                       and plays again; the holder itself must keep its identity, or there
+                       is no slide left for the rise to be half of.
+
+                       The same group plays the warp, which is the other half of a portal
+                       step: the offset back to the mouth it left is on the style, because
+                       the piece is already at the far one by the time anything is drawn. *@
+                    <g @key="(player, _hopAt[player])" class="lift @(_hop[player])" style="@WarpFrom(player)">
+
+                        @* Contact first, because it is what the piece is standing on. It
+                           spreads while the piece travels and tightens as it lands. *@
+                        <ellipse class="contact" cx="3" cy="6" rx="19" ry="7" />
+
+                        @* Whose turn it is should be legible from the board, not only from
+                           the panel beside it. A ring is a clearer answer than a
+                           difference in opacity you have to compare two pieces to notice.
+
+                           Keyed on the ply so the ring that is now on is a new element and
+                           lands rather than simply being there. The pawn that just moved
+                           gets a fresh group anyway; the one waiting for the turn does not,
+                           and it is the one the turn is arriving at. *@
+                        <circle class="ring" @key="(player, State.Ply)" r="26" />
+                        <circle class="disc" r="20" />
+                        <circle class="dome" r="20" />
+                    </g>
+                </g>
+            }
         </g>
     }
 
@@ -207,7 +482,7 @@
             int c = col;
 
             <rect class="hit" x="@Origin(col)" y="@Origin(row)" width="@Cell" height="@Cell"
-                  @onmouseover="() => HoverCell(r, c)" @onclick="Commit" />
+                  @onmouseover="e => HoverCell(e, r, c)" @onclick="() => ClickCell(r, c)" />
         }
     }
 
@@ -219,7 +494,8 @@
             int c = Math.Min(col, Last - 1);
 
             <rect class="hit" x="@Origin(col)" y="@(Origin(row) + Cell - 4)" width="@Cell" height="@(Gap + 8)"
-                  @onmouseover="() => HoverWall(MoveKind.HorizontalWall, r, c)" @onclick="Commit" />
+                  @onmouseover="e => HoverWall(e, MoveKind.HorizontalWall, r, c)"
+                  @onclick="() => ClickWall(MoveKind.HorizontalWall, r, c)" />
         }
     }
 
@@ -231,12 +507,49 @@
             int c = col;
 
             <rect class="hit" x="@(Origin(col) + Cell - 4)" y="@Origin(row)" width="@(Gap + 8)" height="@Cell"
-                  @onmouseover="() => HoverWall(MoveKind.VerticalWall, r, c)" @onclick="Commit" />
+                  @onmouseover="e => HoverWall(e, MoveKind.VerticalWall, r, c)"
+                  @onclick="() => ClickWall(MoveKind.VerticalWall, r, c)" />
         }
     }
 
+    @* The cursor: the one thing on this board a keyboard can reach, laid exactly over the
+       hit target it is standing on so it blocks nothing the mouse was aiming at. Two
+       hundred tab stops would be a board nobody could tab past; one that moves is the
+       same board with a caret in it, and its label is where the caret is.
+
+       Its key changes whenever a key moves it, which replaces the element rather than
+       renaming it. A reader is told the name of what it has just been given and not
+       reliably told that the name of what it already had has changed — so the cursor is
+       handed over anew each time it moves, and focus is put back on it after the render.
+       The mouse deliberately does not change the key: a tap on a phone is a mouseover
+       followed by a click, and an element replaced in between is a tap that never lands.
+
+       Drawn while the game is being read back as well as while it is being played. It is
+       the only thing here that can hold focus, and a cursor that went out when the arrows
+       stepped into the game so far would take the keyboard out of the page with it —
+       where the labels are exactly as much use, since they name the position being read. *@
+    <rect @key="_cursorKey" @ref="_cursor" class="hit cursor" tabindex="0" role="button"
+          aria-label="@AimLabel" aria-disabled="@AimBlocked"
+          x="@AimX" y="@AimY" width="@AimWidth" height="@AimHeight"
+          @onmouseover="AimByMouse" @onclick="Commit" />
+
     </g>
 </svg>
+
+@* What just happened, for somebody who cannot see it happen. The board is drawn in
+   shapes and a reader is given none of them, so the one sentence that matters — the
+   move that arrived and whose turn it now is — is put where a reader is listening.
+
+   Hidden here rather than in the stylesheet on purpose. This element exists only for a
+   screen reader, and a stylesheet that has not been told about it would leave a sentence
+   printed beside the board: the one kind of mistake this whole round is against. It is
+   out of flow, so it changes no layout it lands in.
+
+   Only the position feeds it. A hover redraws the board a dozen times a second and a
+   live region that repeated itself each time would be a voice nobody could play through;
+   the same text is not spoken twice. *@
+<div class="board-say" role="status" aria-live="polite" aria-atomic="true"
+     style="position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap">@Announcement</div>
 
 @code {
     private const int Pad = 28;
@@ -245,6 +558,43 @@
     private const int Pitch = Cell + Gap;
     private const int Extent = Pad * 2 + Board.Size * Cell + (Board.Size - 1) * Gap;
     private const int WallLength = Cell * 2 + Gap;
+
+    /// <summary>
+    /// How far the field is sunk inside the rim. Narrower than <see cref="Pad"/> on
+    /// purpose: the coordinate labels are drawn at 14 and 12 units in from the edge, so
+    /// they land on the rim band and read as printed on the frame.
+    /// </summary>
+    private const int Frame = 22;
+
+    /// <summary>
+    /// How far a placed wall stands proud of its groove, in the board's own units so it
+    /// scales with the board and is the same piece on a 5x5. Mirrored by --lift in the
+    /// stylesheet, which the drop entrance is written against.
+    /// </summary>
+    private const int Lift = 4;
+
+    /// <summary>
+    /// How far inside the mouth of a gap its floor sits. Wide enough that the wall of the
+    /// opening is a band you can read the light across rather than a hairline.
+    /// </summary>
+    private const int PitDepth = 7;
+
+    /// <summary>
+    /// How far ahead in the race a square has to be before its tint stops deepening. Past
+    /// six steps the answer is simply "theirs" and a darker square says nothing more; below
+    /// it, the depth of the stain is the size of the lead.
+    /// </summary>
+    private const int Decisive = 6;
+
+    /// <summary>
+    /// How far a square is restained toward its owner, in percent, at a dead heat and at a
+    /// decisive lead. The floor is not zero on purpose: a square that is contested is still
+    /// somebody's next step, and the seam is drawn by the line between the two colours
+    /// rather than by a band of bare board between them.
+    /// </summary>
+    private const int FaintestStain = 10;
+
+    private const int StrongestStain = 44;
 
     /// <summary>First row and column in the game — non-zero only on a smaller board.</summary>
     private int From => State.GoalRow(0);
@@ -262,11 +612,41 @@
 
     private string ViewBox => $"{ViewX} {ViewY} {ViewSize} {ViewSize}";
 
+    /// <summary>
+    /// The half turn a gradient needs to survive the board being turned around, or null
+    /// when it is not. An object-bound gradient is painted in its own shape's box and then
+    /// carried through every transform above it, so the rotation that puts the second seat
+    /// at the near edge takes the light with it: tiles bevelled along the bottom, openings
+    /// with their lit wall on the side away from the lamp. Pre-rotating the paint by the
+    /// same half turn cancels the group's, so one lamp stays above and to the left for both
+    /// seats. The lamp gradient itself is in user space and cancels the rotation on the
+    /// element instead; the round ones are symmetrical about their centre and need neither.
+    /// </summary>
+    private string? TurnedPaint => Flipped ? "rotate(180 0.5 0.5)" : null;
+
     // What the pointer is over, recorded whether or not it is our turn. Dropping it
     // when the turn passes is what made a resting cursor go dead: you would have to
     // move off the square and back before the click would take.
     private int _pointerCell = -1;
     private Move? _pointerWall;
+
+    // Where the keyboard cursor is standing, which is a target and not a move: a square
+    // when the kind is Pawn, and the wall slot under it otherwise. It outlives the aim
+    // above — the mouse may leave the board, and the cursor is still where it was left.
+    private MoveKind _aimKind = MoveKind.Pawn;
+    private int _aimRow = -1;
+    private int _aimCol = -1;
+
+    // Which of the two is aiming. Both write the same aim, so the board downstream never
+    // asks where a target came from; this is only here so that a mouse resting on the
+    // board cannot quietly take the cursor back off a player who is using the keys.
+    private bool _byKeys;
+
+    // Where the pointer was the last time it reported. A browser dispatches mouseover
+    // when an element moves under a still cursor as well as when the cursor moves onto
+    // one, and the first of those is not the mouse asking for anything.
+    private double _mouseX = double.NaN;
+    private double _mouseY = double.NaN;
 
     // Set when a move is waiting to be confirmed. On a phone there is no hover, so a
     // first tap should choose and a second commit, rather than one stray tap moving.
@@ -274,14 +654,64 @@
 
     private bool _needsRender = true;
 
+    // Where each pawn stood the last time a position was handed in. The board is told
+    // where the pieces are and never what happened, so this is the only place the
+    // difference between a step and a jump can be recovered from.
+    private readonly int[] _wasAt = { -1, -1 };
+
+    // Counted rather than flagged: the key the rise hangs on has to be a value the
+    // browser has not seen before, or the group is reused and the arc never replays.
+    private readonly int[] _hopAt = { 0, 0 };
+
+    private readonly string[] _hop = { "", "" };
+
+    // Where the pawn left from. Every other move is drawn where the piece now is and needs
+    // nothing, but a portal step is played out at the mouth it leaves before it is played
+    // at the mouth it arrives at, and by then the board has only been told the second one.
+    private readonly int[] _hopFrom = { -1, -1 };
+
+    // Which pawn is drawn in the front layer. The one that moved last, so that a jump
+    // passes over the piece it is jumping rather than behind it.
+    private int _over = 1;
+
+    // What the reading says about the position: who reaches each square first, by how
+    // much, and the path along which the two answers meet. Held rather than recomputed
+    // per element, because eighty-one squares ask the same two flood fills; filled only
+    // while the reading is up, so an ordinary board pays nothing at all for it.
+    private readonly int[] _owner = new int[Board.CellCount];
+    private readonly int[] _stain = new int[Board.CellCount];
+    private string _front = string.Empty;
+
     [Parameter, EditorRequired] public GameState State { get; set; }
 
     [Parameter] public bool Interactive { get; set; }
 
-    [Parameter] public bool ShowRoutes { get; set; }
+    /// <summary>
+    /// Flatten the board into a chart of the race: the squares stained toward whoever
+    /// reaches them first, the seam between the two reaches, and both routes home. Held
+    /// up deliberately and put down again — none of it is visible when it is off.
+    /// </summary>
+    [Parameter] public bool Reading { get; set; }
+
+    /// <summary>
+    /// This position is being looked at rather than played. Everything the board does to
+    /// announce a change — a wall landing, a gap opening, a prize being laid out, a pawn
+    /// going over another — is switched off, and the pawns are left to glide between the
+    /// positions the arrow keys ask for. Stepping back through a game is reading it, and
+    /// a board that replays its own entrance forty times is one you are fighting.
+    /// </summary>
+    [Parameter] public bool Reviewing { get; set; }
 
     /// <summary>Turn the board around, for the player who took the second seat.</summary>
     [Parameter] public bool Flipped { get; set; }
+
+    /// <summary>
+    /// Draw the board as a made object rather than as a diagram: lit, bevelled, with the
+    /// walls standing out of their grooves. Off is the board this game is — flat, quiet
+    /// and high in contrast — and everything the material adds is scoped under `.carved`
+    /// in the stylesheet, so nothing of it survives the switch being off.
+    /// </summary>
+    [Parameter] public bool Carved { get; set; }
 
     /// <summary>Squares out of play, drawn as gaps rather than squares.</summary>
     [Parameter] public UInt128 Holes { get; set; }
@@ -327,10 +757,126 @@
 
     protected override void OnParametersSet()
     {
+        ReadMotion();
+
+        // The reading is a property of the position and of nothing else, so it is worked
+        // out when a position arrives rather than when the pointer moves — a hover does
+        // not come through here, and there are eighty-one squares asking.
+        if (Reading) ReadPosition();
+
+        // The cursor is not moved by a move either, for the same reason — but a game of
+        // another size is another board, and a cursor left standing outside it would be
+        // a caret nobody could see.
+        PlaceAim();
+
         // The pointer is deliberately not cleared here. What it is over has not changed
         // just because the position did; only what that means has.
         _needsRender = true;
         _selected = null;
+    }
+
+    /// <summary>
+    /// Puts the focus back on the cursor after a key has moved it. The element is a new
+    /// one each time — that is what has the reader name it — so the focus it had goes
+    /// with the old one and is handed to the new one here.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusWanted) return;
+        _focusWanted = false;
+
+        try
+        {
+            // Without this the browser scrolls the board into view on every press, and
+            // on a phone that is the page jumping under a player who only moved a caret.
+            await _cursor.FocusAsync(preventScroll: true);
+        }
+        catch (Exception)
+        {
+            // The cursor went with a render — a game ended, a review started. The next
+            // press asks again, and a board that cannot focus is not a board that breaks.
+        }
+    }
+
+    /// <summary>
+    /// Works out how each pawn got where it now is, by comparing it with where it was the
+    /// last time a position arrived. Nothing else on the board can tell a jump from a
+    /// step, and until this existed a pawn jumping the other one slid straight through it.
+    /// Runs on every parameter set, including the ones a hover causes, so it has to be
+    /// silent when nothing has actually moved.
+    /// </summary>
+    private void ReadMotion()
+    {
+        for (int player = 0; player < 2; player++)
+        {
+            int now = State.PawnOf(player);
+            int was = _wasAt[player];
+
+            _wasAt[player] = now;
+            if (was == now) continue;
+
+            _hopFrom[player] = was;
+
+            // A first position, a new game, or a step back through the move list is not
+            // travel. There is nothing to go over, and the pawn simply is where it is —
+            // the slide still carries it there, because that is what the arrows are for.
+            //
+            // A portal step is the exception to the exception. Reading a game back is still
+            // no reason to glide a pawn diagonally across half a board it never walked, so
+            // the one move that is not travel is drawn as what it is at every speed.
+            _hop[player] = was < 0 ? ""
+                : IsPortalStep(was, now) ? "warp"
+                : Reviewing ? ""
+                : Motion(was, now);
+
+            _hopAt[player]++;
+            _over = player;
+        }
+    }
+
+    /// <summary>
+    /// Whether the pawn travelled a portal rather than the board. Asked of the position and
+    /// not of the distance: the pairing is the half turn that maps one player's half onto
+    /// the other's, so the two mouths are simply two squares, and nothing about where they
+    /// are says that stepping between them was legal — only the mask does.
+    /// </summary>
+    private bool IsPortalStep(int from, int to) =>
+        State.HasPortals && GameState.PortalPartner(from) == to && State.IsPortalMouth(to);
+
+    /// <summary>
+    /// The offset back to the mouth a portal step left from, in the board's own units, for
+    /// the half of the animation that has to play where the piece actually was. Null for
+    /// every other move, all of which are drawn where the piece now is.
+    /// </summary>
+    private string? WarpFrom(int player)
+    {
+        if (_hop[player] != "warp") return null;
+
+        int from = _hopFrom[player];
+        int to = State.PawnOf(player);
+
+        return $"--from-x: {Centre(Board.ColOf(from)) - Centre(Board.ColOf(to))}px;" +
+               $" --from-y: {Centre(Board.RowOf(from)) - Centre(Board.RowOf(to))}px";
+    }
+
+    /// <summary>
+    /// One square is a step; a corner is the diagonal a jump falls back on when the square
+    /// behind the other pawn is blocked; two squares in a line is a jump over it, which is
+    /// the one that has to visibly go over rather than through. Anything further apart is
+    /// not a move at all and gets nothing.
+    /// </summary>
+    private static string Motion(int from, int to)
+    {
+        int rows = Math.Abs(Board.RowOf(to) - Board.RowOf(from));
+        int cols = Math.Abs(Board.ColOf(to) - Board.ColOf(from));
+
+        return (rows, cols) switch
+        {
+            (0, 1) or (1, 0) => "step",
+            (1, 1) => "slip",
+            (0, 2) or (2, 0) => "leap",
+            _ => "",
+        };
     }
 
     // Mouse movement inside one target must not redraw three hundred elements.
@@ -378,20 +924,31 @@
     /// <summary>Legal for the side to move right now. Meaningless during their turn.</summary>
     private bool PointedIsLegal => Pointed is { } move && State.IsLegal(move);
 
-    private void HoverCell(int row, int col)
+    /// <summary>
+    /// Takes aim at a target, whichever of the two asked for it. The cursor and the pointer
+    /// write the same aim on purpose: everything below — the mark, the sentence in the
+    /// panel, the detour a groove would cause — is drawn from this and never asks which of
+    /// them put it here.
+    /// </summary>
+    private void AimAt(MoveKind kind, int row, int col)
     {
-        int cell = Board.Index(row, col);
-        if (_pointerCell == cell && _pointerWall is null) return;
+        _aimKind = kind;
+        _aimRow = row;
+        _aimCol = col;
 
-        _pointerCell = cell;
-        _pointerWall = null;
-        _needsRender = true;
+        if (kind == MoveKind.Pawn)
+        {
+            int cell = Board.Index(row, col);
+            if (_pointerCell == cell && _pointerWall is null) return;
 
-        OnPreview.InvokeAsync(null);
-    }
+            _pointerCell = cell;
+            _pointerWall = null;
+            _needsRender = true;
 
-    private void HoverWall(MoveKind kind, int row, int col)
-    {
+            OnPreview.InvokeAsync(null);
+            return;
+        }
+
         var candidate = new Move(kind, row, col);
         if (_pointerWall == candidate) return;
 
@@ -402,8 +959,82 @@
         OnPreview.InvokeAsync(Interactive ? Describe(candidate, State.IsWallLegal(kind, row, col)) : null);
     }
 
+    private void HoverCell(MouseEventArgs e, int row, int col)
+    {
+        if (MouseAsked(e)) AimAt(MoveKind.Pawn, row, col);
+    }
+
+    private void HoverWall(MouseEventArgs e, MoveKind kind, int row, int col)
+    {
+        if (MouseAsked(e)) AimAt(kind, row, col);
+    }
+
+    /// <summary>
+    /// A press plays what was pressed. The hover above can decline a target — a pointer
+    /// lying still on the board reports one every time the cursor moves out from under it,
+    /// and none of those are the mouse asking for anything — but a press always is, and a
+    /// square that played the caret's move instead of its own would be unusable.
+    /// </summary>
+    private async Task ClickCell(int row, int col)
+    {
+        MouseTakesOver();
+        AimAt(MoveKind.Pawn, row, col);
+
+        await Commit();
+    }
+
+    private async Task ClickWall(MoveKind kind, int row, int col)
+    {
+        MouseTakesOver();
+        AimAt(kind, row, col);
+
+        await Commit();
+    }
+
+    /// <summary>
+    /// Whether the mouse is actually asking for the target it has just reported, and with
+    /// it hands the aim back from the keys. A browser raises mouseover when an element
+    /// arrives under a still pointer as well as when the pointer arrives on an element,
+    /// and the cursor moving on the keys does exactly that — so a hand resting anywhere on
+    /// the board would pull every press straight back to where the hand was. The pointer's
+    /// own coordinates are the only thing that can tell the two apart.
+    /// </summary>
+    private bool MouseAsked(MouseEventArgs e)
+    {
+        bool moved = e.ClientX != _mouseX || e.ClientY != _mouseY;
+
+        _mouseX = e.ClientX;
+        _mouseY = e.ClientY;
+
+        if (_byKeys && !moved) return false;
+
+        MouseTakesOver();
+        return true;
+    }
+
+    /// <summary>The mouse has the aim now, and the caret on the board is no longer what
+    /// the player is steering by.</summary>
+    private void MouseTakesOver()
+    {
+        if (!_byKeys) return;
+
+        _byKeys = false;
+        _needsRender = true;
+    }
+
+    /// <summary>The mouse arriving on the cursor's own square, which is a handover and
+    /// not a move: the aim is already there, and only who owns it changes.</summary>
+    private void AimByMouse(MouseEventArgs e)
+    {
+        MouseAsked(e);
+    }
+
     private void ClearHover()
     {
+        // Leaving the board takes the mouse's aim with it and leaves the keys' alone.
+        // A cursor that vanished because a hand brushed past the board on its way
+        // somewhere else would be a cursor nobody could rely on.
+        if (_byKeys) return;
         if (_pointerWall is null && _pointerCell < 0) return;
 
         _pointerWall = null;
@@ -475,6 +1106,283 @@
         return us == 0 ? $"{cost}, and nothing to you." : $"{cost}, and {us} to you.";
     }
 
+    // =================================================================== keyboard ==
+
+    /// <summary>The cursor element, so the focus can be put back on it once it has moved.</summary>
+    private ElementReference _cursor;
+
+    /// <summary>
+    /// Counts the moves of the cursor. It is the cursor element's key, so every press
+    /// hands the browser a new element to name rather than a renamed one — see the cursor
+    /// in the markup for why that difference is the whole of whether a reader hears it.
+    /// </summary>
+    private int _cursorKey;
+
+    private bool _focusWanted;
+
+    /// <summary>
+    /// The keys, which are the whole of what it takes to play a game here without a mouse.
+    /// Arrows move a caret in the directions of the screen, Enter or Space plays what it
+    /// is standing on, W or R takes it into the grooves and turns the wall there, Escape
+    /// brings it back out, and Home returns it to your own piece.
+    ///
+    /// The presses arrive from the cursor itself — it is the only thing on the board that
+    /// can hold focus — so nothing here fires unless the board is what the player is on.
+    /// </summary>
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        // Ctrl+Z is the page's undo and the rest of the modifiers are the browser's own.
+        // Nothing the board wants is worth taking one of them away.
+        if (e.CtrlKey || e.MetaKey || e.AltKey) return;
+
+        switch (e.Key)
+        {
+            // Screen directions and not board ones. The board is turned a half turn for
+            // the second seat, and a caret that turned with it would go left when it was
+            // asked to go right — which is worse than having no caret at all.
+            case "ArrowUp": Step(-1, 0); break;
+            case "ArrowDown": Step(1, 0); break;
+            case "ArrowLeft": Step(0, -1); break;
+            case "ArrowRight": Step(0, 1); break;
+
+            // Into the grooves, and once there, round. Which slot and which way it lies
+            // are the same question asked twice, so they are the same key asked twice.
+            case "w" or "W" or "r" or "R":
+                TurnWall();
+                break;
+
+            // Back to your own piece, from wherever forty presses have left the caret.
+            case "Home":
+                RestAim();
+                break;
+
+            case "Escape":
+                if (!LeaveWalls()) return;
+                break;
+
+            case "Enter" or " ":
+                AimByKeys();
+                await Commit();
+
+                // With confirmation on, the first press only chooses, and a press that
+                // says nothing back is one a reader cannot tell from a press that failed.
+                // What is waiting is in the cursor's label, so the cursor is handed over
+                // again to have that label read out.
+                if (_selected is not null)
+                {
+                    _cursorKey++;
+                    _focusWanted = true;
+                }
+
+                return;
+
+            default:
+                return;
+        }
+
+        AimByKeys();
+
+        _cursorKey++;
+        _focusWanted = true;
+    }
+
+    /// <summary>
+    /// Moves the cursor a square, or a slot while it is in the grooves, and stops at the
+    /// edge of the game rather than wrapping round it: a caret that comes out at the far
+    /// side is a caret you have to go looking for.
+    /// </summary>
+    private void Step(int rows, int cols)
+    {
+        if (Flipped)
+        {
+            rows = -rows;
+            cols = -cols;
+        }
+
+        int high = _aimKind == MoveKind.Pawn ? Last : Last - 1;
+
+        _aimRow = Math.Clamp(_aimRow + rows, From, high);
+        _aimCol = Math.Clamp(_aimCol + cols, From, high);
+    }
+
+    /// <summary>
+    /// Takes the cursor into the grooves, and turns the wall once it is there. A square's
+    /// own slot is the corner below and to the right of it, which is the wall a player
+    /// looking at that square is thinking about; the far row and column have no corner of
+    /// their own, and the cursor steps back onto the last one that has.
+    /// </summary>
+    private void TurnWall()
+    {
+        if (_aimKind != MoveKind.Pawn)
+        {
+            _aimKind = _aimKind == MoveKind.HorizontalWall ? MoveKind.VerticalWall : MoveKind.HorizontalWall;
+            return;
+        }
+
+        _aimKind = MoveKind.HorizontalWall;
+        _aimRow = Math.Min(_aimRow, Last - 1);
+        _aimCol = Math.Min(_aimCol, Last - 1);
+    }
+
+    /// <summary>
+    /// Escape, which puts back whatever the last press put you into: the grooves first,
+    /// then a move standing waiting to be confirmed. False when the board has nothing to
+    /// leave, and the key is then the page's — where it means "stop reading the game".
+    /// </summary>
+    private bool LeaveWalls()
+    {
+        if (_aimKind != MoveKind.Pawn)
+        {
+            _aimKind = MoveKind.Pawn;
+            return true;
+        }
+
+        if (_selected is null) return false;
+
+        _selected = null;
+        return true;
+    }
+
+    /// <summary>Puts the cursor on the piece whose turn it is, which is where the next
+    /// move is being thought about before it is aimed anywhere.</summary>
+    private void RestAim()
+    {
+        int cell = State.PawnOf(State.SideToMove);
+
+        _aimKind = MoveKind.Pawn;
+        _aimRow = Board.RowOf(cell);
+        _aimCol = Board.ColOf(cell);
+    }
+
+    /// <summary>
+    /// Brings the cursor inside the game actually being played. A cursor stays where it
+    /// was left for the whole of a game — a caret that jumped every time the position
+    /// changed would be one you had to find again after every move — but a new game is
+    /// not that: nothing on the board is where it was, and the caret goes home with it.
+    /// A smaller board makes the point twice over, since a cursor left where a nine put
+    /// it can be off the five entirely.
+    /// </summary>
+    private void PlaceAim()
+    {
+        int high = _aimKind == MoveKind.Pawn ? Last : Last - 1;
+        bool inside = _aimRow >= From && _aimRow <= high && _aimCol >= From && _aimCol <= high;
+
+        if (inside && Generation == _placedFor) return;
+
+        _placedFor = Generation;
+        RestAim();
+    }
+
+    /// <summary>Which game the cursor was last placed for. Not nullable and not zero:
+    /// zero is a real generation, and a board is one of a great many.</summary>
+    private int _placedFor = -1;
+
+    /// <summary>Hands the aim to the cursor, wherever the last press left it.</summary>
+    private void AimByKeys()
+    {
+        _byKeys = true;
+        _needsRender = true;
+
+        AimAt(_aimKind, _aimRow, _aimCol);
+    }
+
+    /// <summary>What the cursor is standing on, as the move playing it would be.</summary>
+    private Move AimMove => new(_aimKind, _aimRow, _aimCol);
+
+    // Laid exactly over the hit target underneath it. Anything wider would take mouse
+    // presses away from the targets on either side of the one it is standing on.
+    private int AimX => _aimKind == MoveKind.VerticalWall ? Origin(_aimCol) + Cell - 4 : Origin(_aimCol);
+
+    private int AimY => _aimKind == MoveKind.HorizontalWall ? Origin(_aimRow) + Cell - 4 : Origin(_aimRow);
+
+    private int AimWidth => _aimKind == MoveKind.VerticalWall ? Gap + 8 : Cell;
+
+    private int AimHeight => _aimKind == MoveKind.HorizontalWall ? Gap + 8 : Cell;
+
+    /// <summary>Said of a target that cannot be played from here, so a reader is told
+    /// before pressing rather than by the press doing nothing.</summary>
+    private string? AimBlocked => Interactive && !State.IsLegal(AimMove) ? "true" : null;
+
+    /// <summary>
+    /// Where the cursor is, in the notation printed round the board and used by the move
+    /// list — so a player who cannot see the board is given the same names as one who can,
+    /// and the two of them can talk about the same game.
+    /// </summary>
+    private string AimLabel
+    {
+        get
+        {
+            Move aim = AimMove;
+            string spot = Notation.Format(aim, State);
+
+            if (aim.Kind == MoveKind.Pawn)
+            {
+                string what = Occupant(aim.Cell);
+
+                if (!Interactive || !State.IsLegal(aim)) return $"{spot}, {what}";
+
+                return $"{spot}, {what}, {Offer("step here")}";
+            }
+
+            // The move list calls it e3h. A reader hears a letter as a letter, so the one
+            // that says which way the wall lies is given as the word it stands for.
+            string wall = $"wall {spot[..^1]} {(aim.IsHorizontal ? "across" : "down")}";
+
+            if (!Interactive) return wall;
+
+            return State.IsWallLegal(aim.Kind, aim.Row, aim.Col)
+                ? $"{wall}, {Offer("place it here")}"
+                : $"{wall}, not allowed";
+        }
+    }
+
+    /// <summary>
+    /// What pressing here would do. Nearly always the plain offer — but with confirmation
+    /// on, the target already chosen is one press from being played, and a board that said
+    /// the same thing before and after the choosing would leave a reader unable to tell a
+    /// press that chose from a press that did nothing at all.
+    /// </summary>
+    private string Offer(string plain) => _selected == AimMove ? "press again to play it" : plain;
+
+    /// <summary>What is standing on a square, in the words the guides use for it.</summary>
+    private string Occupant(int cell)
+    {
+        UInt128 bit = Board.Bit(cell);
+
+        if ((Holes & bit) != 0) return "a gap";
+        if (State.PawnOf(0) == cell) return "the first player";
+        if (State.PawnOf(1) == cell) return "the second player";
+        if ((State.WallPickups & bit) != 0) return "two spare walls";
+        if ((State.SkipPickups & bit) != 0) return "a free move";
+        if (State.IsPortalMouth(cell)) return "a portal";
+
+        return "empty";
+    }
+
+    /// <summary>
+    /// The one sentence the board itself has to say out loud: what was just played, and
+    /// who is on move now. Composed here rather than taken from the panel because the
+    /// panel's status is about the game — thinking, waiting, disconnected — and this is
+    /// about the position, which is the part a reader cannot get at any other way.
+    /// </summary>
+    private string Announcement
+    {
+        get
+        {
+            if (State.IsGameOver) return $"{Seat(State.Winner)} wins.";
+
+            string turn = $"{Seat(State.SideToMove)} to move.";
+
+            return LastMove is { } last ? $"{Spoken(last)} {turn}" : turn;
+        }
+    }
+
+    private static string Seat(int player) => player == 0 ? "First player" : "Second player";
+
+    private string Spoken(Move move) => move.Kind == MoveKind.Pawn
+        ? $"Pawn to {Notation.Format(move, State)}."
+        : $"Wall {Notation.Format(move, State)[..^1]} {(move.IsHorizontal ? "across" : "down")}.";
+
     // =================================================================== contents ==
 
     /// <summary>Every square still holding something, and whether it is a spare wall.</summary>
@@ -504,28 +1412,70 @@
     {
         string side = State.SideToMove == 0 ? "p0" : "p1";
 
+        // A pointer is its own cursor and needs no mark to say where it is; a caret has
+        // nothing else, so the target it stands on is drawn whether or not the target is
+        // one that could be played from here.
+        string caret = _byKeys ? " cursor" : string.Empty;
+
         if (Premove is { } queued) yield return (queued, "premove");
 
         if (_selected is { } chosen)
         {
             yield return (chosen, $"chosen {side}");
+
+            // Confirming leaves the cursor free to go on looking, and a caret that went
+            // out while a move waited would be a board the keys had gone quiet on.
+            if (_byKeys && Pointed is { } looking && looking != chosen)
+                yield return (looking, "cursor");
+
             yield break;
         }
 
         if (Interactive && Pointed is { } pointed)
-            yield return (pointed, PointedIsLegal ? $"aim {side}" : "bad");
+            yield return (pointed, (PointedIsLegal ? $"aim {side}" : "bad") + caret);
+        else if (_byKeys && Pointed is { } waiting)
+            yield return (waiting, "cursor");
     }
 
     private List<int> Hints()
     {
-        var cells = new List<int>(8);
+        var cells = new List<int>(10);
         if (!Interactive || State.IsGameOver) return cells;
 
-        Span<Move> buffer = stackalloc Move[8];
+        // Eight was five before portals: a pawn on a mouth whose far end is occupied is
+        // offered four plain steps and the far mouth's four free sides. Ten is what the
+        // generator itself reserves, and a buffer narrower than what it may write is not a
+        // hint missing from the board — it is a write past the end of the stack buffer.
+        Span<Move> buffer = stackalloc Move[10];
         int count = State.GeneratePawnMoves(buffer);
         for (int i = 0; i < count; i++) cells.Add(buffer[i].Cell);
 
         return cells;
+    }
+
+    /// <summary>
+    /// Both mouths of every portal, each carrying the pair it belongs to so the two ends of
+    /// one can be drawn in one ink. Read straight off the position, which is where the
+    /// pairs live, so nothing has to be handed to the board beside it the way the holes are.
+    /// </summary>
+    private List<(int Cell, int Pair)> Mouths()
+    {
+        var mouths = new List<(int, int)>(4);
+
+        ulong pairs = State.Portals;
+        int pair = 0;
+
+        while (pairs != 0)
+        {
+            int low = System.Numerics.BitOperations.TrailingZeroCount(pairs);
+            pairs &= pairs - 1;
+
+            mouths.Add((low, pair));
+            mouths.Add((GameState.PortalPartner(low), pair));
+            pair++;
+        }
+
+        return mouths;
     }
 
     private IEnumerable<(MoveKind Kind, int Row, int Col, int Owner)> PlacedWalls()
@@ -560,14 +1510,312 @@
 
             if (cells.Count < 2) continue;
 
-            routes.Add((player == 0 ? "p0" : "p1",
-                string.Join(' ', cells.Select(c => $"{Centre(Board.ColOf(c))},{Centre(Board.RowOf(c))}"))));
+            string accent = player == 0 ? "p0" : "p1";
+
+            // One ribbon per stretch that is actually walked, rather than one per route: a
+            // route through a portal has two consecutive squares half a board apart, and a
+            // ribbon laid between them would claim the pawn walks that ground — and passes
+            // those walls — on the way home. It is cut at the mouth and picked up at the
+            // far one, which is also what the route does.
+            foreach (string run in Walked(cells)) routes.Add((accent, run));
         }
 
         return routes;
     }
 
+    /// <summary>Each unbroken stretch of a route, as the polyline through its centres.</summary>
+    private static IEnumerable<string> Walked(List<int> cells)
+    {
+        int start = 0;
+
+        for (int i = 1; i <= cells.Count; i++)
+        {
+            if (i < cells.Count && AreNeighbours(cells[i - 1], cells[i])) continue;
+
+            if (i - start >= 2) yield return Points(cells.GetRange(start, i - start));
+            start = i;
+        }
+    }
+
+    /// <summary>Whether two squares are a step apart on the board itself, portals aside.</summary>
+    private static bool AreNeighbours(int a, int b) =>
+        Math.Abs(Board.RowOf(a) - Board.RowOf(b)) + Math.Abs(Board.ColOf(a) - Board.ColOf(b)) == 1;
+
+    /// <summary>A run of squares as the polyline through their centres.</summary>
+    private static string Points(List<int> cells) =>
+        string.Join(' ', cells.Select(c => $"{Centre(Board.ColOf(c))},{Centre(Board.RowOf(c))}"));
+
+    // ==================================================================== reading ==
+
+    /// <summary>
+    /// How many steps every square is from a player's pawn, flooding out the way that pawn
+    /// may actually walk. Squares out of play need no test of their own: sealing one blocks
+    /// it in all four directions and blocks each of its neighbours back toward it, so a
+    /// frontier can neither enter a gap nor leave one — and the ring outside a smaller
+    /// board is sealed the same way, square by square, when the game is built.
+    /// </summary>
+    private static void FillReach(in GameState state, int player, Span<byte> steps)
+    {
+        steps.Fill(PathFinder.Unreachable);
+
+        UInt128 reached = Board.Bit(state.PawnOf(player));
+        UInt128 previous = 0;
+        byte distance = 0;
+
+        while (reached != previous)
+        {
+            UInt128 layer = reached & ~previous;
+
+            while (layer != 0)
+            {
+                steps[Board.LowestBit(layer)] = distance;
+                layer &= layer - UInt128.One;
+            }
+
+            previous = reached;
+            reached = PathFinder.Expand(state, reached);
+            distance++;
+        }
+    }
+
+    /// <summary>
+    /// Works out the whole of the reading at once: which player reaches each square first,
+    /// how far ahead they are there, and the line along which the answer changes.
+    /// </summary>
+    private void ReadPosition()
+    {
+        Span<byte> first = stackalloc byte[Board.CellCount];
+        Span<byte> second = stackalloc byte[Board.CellCount];
+
+        FillReach(State, 0, first);
+        FillReach(State, 1, second);
+
+        for (int cell = 0; cell < Board.CellCount; cell++)
+        {
+            byte mine = first[cell];
+            byte theirs = second[cell];
+
+            // Neither can get there — a pocket the walls closed off, or a square that is
+            // not part of this game. It belongs to nobody and stays a plain tile.
+            if (mine == PathFinder.Unreachable && theirs == PathFinder.Unreachable)
+            {
+                _owner[cell] = -1;
+                continue;
+            }
+
+            // A square both pawns reach in the same number of steps goes to whoever is on
+            // move, because they take the first of those steps. That is also why the seam
+            // shifts by a square as the turn passes: the race has genuinely changed hands,
+            // and under a toggle you have asked for that is the thing you asked to see.
+            _owner[cell] = mine == theirs ? State.SideToMove : mine < theirs ? 0 : 1;
+
+            int margin = mine == PathFinder.Unreachable || theirs == PathFinder.Unreachable
+                ? Decisive
+                : Math.Abs(mine - theirs);
+
+            _stain[cell] = FaintestStain +
+                (StrongestStain - FaintestStain) * Math.Min(margin, Decisive) / Decisive;
+        }
+
+        _front = BuildFront();
+    }
+
+    /// <summary>
+    /// The seam, as one path: every groove with a different answer on either side of it.
+    /// Drawn down the middle of the gap and a whole pitch long, so consecutive segments
+    /// meet at the corners and the two edges of the field are where the line ends.
+    /// </summary>
+    private string BuildFront()
+    {
+        var path = new System.Text.StringBuilder();
+
+        for (int row = From; row <= Last; row++)
+        {
+            for (int col = From; col <= Last; col++)
+            {
+                int cell = Board.Index(row, col);
+                int owner = _owner[cell];
+                if (owner < 0) continue;
+
+                if (col < Last && Divides(owner, cell + 1))
+                    path.Append($"M{Origin(col) + Cell + Gap / 2} {Origin(row) - Gap / 2}v{Pitch}");
+
+                if (row < Last && Divides(owner, cell + Board.Size))
+                    path.Append($"M{Origin(col) - Gap / 2} {Origin(row) + Cell + Gap / 2}h{Pitch}");
+            }
+        }
+
+        return path.ToString();
+    }
+
+    /// <summary>Whether the seam runs between a square and the neighbour given.</summary>
+    private bool Divides(int owner, int neighbour) => _owner[neighbour] >= 0 && _owner[neighbour] != owner;
+
+    /// <summary>Which player's reach a square is in, as a class. Nothing outside the reading.</summary>
+    private string Territory(int cell) =>
+        !Reading || _owner[cell] < 0 ? string.Empty : _owner[cell] == 0 ? "reach p0" : "reach p1";
+
+    /// <summary>How far that square is restained toward its owner, for the fill to mix by.</summary>
+    private string? Stain(int cell) =>
+        !Reading || _owner[cell] < 0 ? null : $"--stain: {_stain[cell]}%";
+
+    // ===================================================================== detour ==
+
+    /// <summary>
+    /// What the wall under the pointer would do to the route it is aimed at: the stretch of
+    /// the old way that dies, and the new way round. Both arcs are cut to the part that
+    /// actually differs and extended one square past each end, so they leave and rejoin the
+    /// same route rather than being two separate drawings of the whole board.
+    ///
+    /// The work is four flood fills and two walks of at most eighty-one squares, on a hover
+    /// that already places the wall and measures both routes to write the sentence in the
+    /// panel. The engine only takes the thread after a move, never during one.
+    /// </summary>
+    private (string Accent, string Gone, string Now, int Length)? Detour()
+    {
+        if (!Interactive || State.IsGameOver) return null;
+        if (_pointerWall is not { } wall) return null;
+        if (!State.IsWallLegal(wall.Kind, wall.Row, wall.Col)) return null;
+
+        // The wall is played against the other player, so theirs is the route it bends.
+        int player = State.Opponent;
+
+        Span<byte> distances = stackalloc byte[Board.CellCount];
+
+        var before = new List<int>(Board.CellCount);
+        PathFinder.FillDistancesToGoal(State, player, distances);
+        PathFinder.TraceShortestPath(State, player, distances, before);
+        if (before.Count < 2) return null;
+
+        GameState placed = State;
+        placed.PlaceWallUnchecked(wall.Kind, wall.Row, wall.Col);
+
+        UInt128 old = 0;
+        foreach (int cell in before) old |= Board.Bit(cell);
+
+        var after = new List<int>(Board.CellCount);
+        PathFinder.FillDistancesToGoal(placed, player, distances);
+        Trace(placed, player, distances, old, after);
+        if (after.Count < 2) return null;
+
+        UInt128 taken = 0;
+        foreach (int cell in after) taken |= Board.Bit(cell);
+
+        // Cut at the first portal the stretch takes rather than broken into pieces at each
+        // one: unlike a ribbon, the new way round is a single line that draws itself in,
+        // and both the drawing and the length it is measured in assume one unbroken run.
+        // What is kept is the part nearest the pawn, which is the part being asked about.
+        List<int> gone = Unbroken(Stretch(before, taken));
+        List<int> now = Unbroken(Stretch(after, old));
+
+        // The wall bends nothing this player was going to do anyway. The panel still says
+        // what it costs; there is simply no detour to draw.
+        if (gone.Count < 2 && now.Count < 2) return null;
+
+        return (player == 0 ? "p0" : "p1",
+            gone.Count < 2 ? string.Empty : Points(gone),
+            now.Count < 2 ? string.Empty : Points(now),
+            (now.Count - 1) * Pitch);
+    }
+
+    /// <summary>
+    /// One shortest route, preferring squares the other route already used. Ties on a
+    /// distance field are everywhere and choosing among them arbitrarily redraws a route
+    /// that has not really changed; keeping to the old one wherever it is still shortest is
+    /// the whole of why the difference reads as a detour rather than as a new board.
+    /// </summary>
+    private static void Trace(in GameState state, int player, Span<byte> distances, UInt128 old, List<int> cells)
+    {
+        int cell = state.PawnOf(player);
+        if (distances[cell] == PathFinder.Unreachable) return;
+
+        cells.Add(cell);
+
+        while (distances[cell] > 0)
+        {
+            int next = -1;
+            bool kept = false;
+
+            for (int dir = 0; dir < 4; dir++)
+            {
+                if (state.Blocked(cell, dir)) continue;
+
+                int neighbour = cell + Board.Delta[dir];
+                byte step = distances[neighbour];
+
+                // On a distance field anything strictly closer is already one step closer,
+                // so this is the whole of the test for being on a shortest route.
+                if (step == PathFinder.Unreachable || step >= distances[cell]) continue;
+
+                bool familiar = (old & Board.Bit(neighbour)) != 0;
+
+                // Take the first candidate, and after that only trade up: a square the old
+                // route used, in place of one it did not.
+                if (next >= 0 && !(familiar && !kept)) continue;
+
+                next = neighbour;
+                kept = familiar;
+            }
+
+            if (next < 0) break;
+
+            cell = next;
+            cells.Add(cell);
+        }
+    }
+
+    /// <summary>
+    /// The run of a route that the other one does not have, with one square kept at each
+    /// end so the two arcs start and finish on the same squares — which is what makes them
+    /// read as one route leaving and rejoining rather than as two unrelated lines.
+    /// </summary>
+    private static List<int> Stretch(List<int> route, UInt128 shared)
+    {
+        int first = -1;
+        int last = -1;
+
+        for (int i = 0; i < route.Count; i++)
+        {
+            if ((shared & Board.Bit(route[i])) != 0) continue;
+
+            if (first < 0) first = i;
+            last = i;
+        }
+
+        if (first < 0) return new List<int>();
+
+        int from = Math.Max(first - 1, 0);
+        int to = Math.Min(last + 1, route.Count - 1);
+
+        return route.GetRange(from, to - from + 1);
+    }
+
+    /// <summary>The leading part of a route, up to the first portal it takes.</summary>
+    private static List<int> Unbroken(List<int> route)
+    {
+        for (int i = 1; i < route.Count; i++)
+            if (!AreNeighbours(route[i - 1], route[i]))
+                return route.GetRange(0, i);
+
+        return route;
+    }
+
     // =================================================================== geometry ==
+
+    /// <summary>
+    /// Where along the finish line the winning pawn crossed it, for the flood to start
+    /// from. A percentage rather than a coordinate because the transform is taken in the
+    /// bar's own box, and the bar is the whole row wide however big the board is. Written
+    /// invariantly: this is CSS, and a browser set to a comma decimal point would be
+    /// handed a declaration it can only drop.
+    /// </summary>
+    private string Crossing(int player)
+    {
+        int span = Span * Cell + (Span - 1) * Gap;
+        double at = 100.0 * (Centre(Board.ColOf(State.PawnOf(player))) - Origin(From)) / span;
+
+        return FormattableString.Invariant($"transform-origin: {at:0.#}% 50%");
+    }
 
     private static int Origin(int index) => Pad + index * Pitch;
 

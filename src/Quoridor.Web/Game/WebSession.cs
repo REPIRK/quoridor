@@ -114,6 +114,24 @@ public sealed class WebSession
     /// <summary>Whether the move just played picked a spare wall up off the board.</summary>
     public bool LastMoveTookAWall { get; private set; }
 
+    /// <summary>
+    /// Whether the move just played went through a portal rather than across the board.
+    /// The board draws that step as leave-and-arrive rather than a glide, and without
+    /// saying so a pawn appearing half a board away reads as the game losing its place.
+    /// </summary>
+    public bool LastMoveCrossedPortal { get; private set; }
+
+    /// <summary>
+    /// Whether this move takes the mover from one mouth of a portal to the other. Asked
+    /// of the position <em>before</em> the move: afterwards the pawn is at the far mouth
+    /// and both ends look alike.
+    /// </summary>
+    private static bool CrossesPortal(in GameState state, Move move) =>
+        move.Kind == MoveKind.Pawn &&
+        state.HasPortals &&
+        state.IsPortalMouth(state.PawnOf(state.SideToMove)) &&
+        GameState.PortalPartner(state.PawnOf(state.SideToMove)) == move.Cell;
+
     /// <summary>Who made the move just played, or -1 for none — so what it did can be
     /// shown beside the player it happened to rather than to both of them.</summary>
     public int LastMover { get; private set; } = -1;
@@ -134,6 +152,10 @@ public sealed class WebSession
             : move.Kind == MoveKind.Pawn && (State.SkipPickups & Board.Bit(move.Cell)) != 0
                 ? (move.Cell, false)
                 : null;
+
+        // Also noted before the move, and for the same reason: the near mouth is only
+        // identifiable while the pawn is still standing on it.
+        LastMoveCrossedPortal = CrossesPortal(State, move);
 
         GameState next = State;
         next.Apply(move);
@@ -166,6 +188,7 @@ public sealed class WebSession
         // collected pickup off a second time as the position it was keyed on changed.
         LastMoveWentAgain = false;
         LastMoveTookAWall = false;
+        LastMoveCrossedPortal = false;
         LastPickup = null;
         LastMover = -1;
 

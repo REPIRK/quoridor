@@ -5,7 +5,7 @@
 
 <div class="app" data-theme="@(_light ? "light" : "dark")">
 
-    <header class="bar">
+    <header class="bar" inert="@Covered">
         <div class="brand">Quoridor</div>
         <div class="mode">@Title</div>
         @* One button, not six. What is behind it is not needed mid-move, and a row of
@@ -18,7 +18,7 @@
         </div>
     </header>
 
-    <main class="layout">
+    <main class="layout" inert="@Covered">
 
         <aside class="players">
             @for (int seat = 1; seat >= 0; seat--)
@@ -49,19 +49,38 @@
                             <span class="count">@_session.State.WallsOf(player)</span>
                         </div>
                     </div>
-                    <div class="steps">@Steps(player)</div>
                 </div>
             }
+
+            @* The race, as one figure instead of two grey strings on opposite sides of a
+               panel that nobody subtracts from each other. Each player's remaining steps
+               sit at their own end, and the bar between leans toward whoever gets home
+               first — by six steps it is as far over as it goes, because past that the
+               answer is simply "them" and a longer bar says nothing more.
+
+               The half-step of being on move is included, so the bar is never exactly
+               level and the turn passing is visible here as well as on the board. The
+               whole sentence is on the figure itself, which is why nothing is written
+               beside it. *@
+            <div class="tape" role="img" title="@Race" aria-label="@Race" style="--edge: @Edge">
+                <span class="end p0">@Remaining(0)</span>
+                <div class="rail">
+                    <span class="wedge @(Ahead == 0 ? "p0" : "p1")"></span>
+                </div>
+                <span class="end p1">@Remaining(1)</span>
+            </div>
         </aside>
 
         <div class="board-wrap">
             <BoardView State="Shown"
                        Interactive="@(_session.IsHumanTurn && !_thinking && !_session.IsOver && _reviewPly is null)"
-                       ShowRoutes="_routes"
+                       Reading="_reading"
+                       Reviewing="@(_reviewPly is not null)"
                        Flipped="@(_session.LocalSeat == 1)"
                        Holes="_session.Holes"
                        Generation="_session.Setup.GetHashCode()"
                        Collected="@(_reviewPly is null ? _session.LastPickup : null)"
+                       Carved="_carved"
                        ConfirmMoves="_confirm"
                        LastMove="ShownLastMove"
                        Premove="_premove"
@@ -80,7 +99,12 @@
                         @onclick="() => _showHelp = !_showHelp">?</button>
             </div>
 
-            <p class="status">@Status@(_thinking ? "…" : "")</p>
+            @* Whose move it is, said out loud. A player who cannot see the board learns the
+               turn has passed from this line and from nothing else, and it is already the
+               one thing on the page that says so — role="status" only asks the screen
+               reader to mention it when it changes, and atomic asks for the whole of it
+               rather than the words that differ. *@
+            <p class="status" role="status" aria-atomic="true">@Status@(_saidThinking ? "…" : "")</p>
 
             @{ string note = _preview ?? Hint; }
             @if (note.Length > 0)
@@ -117,18 +141,23 @@
                 }
             </ol>
 
+            @* A greyed-out button that will not say why is a button you press twice and
+               then distrust. The reason is on the button itself, where the pointer already
+               is when the question comes up. *@
             <div class="actions review">
-                <button class="ghost" disabled="@(_session.Moves.Count == 0)"
+                <button class="ghost" disabled="@(_session.Moves.Count == 0)" title="@BackNote"
                         @onclick="() => Review((_reviewPly ?? _session.Moves.Count) - 1)">&#x25C0;</button>
-                <button class="ghost" disabled="@(_reviewPly is null)"
+                <button class="ghost" disabled="@(_reviewPly is null)" title="@LiveNote"
                         @onclick="() => Review((_reviewPly ?? 0) + 1)">&#x25B6;</button>
-                <button class="ghost" disabled="@(_reviewPly is null)" @onclick="() => Review(null)">Live</button>
+                <button class="ghost" disabled="@(_reviewPly is null)" title="@LiveNote"
+                        @onclick="() => Review(null)">Live</button>
             </div>
 
             <hr />
 
             <div class="actions">
-                <button class="ghost" disabled="@(!_session.CanUndo || _thinking)" @onclick="Undo">Undo</button>
+                <button class="ghost" disabled="@(!_session.CanUndo || _thinking)" title="@UndoNote"
+                        @onclick="Undo">Undo</button>
                 <button class="ghost" @onclick="() => Restart(false)">Restart</button>
             </div>
         </aside>
@@ -142,14 +171,24 @@
 
                 <div class="row">
                     <span class="label">Board</span>
-                    <button class="seg @(_routes ? "on" : "")" @onclick="() => _routes = !_routes">Show routes</button>
-                    <button class="seg @(_confirm ? "on" : "")" @onclick="() => _confirm = !_confirm">Confirm moves</button>
+                    <button class="seg @(_reading ? "on" : "")" @onclick="() => Choose(() => _reading = !_reading)">Read the position</button>
+                    <button class="seg @(_confirm ? "on" : "")" @onclick="() => Choose(() => _confirm = !_confirm)">Confirm moves</button>
                 </div>
 
                 <div class="row">
                     <span class="label">Theme</span>
-                    <button class="seg @(!_light ? "on" : "")" @onclick="() => _light = false">Dark</button>
-                    <button class="seg @(_light ? "on" : "")" @onclick="() => _light = true">Light</button>
+                    <button class="seg @(!_light ? "on" : "")" @onclick="() => Choose(() => _light = false)">Dark</button>
+                    <button class="seg @(_light ? "on" : "")" @onclick="() => Choose(() => _light = true)">Light</button>
+                </div>
+
+                @* Two boards, not two of anything else: the same game drawn flat, or drawn
+                   as a tray with the pieces standing in it. Flat is the one a first visit
+                   gets, because it is the one that never gets in the way of reading the
+                   position — the other is there for whoever wants the object. *@
+                <div class="row">
+                    <span class="label">Style</span>
+                    <button class="seg @(!_carved ? "on" : "")" @onclick="() => Choose(() => _carved = false)">Flat</button>
+                    <button class="seg @(_carved ? "on" : "")" @onclick="() => Choose(() => _carved = true)">Carved</button>
                 </div>
 
                 <div class="row">
@@ -183,7 +222,15 @@
 
                 @if (_session.Setup.Pickups > 0)
                 {
-                    <PickupGuide />
+                    <PickupGuide Carved="_carved" />
+                }
+
+                @* What the board really carries, not what was asked for: a two set on a nine
+                   and then rolled onto a five is a rule the player would go looking for and
+                   never find. *@
+                @if (_session.Setup.ActualPortals > 0)
+                {
+                    @PortalGuide
                 }
 
                 <div class="actions">
@@ -193,7 +240,9 @@
         </div>
     }
 
-    @if (_session.IsOver)
+    @* Not the instant the game ends. The winning move is the most interesting thing that
+       happens all game and the card used to cover it before anybody had looked. *@
+    @if (_showResult)
     {
         <div class="overlay">
             <div class="result">
@@ -279,7 +328,7 @@
                     {
                         <div class="row">
                             <span class="label">Board</span>
-                            <select class="pick" value="@_size" @onchange="e => _size = Number(e, Board.Size)">
+                            <select class="pick" value="@_size" @onchange="PickSize">
                                 <option value="9">9 × 9 — standard</option>
                                 <option value="7">7 × 7 — quick</option>
                                 <option value="5">5 × 5 — tiny</option>
@@ -290,7 +339,7 @@
                             <span class="label">Walls each</span>
                             <select class="pick" value="@_walls"
                                     @onchange="e => _walls = Number(e, Board.WallsPerPlayer)">
-                                @foreach (int option in new[] { 0, 3, 5, 7, 10, 14, 20 })
+                                @foreach (int option in WallChoices)
                                 {
                                     <option value="@option">@option</option>
                                 }
@@ -318,17 +367,46 @@
                             </select>
                         </div>
 
+                        @* Counted in portals, not in squares: a portal's two mouths are one
+                           object, unlike a pair of holes or of pickups. The list is the
+                           size's own, so a number this board cannot carry is never the one
+                           sent over a link. *@
+                        <div class="row">
+                            <span class="label">Portals</span>
+                            <select class="pick" value="@_portals"
+                                    disabled="@(PortalChoices.Length == 1)"
+                                    @onchange="e => _portals = Number(e, 0)">
+                                @foreach (int option in PortalChoices)
+                                {
+                                    <option value="@option">@PortalLabel(option)</option>
+                                }
+                            </select>
+                        </div>
+
+                        @* A control with nothing in it is a control that looks broken. What
+                           the size will and will not carry is a rule of the game, so it is
+                           said out loud rather than left to be inferred from a dead list. *@
+                        @if (PortalNote.Length > 0)
+                        {
+                            <p class="fine why">@PortalNote</p>
+                        }
+
                         @if (_pickups > 0)
                         {
-                            <PickupGuide />
+                            <PickupGuide Carved="_carved" />
+                        }
+                        @if (_portals > 0)
+                        {
+                            @PortalGuide
                         }
                     }
                 }
                 else if (_flavour == GameFlavour.Random)
                 {
-                    @* A rolled game may well put pickups on the board, and the first one
-                       should not be a surprise nobody explained. *@
-                    <PickupGuide />
+                    @* A rolled game may well put pickups or a portal on the board, and the
+                       first of either should not be a surprise nobody explained. *@
+                    <PickupGuide Carved="_carved" />
+                    @PortalGuide
                 }
 
                 @if (_mode == WebMode.Online)
@@ -446,14 +524,33 @@
     private int _walls = Board.WallsPerPlayer;
     private int _holes;
     private int _pickups;
+    private int _portals;
 
     private bool _showSetup = true;
     private bool _showSettings;
     private bool _thinking;
     private bool _engineRunning;
     private bool _light;
-    private bool _routes;
+    private bool _reading;
     private bool _confirm;
+
+    /// <summary>Whether the board is drawn as an object rather than as a diagram. Off is
+    /// the board this game is really about, so off is what a first visit gets.</summary>
+    private bool _carved;
+
+    /// <summary>
+    /// Whether a card is up over the page. Each of the three is an opaque sheet across the
+    /// whole viewport, so the mouse has never been able to reach what is behind one — but
+    /// the keyboard could, and now that the board has a caret of its own that is a real
+    /// hole: the caret is the third stop on a fresh page, ahead of every control the setup
+    /// card offers, and Enter on it plays a move into a game nobody has started yet.
+    ///
+    /// `inert` is the one thing that says this properly. It takes the whole subtree out of
+    /// the tab order and out of hit testing at once, which is what an opaque sheet already
+    /// means everywhere except the keyboard.
+    /// </summary>
+    private bool Covered => _showSetup || _showSettings || _showResult;
+
     private bool _touch;
     private bool _showHelp;
     private bool _sound = true;
@@ -483,10 +580,82 @@
 
     private string FlavourNote => _flavour switch
     {
-        GameFlavour.Random => "Board, walls, holes, pickups and who moves first — all rolled for you.",
+        GameFlavour.Random => "Board, walls, holes, pickups, portals and who moves first — all rolled for you.",
         GameFlavour.Custom => "Everything is yours to set.",
         _ => "Nine by nine, ten walls each. The game as it is normally played.",
     };
+
+    // ================================================================ portals ==
+
+    /// <summary>The portal counts the chosen size can actually carry.</summary>
+    private int[] PortalChoices => GameSetup.PortalOptions(_size);
+
+    /// <summary>
+    /// The board size, with the portal count brought back inside what that size can carry.
+    /// A two chosen on a nine cannot be left standing on the control after the board has
+    /// become a five: the game would be built without it, and a number shown but not
+    /// honoured reads as the generator being unreliable rather than as a rule of the size.
+    /// </summary>
+    private void PickSize(ChangeEventArgs e)
+    {
+        _size = Number(e, Board.Size);
+        _portals = Math.Min(_portals, PortalChoices[^1]);
+    }
+
+    /// <summary>Said in pairs of squares, because that is the unit the count is in.</summary>
+    private static string PortalLabel(int count) => count switch
+    {
+        1 => "1 — one pair of linked squares",
+        2 => "2 — two pairs of linked squares",
+        _ => "None",
+    };
+
+    /// <summary>
+    /// Why a size is offered fewer portals than the last one was. A five has nowhere at all
+    /// to put a mouth, and a seven has one usable pairing, so a second portal there would
+    /// share it and the two would be one objective rather than two.
+    /// </summary>
+    private string PortalNote => PortalChoices.Length switch
+    {
+        1 => "No portals on a five. A mouth may not stand on a goal row, next to one, or on the middle row — and on a five that is every row there is.",
+        2 => "One portal on a seven. Its two usable rows are a single mirrored pair, and two portals sharing that pair would be one objective rather than two.",
+        _ => string.Empty,
+    };
+
+    /// <summary>
+    /// What a portal does, drawn where the pickups are drawn and in the same voice. It is a
+    /// fragment rather than a component of its own only because it is wanted in three places
+    /// in this one file — the custom knobs, a rolled game, and the settings panel of a game
+    /// already in play.
+    ///
+    /// Two mouths, not one: a portal is the pair, and a single ring is the half of it that
+    /// cannot be walked through.
+    /// </summary>
+    private RenderFragment PortalGuide => @<div class="guide">
+        <div class="line">
+            <svg class="glyph" viewBox="0 0 40 28" aria-hidden="true">
+                <g class="portal">
+                    <path class="link" d="M 10 21 Q 20 28 30 21" />
+                    <circle class="rim" cx="10" cy="14" r="8" />
+                    <circle class="iris" cx="10" cy="14" r="3.5" />
+                    <circle class="rim" cx="30" cy="14" r="8" />
+                    <circle class="iris" cx="30" cy="14" r="3.5" />
+                </g>
+            </svg>
+            <div>
+                <b>Two squares, one step.</b>
+                Stand on either mouth and the other one is next door: crossing costs a move
+                and passes the turn, exactly as walking one square does. Nothing is used up,
+                so a portal works all game, for whoever is standing on it.
+            </div>
+        </div>
+
+        <p class="fine">
+            Both mouths of a pair are drawn in one colour, so the one you are standing on
+            tells you where you would come out. They sit opposite each other under the same
+            half turn as the pickups, and no wall can ever close one.
+        </p>
+    </div>;
 
     /// <summary>
     /// The board this setup screen describes. Standard is the plain game; Random rolls
@@ -514,6 +683,7 @@
                 Walls = _walls,
                 Holes = _holes,
                 Pickups = _pickups,
+                Portals = _portals,
                 Seed = seed,
             };
         }
@@ -535,6 +705,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Before anything is drawn, so that what is drawn is already the player's own.
+        await LoadSettings();
+
         _net = new NetLink(Js);
         _net.Changed += OnNetChanged;
         _net.Received += OnNetMessage;
@@ -558,6 +731,15 @@
     {
         if (!firstRender)
         {
+            // Every way a game can end — a move here, the engine's reply, a move arriving
+            // over the link — ends with a render, so the wait is started from here rather
+            // than from each of them in turn.
+            if (_session.IsOver && !_showResult && !_resultHeld)
+            {
+                _resultHeld = true;
+                _ = HoldResult();
+            }
+
             // The list is a fixed height and a game outgrows it about ten moves in,
             // after which the move just played is below the fold — including the one
             // the arrow keys have just stepped to, which is the whole point of pressing
@@ -586,7 +768,8 @@
         _ = LoadSfx();
 
         // A touch screen has no hover, so one stray tap would move a pawn. Confirmation
-        // is the right default there and the wrong one with a mouse.
+        // is the right default there and the wrong one with a mouse — a default being all
+        // it is, so a player who has been to the panel and turned it off keeps it off.
         try
         {
             if (await LoadPage() is not { } page) return;
@@ -597,7 +780,8 @@
             if (!await page.InvokeAsync<bool>("isCoarsePointer")) return;
 
             _touch = true;
-            _confirm = true;
+            if (!_confirmChosen) _confirm = true;
+
             StateHasChanged();
         }
         catch (Exception)
@@ -645,7 +829,7 @@
                 break;
 
             case " ":
-                _routes = !_routes;
+                _reading = !_reading;
                 break;
 
             case "?":
@@ -704,7 +888,7 @@
         get
         {
             if (_session.IsOver) return WinnerLabel;
-            if (_thinking) return "Thinking";
+            if (_saidThinking) return "Thinking";
 
             if (_session.Mode == WebMode.Online)
                 return _session.IsHumanTurn ? "Your move" : "Waiting for your opponent";
@@ -732,6 +916,11 @@
             if (_session.LastMoveTookAWall)
                 return "Two spare walls picked up, on top of what you started with.";
 
+            // The one move whose result does not look like its cause: the pawn is
+            // suddenly half a board away, having paid a single step for it.
+            if (_session.LastMoveCrossedPortal)
+                return "Through the portal — one step to the square it is linked to.";
+
             if (_session.State.WallsOf(_session.State.SideToMove) == 0)
                 return "No walls left — it is a straight race now.";
 
@@ -753,7 +942,37 @@
     /// </summary>
     private string Keys => _touch || _session.IsOver
         ? string.Empty
-        : "Space draws both routes · ← → step through the game · Esc returns to it · Ctrl+Z undo";
+        : "Space reads the position · ← → step through the game · Esc returns to it · Ctrl+Z undo";
+
+    // ============================================================ why not, then ==
+
+    /// <summary>
+    /// Why Undo is not available, when it is not. Online it never is and that is a rule of
+    /// the mode rather than of the position, so it is worth saying even though the button
+    /// will never come back to life in that game.
+    /// </summary>
+    private string? UndoNote
+    {
+        get
+        {
+            if (_thinking) return "The engine has the board for a moment.";
+            if (_session.CanUndo) return null;
+
+            if (_session.Mode == WebMode.Online)
+                return "Taking a move back has to be agreed, and there is no way to ask.";
+
+            return _session.Moves.Count == 0
+                ? "Nothing has been played yet."
+                : "Not until you have had a move of your own to take back.";
+        }
+    }
+
+    /// <summary>Why there is nothing to step back to.</summary>
+    private string? BackNote => _session.Moves.Count == 0 ? "No moves to step back through yet." : null;
+
+    /// <summary>Why the two forward controls are dead: they only mean something from inside
+    /// the game's past, and this is the live position.</summary>
+    private string? LiveNote => _reviewPly is null ? "You are at the live position." : null;
 
     private string WinnerLabel
     {
@@ -786,13 +1005,94 @@
         }
     }
 
-    private string Steps(int player)
+    // ================================================================== the tape ==
+
+    /// <summary>
+    /// How far ahead a player has to be before the bar stops leaning further. Past six
+    /// steps the answer is simply "them", and a longer bar would be saying the same thing
+    /// louder rather than saying more.
+    /// </summary>
+    private const int DecisiveLead = 6;
+
+    /// <summary>
+    /// The lead, in steps, positive when the first player is closer to home. The half-step
+    /// belongs to whoever is on move — they take the next of those steps — which is why
+    /// the race is never exactly level and why the bar shifts as the turn passes.
+    /// </summary>
+    private double Advantage
+    {
+        get
+        {
+            (int first, int second) = _session.Distances();
+
+            // Having no route at all is not being a long way behind; it is being out of
+            // the race, and the figure should say so rather than pick a number.
+            if (first < 0 && second < 0) return 0;
+            if (first < 0) return -DecisiveLead;
+            if (second < 0) return DecisiveLead;
+
+            double half = _session.IsOver ? 0 : _session.State.SideToMove == 0 ? 0.5 : -0.5;
+
+            return second - first + half;
+        }
+    }
+
+    /// <summary>Whose end the bar leans toward.</summary>
+    private int Ahead => Advantage >= 0 ? 0 : 1;
+
+    /// <summary>
+    /// How far over, as the fraction of the rail's half the bar is scaled to. Written
+    /// invariantly because it lands in a CSS custom property, and a browser set to a
+    /// comma decimal point would be handed a number it can only drop.
+    /// </summary>
+    private string Edge => Math.Min(Math.Abs(Advantage) / DecisiveLead, 1)
+        .ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>What a player has left to walk, short enough to sit at the end of the bar.</summary>
+    private string Remaining(int player)
     {
         (int first, int second) = _session.Distances();
         int distance = player == 0 ? first : second;
 
-        return distance < 0 ? "no route" : distance == 0 ? "home" : $"{distance} to go";
+        return distance < 0 ? "—" : distance == 0 ? "home" : distance.ToString();
     }
+
+    /// <summary>
+    /// The figure said out loud, for the title and for anyone reading the page rather than
+    /// looking at it. A shape with a sentence attached needs no caption printed beside it.
+    /// </summary>
+    private string Race
+    {
+        get
+        {
+            (int first, int second) = _session.Distances();
+            string both = $"{_session.PlayerName(0)} {Walk(first)}, {_session.PlayerName(1)} {Walk(second)}";
+
+            if (first < 0 || second < 0) return $"{both}.";
+
+            int lead = Math.Abs(second - first);
+
+            if (lead == 0)
+            {
+                return _session.IsOver
+                    ? $"{both} — level."
+                    : $"{both} — level, and {_session.PlayerName(_session.State.SideToMove)} to move.";
+            }
+
+            string leader = _session.PlayerName(second > first ? 0 : 1);
+
+            return $"{both} — {leader} ahead by {lead} {(lead == 1 ? "step" : "steps")}.";
+        }
+    }
+
+    // Written as a chain rather than a switch on relational patterns: a line that begins
+    // with "<" inside a Razor code block is read as the start of a tag, and "< 0 =>" turns
+    // the rest of the file into markup.
+    private static string Walk(int distance) =>
+        distance < 0 ? "has no route"
+        : distance == 0 ? "is home"
+        : distance == 1 ? "is one step from home"
+        : $"is {distance} steps from home";
 
     // ================================================================== setup ==
 
@@ -816,6 +1116,16 @@
         _session = new WebSession(_mode, _strength, _seat, BuildSetup(), _flavour);
         _showSetup = false;
         ResetPlayState();
+
+        // The game just set up is the one a returning player almost always wants next, so
+        // it is written down here — where it has been settled — rather than on every
+        // touch of every control on the card.
+        Remember();
+
+        // Music cannot start when the page loads, however it was left: a browser will not
+        // make a sound until somebody has pressed something. This press is the first one
+        // there is, so a piece that was playing last time picks up here.
+        if (_music) _ = StartMusic();
 
         // Taking the second seat means the engine opens.
         await OpenGame();
@@ -870,8 +1180,11 @@
     {
         if (!_session.IsBotTurn) return;
 
-        // A plain board has nothing to arrive, so it has nothing to wait for.
-        if (_session.Setup.Holes > 0 || _session.Setup.Pickups > 0)
+        // A plain board has nothing to arrive, so it has nothing to wait for. The portals
+        // count here as the holes and the pickups do: their mouths are drawn with the rest
+        // of what the generator laid out, and a search starting mid-entrance freezes them
+        // half-arrived.
+        if (_session.Setup.Holes > 0 || _session.Setup.Pickups > 0 || _session.Setup.ActualPortals > 0)
             await Task.Delay(BoardEntranceMs);
 
         await RunEngine();
@@ -905,6 +1218,10 @@
             // sliding.
             await _sfx.InvokeVoidAsync("warm");
 
+            // A volume remembered from an earlier visit has to reach the thing that makes
+            // the sound, or the slider says one number and the board plays another.
+            await _sfx.InvokeVoidAsync("setVolume", _soundVolume / 100.0, _musicVolume / 100.0);
+
             return _sfx;
         }
         catch (Exception)
@@ -931,9 +1248,13 @@
     private async Task SoundFor(Move move)
     {
         // A pickup is the one thing on the board worth its own sound; without it the
-        // most interesting move in the game sounds exactly like every other step.
+        // most interesting move in the game sounds exactly like every other step. A
+        // portal step earns one for the opposite reason: it is the one move that does not
+        // look like what it is, because the pawn arrives somewhere it never walked to.
         if (_session.LastMoveWentAgain || _session.LastMoveTookAWall)
             await Sfx(_session.LastMoveWentAgain ? "again" : "collect");
+        else if (_session.LastMoveCrossedPortal)
+            await Sfx("portal");
         else
             await Sfx(move.Kind == MoveKind.Pawn ? "move" : "wall");
 
@@ -946,6 +1267,8 @@
     private async Task ToggleMusic()
     {
         _music = !_music;
+        Remember();
+
         await StartMusic();
     }
 
@@ -953,6 +1276,7 @@
     private async Task PickTrack(ChangeEventArgs e)
     {
         _track = Math.Clamp(Number(e, 0), 0, 2);
+        Remember();
 
         if (!_music) return;
 
@@ -986,6 +1310,8 @@
     private async Task ToggleSound()
     {
         _sound = !_sound;
+        Remember();
+
         if (_sound) await Sfx("move");
     }
 
@@ -997,6 +1323,8 @@
 
         if (music) _musicVolume = level;
         else _soundVolume = level;
+
+        Remember();
 
         try
         {
@@ -1014,12 +1342,222 @@
         if (!music && _sound) await Sfx("move");
     }
 
+    // ============================================================== remembered ==
+
+    /// <summary>
+    /// Whether the confirm step was chosen by hand on some earlier visit. A touch screen
+    /// turns it on by itself, and it must not turn it back on for the one player who went
+    /// looking for the switch and turned it off.
+    /// </summary>
+    private bool _confirmChosen;
+
+    /// <summary>The board sizes the list offers, which is what a stored one has to be.</summary>
+    private static readonly int[] BoardSizes = { 9, 7, 5 };
+
+    private static readonly int[] WallChoices = { 0, 3, 5, 7, 10, 14, 20 };
+    private static readonly int[] HoleChoices = { 0, 2, 4, 6, 10 };
+    private static readonly int[] PickupChoices = { 0, 4, 6, 10 };
+
+    /// <summary>
+    /// Everything worth carrying to the next visit, as the single line it is stored as.
+    /// Named terms rather than a fixed order, so that a setting added later is simply not
+    /// found in what an older visit wrote — and takes its default — and one that has
+    /// stopped meaning anything can be dropped without invalidating the rest.
+    /// </summary>
+    private string Settings => string.Join(';', new[]
+    {
+        $"theme={(_light ? "light" : "dark")}",
+        $"style={(_carved ? "carved" : "flat")}",
+        $"reading={(_reading ? 1 : 0)}",
+        $"confirm={(_confirm ? 1 : 0)}",
+        $"sound={(_sound ? 1 : 0)}",
+        $"soundvol={_soundVolume}",
+        $"music={(_music ? 1 : 0)}",
+        $"musicvol={_musicVolume}",
+        $"track={_track}",
+
+        // The game last set up, so that coming back to play another one is the same
+        // single press it was the first time. An online game is not written down: it
+        // cannot be resumed by remembering it, since the invite went with the tab, and
+        // opening the card on the online panel with an empty code is a worse start than
+        // the one almost everybody wants.
+        $"opponent={(_mode == WebMode.Hotseat ? "hotseat" : "engine")}",
+        $"strength={(int)_strength}",
+        $"game={_flavour}",
+        $"size={_size}",
+        $"walls={_walls}",
+        $"holes={_holes}",
+        $"pickups={_pickups}",
+        $"portals={_portals}",
+    });
+
+    /// <summary>
+    /// Takes the stored line back apart. Every value is checked against what the control
+    /// it belongs to actually offers, and anything that fails simply leaves the default
+    /// standing: what is in storage was written by some other version of this page, or by
+    /// somebody with the developer tools open, and neither is a reason to fail to start.
+    /// </summary>
+    private void ApplySettings(string stored)
+    {
+        foreach (string term in stored.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int mark = term.IndexOf('=');
+            if (mark <= 0) continue;
+
+            string name = term[..mark];
+            string value = term[(mark + 1)..];
+
+            switch (name)
+            {
+                case "theme": _light = value == "light"; break;
+                case "style": _carved = value == "carved"; break;
+                case "reading": _reading = value == "1"; break;
+                case "confirm": _confirm = value == "1"; _confirmChosen = true; break;
+                case "sound": _sound = value == "1"; break;
+                case "music": _music = value == "1"; break;
+                case "soundvol": _soundVolume = Ranged(value, _soundVolume, 100); break;
+                case "musicvol": _musicVolume = Ranged(value, _musicVolume, 100); break;
+                case "track": _track = Ranged(value, _track, 2); break;
+
+                case "opponent": _mode = value == "hotseat" ? WebMode.Hotseat : WebMode.VersusBot; break;
+                case "strength": _strength = (BotStrength)Ranged(value, (int)_strength, 2); break;
+                case "game": _flavour = Flavour(value); break;
+
+                case "size": _size = Offered(value, BoardSizes, Board.Size); break;
+                case "walls": _walls = Offered(value, WallChoices, Board.WallsPerPlayer); break;
+                case "holes": _holes = Offered(value, HoleChoices, 0); break;
+                case "pickups": _pickups = Offered(value, PickupChoices, 0); break;
+                case "portals": _portals = Offered(value, PortalChoices, 0); break;
+            }
+        }
+
+        // The size and the portal count are stored as two terms and read in whatever order
+        // they arrive in, so what the size will carry is settled once both are in — the
+        // same rule the control itself applies, and for the same reason.
+        _portals = Math.Min(_portals, PortalChoices[^1]);
+    }
+
+    /// <summary>A stored number inside the range its control has, or the default. Written
+    /// as two comparisons rather than a relational pattern because a Razor code block reads
+    /// a line beginning with "&lt;" as the start of a tag.</summary>
+    private static int Ranged(string value, int fallback, int highest) =>
+        int.TryParse(value, out int number) && number >= 0 && number <= highest ? number : fallback;
+
+    /// <summary>
+    /// A stored number, but only one the control in question actually offers. A value no
+    /// option carries would leave the list showing a blank, which reads as the setting
+    /// having been lost rather than as it never having been possible.
+    /// </summary>
+    private static int Offered(string value, int[] options, int fallback) =>
+        int.TryParse(value, out int number) && Array.IndexOf(options, number) >= 0 ? number : fallback;
+
+    private static GameFlavour Flavour(string value) => value switch
+    {
+        nameof(GameFlavour.Random) => GameFlavour.Random,
+        nameof(GameFlavour.Custom) => GameFlavour.Custom,
+        _ => GameFlavour.Standard,
+    };
+
+    /// <summary>
+    /// Reads the settings back before anything is drawn. After the first render would be
+    /// simpler and would also mean a player who chose the light theme is shown the dark
+    /// one for a frame on the way in. The module is a few hundred bytes and comes from the
+    /// browser's own cache on every visit that has anything stored to read — the one visit
+    /// that pays for the round trip is the one where it finds nothing.
+    /// </summary>
+    private async Task LoadSettings()
+    {
+        try
+        {
+            if (await LoadPage() is not { } page) return;
+
+            ApplySettings(await page.InvokeAsync<string>("readSettings"));
+        }
+        catch (Exception)
+        {
+            // A visit with nothing remembered is a visit with the defaults, which is
+            // exactly what a first visit is.
+        }
+    }
+
+    /// <summary>
+    /// Makes a change from the settings panel and writes the result down. A preference
+    /// that has to be set again on every visit is a preference the player stops setting.
+    /// </summary>
+    private void Choose(Action change)
+    {
+        change();
+        Remember();
+    }
+
+    /// <summary>
+    /// Stores the settings as they now stand. Started and not awaited: nothing on the page
+    /// is waiting to hear whether the browser kept them, and the button that caused it
+    /// should not sit pressed while a disk is written to.
+    /// </summary>
+    private void Remember()
+    {
+        // Before the module is up nothing has been changed yet — and writing at that point
+        // would store the defaults over what we are still in the middle of reading.
+        if (_page is null) return;
+
+        _ = RememberAsync();
+    }
+
+    private async Task RememberAsync()
+    {
+        try
+        {
+            if (_page is { } page) await page.InvokeVoidAsync("writeSettings", Settings);
+        }
+        catch (Exception)
+        {
+            // Storage is a convenience; a browser without it should still play.
+        }
+    }
+
     /// <summary>Anything that only made sense for the position we just left.</summary>
     private void ResetPlayState()
     {
         _preview = null;
         _premove = null;
         _reviewPly = null;
+        _showResult = false;
+        _resultHeld = false;
+
+        // A fresh opponent has no history to guess from, so the strength stands in for
+        // one: the full engine is worth announcing, and the two handicapped bots answer
+        // faster than the word could be read.
+        _lastThinkMs = _session.Strength == BotStrength.Hard ? SlowSearchMs : 0;
+    }
+
+    // ================================================================ the finish ==
+
+    /// <summary>Whether the result card is up, which the game being over is not yet.</summary>
+    private bool _showResult;
+
+    /// <summary>Whether the wait is already running, so it is only started once.</summary>
+    private bool _resultHeld;
+
+    /// <summary>
+    /// Long enough to see the move that won and the finish line flooding out from it, and
+    /// short enough that it reads as a beat rather than as the page having stopped. The
+    /// board's own flourish is --t-win in the stylesheet and finishes inside this.
+    /// </summary>
+    private const int WinPauseMs = 750;
+
+    private async Task HoldResult()
+    {
+        await Task.Delay(WinPauseMs);
+
+        _resultHeld = false;
+
+        // A restart or an undo inside the pause takes the card with it: there is no result
+        // to show any more, and the wait was for a game that is no longer the one in play.
+        if (!_session.IsOver) return;
+
+        _showResult = true;
+        StateHasChanged();
     }
 
     // =================================================================== link ==
@@ -1058,7 +1596,13 @@
             _showSetup = false;
             ResetPlayState();
 
+            // The host announces the board; the other side asks for it. Announcing alone
+            // was one message with no second chance — miss it and that browser plays on a
+            // standard board while the game goes on around it, holes and pickups missing
+            // and nothing saying so. Asking makes the handshake answerable rather than
+            // hopeful, and the answer is idempotent, so arriving twice costs nothing.
             if (host) await _net.SendAsync($"seat|{_seat ^ 1}|{setup.Encode()}");
+            else await _net.SendAsync("board?");
         }
 
         StateHasChanged();
@@ -1066,14 +1610,28 @@
 
     private void OnNetMessage(string message) => InvokeAsync(async () =>
     {
+        // "board?" — the other side asking which board this is. Only the host can answer,
+        // and it answers from the session actually in play rather than from the setup
+        // screen, so a game already under way is described as it now stands.
+        if (message == "board?")
+        {
+            if (_net.Code.Length > 0 && _session.Mode == WebMode.Online)
+                await _net.SendAsync($"seat|{_session.LocalSeat ^ 1}|{_session.Setup.Encode()}");
+
+            return;
+        }
+
         // "seat|<n>|<board>" — the side and the board the other browser has set up, the
         // board as the numbers it was generated from so both sides build the same one.
-        // Sent once, on connecting, by whoever created the game.
+        // Sent on connecting by whoever created the game, and again whenever asked.
         if (message.StartsWith("seat|"))
         {
             string[] terms = message.Split('|');
 
-            if (terms.Length == 7 &&
+            // Seven terms is a board without portals and eight is one with: the portal
+            // count is only sent when it is not zero, so every game that could have been
+            // played against a build predating portals still can be.
+            if (terms.Length is 7 or 8 &&
                 int.TryParse(terms[1], out int mine) && mine is 0 or 1 &&
                 GameSetup.TryDecode(terms.AsSpan(2), out GameSetup setup))
             {
@@ -1102,7 +1660,9 @@
             string[] terms = message.Split('|');
             bool swap = terms.Length > 1 && terms[1] == "swap";
 
-            GameSetup setup = terms.Length == 7 && GameSetup.TryDecode(terms.AsSpan(2), out GameSetup sent)
+            // Seven or eight for the same reason as the seat message: the eighth term is
+            // the portal count, and it is only there when there is a portal to name.
+            GameSetup setup = terms.Length is 7 or 8 && GameSetup.TryDecode(terms.AsSpan(2), out GameSetup sent)
                 ? sent
                 : _session.Setup;
 
@@ -1121,8 +1681,12 @@
         // guessed at, because both sides hold the same position and can afford to wait.
         string[] parts = message.Split('|');
 
+        // The seat test is the one that matters: legality alone is checked against
+        // whoever is on move, so without it a message arriving on our own turn is
+        // applied as our move, and the other browser gets to play both colours.
         if (parts.Length == 3 &&
             parts[0] == "move" &&
+            _session.State.SideToMove != _session.LocalSeat &&
             int.TryParse(parts[1], out int ply) &&
             ply == _session.Moves.Count &&
             Notation.TryParse(parts[2], out Move move, _session.State.GoalRow(0)) &&
@@ -1208,14 +1772,32 @@
             while (_session.IsBotTurn)
             {
                 _thinking = true;
-                StateHasChanged();
-                await Task.Delay(40);
+                _saidThinking = _lastThinkMs >= SlowSearchMs;
+
+                // A wait worth mentioning is announced and then paid for; one that is
+                // over before it can be read is simply taken. Easy answers in a few
+                // milliseconds, and the panel used to write "Thinking…" and rub it out
+                // again between two frames, which reads as the page glitching rather
+                // than as an opponent playing quickly.
+                if (_saidThinking)
+                {
+                    StateHasChanged();
+                    await Task.Delay(40);
+                }
+
+                // How long the last search took is the only honest guide to how long
+                // this one will take, and it costs nothing to keep.
+                long started = System.Diagnostics.Stopwatch.GetTimestamp();
 
                 Move move = _session.Think();
+
+                _lastThinkMs = (int)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+
                 _session.Apply(move);
                 _ = SoundFor(move);
 
                 _thinking = false;
+                _saidThinking = false;
                 StateHasChanged();
 
                 // Same reason as after a human move: if the engine is about to think
@@ -1226,11 +1808,26 @@
         finally
         {
             _thinking = false;
+            _saidThinking = false;
             _engineRunning = false;
         }
 
         await TryPremoveAsync();
     }
+
+    /// <summary>
+    /// How long a search has to take before it is worth telling the player it is running.
+    /// Below this the label is gone before the eye has finished moving to it.
+    /// </summary>
+    private const int SlowSearchMs = 120;
+
+    /// <summary>What the last search cost, which is what the next one is guessed from.</summary>
+    private int _lastThinkMs;
+
+    /// <summary>Whether this wait was long enough last time to be worth a word about it.
+    /// The engine having the thread is <see cref="_thinking"/>; this is only whether the
+    /// panel says so.</summary>
+    private bool _saidThinking;
 
     private async Task SelectAll(FocusEventArgs _) =>
         await Js.InvokeVoidAsync("document.execCommand", "selectAll", false, null);

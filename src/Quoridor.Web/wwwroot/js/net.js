@@ -17,7 +17,14 @@ function notify(kind, payload) {
 function attach(connection) {
     conn = connection;
 
-    connection.on('open', () => notify('connected', connection.peer));
+    // A connection can arrive already open — the host is handed one by 'connection',
+    // and if it opened before this ran, the 'open' event has already been and gone and
+    // a listener added now would never hear it. The channel still works, so moves would
+    // travel and the game would look fine; what would not happen is the host announcing
+    // the board, leaving the other side playing a standard one with none of the holes or
+    // pickups on it.
+    if (connection.open) notify('connected', connection.peer);
+    else connection.on('open', () => notify('connected', connection.peer));
     connection.on('data', data => notify('message', data));
     connection.on('close', () => notify('closed', ''));
     connection.on('error', error => notify('error', error?.message ?? 'connection error'));
