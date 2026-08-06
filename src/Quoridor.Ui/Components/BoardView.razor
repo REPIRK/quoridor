@@ -60,7 +60,23 @@
      @onpointerdown="Press" @onpointerup="Release" @onpointercancel="Abandon" @onpointerleave="LeaveBoard" @onkeydown="OnKeyDown">
 
     @* A board is a physical thing; a flat rectangle of one colour is not. Every gradient
-       here is painted once — no animation, nothing per frame. *@
+       here is painted once — no animation, nothing per frame.
+
+       Every one of them is also the same in every board on the page, which is a property
+       worth stating because it did not use to be one and there is now more than one board:
+       the start screen draws the game about to be played beside the choices, with the game
+       in progress still mounted behind it. Ids are a document-wide namespace, so two boards
+       define the same nine ids and a `url(#tile-face)` from either resolves to whichever
+       came first in the document — which is fine when the two are identical and is a board
+       lit from the wrong side when they are not.
+
+       Two things used to make them differ. The lamp was laid out in the board's own
+       coordinates, which are a smaller square on a smaller game; it is object-bound below,
+       and since it is laid over one rect that is exactly the board, that is the same
+       gradient by another name. And the three that have to survive the board being turned
+       around carried the half turn in the paint, so a turned board and an unturned one
+       disagreed about them; both turns are defined here now and the board's own `turned`
+       class picks between them in the stylesheet. *@
     <defs>
         @* The rim, which is the raised part of the tray and so the part nearest the lamp. *@
         <linearGradient id="board-sheen" x1="0" y1="0" x2="0" y2="1">
@@ -79,19 +95,28 @@
         @* Every tile is bevelled by its own fill: lit along the top edge, shaded along the
            bottom, flat between. Object-bound, so this one gradient bevels all eighty-one
            squares at whatever size they are drawn, and adds no element to the board. *@
-        <linearGradient id="tile-face" x1="0" y1="0" x2="0" y2="1" gradientTransform="@TurnedPaint">
+        <linearGradient id="tile-face" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stop-color="var(--tile-lit)" />
             <stop offset="9%" stop-color="var(--cell)" />
             <stop offset="88%" stop-color="var(--cell)" />
             <stop offset="100%" stop-color="var(--tile-shade)" />
         </linearGradient>
 
-        @* The lamp itself, running corner to corner of the view. In user space rather than
-           object space so it crosses the board once, instead of repeating inside every
-           shape it is laid over. The stops are coloured from CSS because how much light a
-           room has differs between the themes and only stop-opacity can say so. *@
-        <linearGradient id="board-light" gradientUnits="userSpaceOnUse"
-                        x1="@ViewX" y1="@ViewY" x2="@(ViewX + ViewSize)" y2="@(ViewY + ViewSize)">
+        @* And the same bevel for a board that has been turned around. See TurnedPaint. *@
+        <linearGradient id="tile-face-turned" x1="0" y1="0" x2="0" y2="1" gradientTransform="rotate(180 0.5 0.5)">
+            <stop offset="0%" stop-color="var(--tile-lit)" />
+            <stop offset="9%" stop-color="var(--cell)" />
+            <stop offset="88%" stop-color="var(--cell)" />
+            <stop offset="100%" stop-color="var(--tile-shade)" />
+        </linearGradient>
+
+        @* The lamp itself, running corner to corner of the board. It is laid over exactly
+           one rect, and that rect is exactly the board, so its own box is the board's — no
+           shape here has this laid over it more than once and there is nothing for an
+           object-bound gradient to repeat inside. The stops are coloured from CSS because
+           how much light a room has differs between the themes and only stop-opacity can
+           say so. *@
+        <linearGradient id="board-light" x1="0" y1="0" x2="1" y2="1">
             <stop class="lit" offset="0%" />
             <stop class="clear" offset="50%" />
             <stop class="shade" offset="100%" />
@@ -101,7 +126,14 @@
            and to the left of it and falls away to the far edge. One gradient serves both
            players and both themes, because how a piece is lit belongs to the room and
            not to whoever owns it. *@
-        <radialGradient id="dome" cx="50%" cy="50%" r="62%" fx="33%" fy="27%" gradientTransform="@TurnedPaint">
+        <radialGradient id="dome" cx="50%" cy="50%" r="62%" fx="33%" fy="27%">
+            <stop offset="0%" stop-color="var(--lit)" stop-opacity="0.34" />
+            <stop offset="52%" stop-color="var(--lit)" stop-opacity="0" />
+            <stop offset="100%" stop-color="var(--shade)" stop-opacity="0.26" />
+        </radialGradient>
+
+        <radialGradient id="dome-turned" cx="50%" cy="50%" r="62%" fx="33%" fy="27%"
+                        gradientTransform="rotate(180 0.5 0.5)">
             <stop offset="0%" stop-color="var(--lit)" stop-opacity="0.34" />
             <stop offset="52%" stop-color="var(--lit)" stop-opacity="0" />
             <stop offset="100%" stop-color="var(--shade)" stop-opacity="0.26" />
@@ -118,7 +150,12 @@
         @* Looking down into a square that is not there. The near wall of the opening is in
            its own shadow and the far one is the part the lamp still reaches, so this runs
            the same way across the board as every other gradient here. *@
-        <linearGradient id="pit-wall" x1="0" y1="0" x2="1" y2="1" gradientTransform="@TurnedPaint">
+        <linearGradient id="pit-wall" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="var(--pit)" />
+            <stop offset="100%" stop-color="var(--pit-lit)" />
+        </linearGradient>
+
+        <linearGradient id="pit-wall-turned" x1="0" y1="0" x2="1" y2="1" gradientTransform="rotate(180 0.5 0.5)">
             <stop offset="0%" stop-color="var(--pit)" />
             <stop offset="100%" stop-color="var(--pit-lit)" />
         </linearGradient>
@@ -651,17 +688,20 @@
 
     private string ViewBox => $"{ViewX} {ViewY} {ViewSize} {ViewSize}";
 
-    /// <summary>
-    /// The half turn a gradient needs to survive the board being turned around, or null
-    /// when it is not. An object-bound gradient is painted in its own shape's box and then
-    /// carried through every transform above it, so the rotation that puts the second seat
-    /// at the near edge takes the light with it: tiles bevelled along the bottom, openings
-    /// with their lit wall on the side away from the lamp. Pre-rotating the paint by the
-    /// same half turn cancels the group's, so one lamp stays above and to the left for both
-    /// seats. The lamp gradient itself is in user space and cancels the rotation on the
-    /// element instead; the round ones are symmetrical about their centre and need neither.
-    /// </summary>
-    private string? TurnedPaint => Flipped ? "rotate(180 0.5 0.5)" : null;
+    // ---- the half turn, and why the paint knows about it -------------------------------
+    //
+    // An object-bound gradient is painted in its own shape's box and then carried through
+    // every transform above it, so the rotation that puts the second seat at the near edge
+    // takes the light with it: tiles bevelled along the bottom, openings with their lit wall
+    // on the side away from the lamp. Pre-rotating the paint by the same half turn cancels
+    // the group's, so one lamp stays above and to the left for both seats.
+    //
+    // Which used to be a `gradientTransform` computed from Flipped, and is now a second copy
+    // of each of the three gradients that need it, chosen by the board's own `turned` class
+    // in the stylesheet. The defs of two boards on one page have to be identical or the ids
+    // they share pick a winner between them — see the note over <defs>. The lamp cancels the
+    // rotation on the element it fills instead, and the round ones are symmetrical about
+    // their own centre and need neither.
 
     /// <summary>
     /// The sign every offset that says where the lamp is has to be drawn with. The gradients

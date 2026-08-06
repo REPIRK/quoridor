@@ -652,7 +652,13 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
     z-index: 20;
     background: var(--overlay);
     display: flex;
-    align-items: center;
+
+    /* Centred by the card's own auto margins rather than by align-items, which is the
+       one that breaks. A flex container that is also the scroll container centres an
+       over-tall child by overflowing it equally at both ends — and the overflow above
+       the top is unreachable, because scrolling does not go below zero. On a phone the
+       settings card is always taller than the screen, so its first rows simply could not
+       be reached. Auto margins centre only what fits and give the rest to the scroll. */
     justify-content: center;
 
     /* The sheet itself covers the whole window, bars and all — that is what makes it read
@@ -670,8 +676,10 @@ button.seg.on { opacity: 1; border-bottom-color: var(--p1); }
 }
 
 /* The card is the thing that scrolls, so it must not be stretched to the full height
-   of the overlay by the flex centring. */
-.overlay > * { flex: 0 0 auto; max-height: none; }
+   of the overlay by the flex centring. The auto margins are what centre it, and they
+   collapse to nothing the moment it is taller than the screen — which is exactly when
+   every one of its rows has to stay reachable. */
+.overlay > * { flex: 0 0 auto; max-height: none; margin: auto; }
 
 /* And the page behind it does not scroll at all while it is up. Scroll chaining is
    only half the problem: a touch that starts outside the card would otherwise drag
@@ -893,6 +901,18 @@ select.pick option { background: var(--surface); color: var(--text); }
     text-align: right;
 }
 
+/* A hairline between two answers that have been put on one row. The panel now asks two
+   questions on a line in two places — the theme and the material, the engine's budget and
+   whether it keeps running — and without a mark between them four segments read as one
+   list of four choices with two of them lit. */
+.settings .split { width: 1px; height: 15px; background: var(--line); }
+
+/* The track rides on the music's own row rather than holding a row of its own, so it gives
+   up the width a picker is normally given here and wraps under the slider when there is not
+   enough of it. It is the one control on the row that is dead when the volume is zero,
+   which is the same thing the slider is saying. */
+.settings select.pick.track { min-width: 150px; flex: 1 1 150px; }
+
 input.slider {
     appearance: none;
     flex: 1;
@@ -932,6 +952,125 @@ input.slider::-moz-range-thumb {
     border-radius: 50%;
     background: var(--p1);
     border: none;
+}
+
+/* =========================================================== the start screen ====
+
+   The setup was a card on a sheet: a modal doing a screen's job. Ten rows had to be stacked
+   down the width of a phone, the card was reliably taller than the phone it was drawn on,
+   and the one thing behind it — a board nobody had set up yet — was not worth covering.
+
+   It is the same rows on a screen now. The page's own ink rather than a scrim over
+   something, no card edge, and the choices beside the board they describe wherever there is
+   room for two columns. Below that width it is one column and the board sits between the
+   controls and the button, which is the order the eye wants: choose, see, play.
+
+   Still an .overlay, and deliberately so. The game stays behind it, which is what makes
+   "New game" a screen that can be backed out of rather than a game already lost — and
+   everything the overlay does about scrolling, the card's own auto margins doing the
+   centring above all, is exactly what a screen this tall needs. None of it is repeated. */
+
+.overlay.screen {
+    /* The page's own background rather than a sheet over it. And under the panels, which
+       are cards on a sheet over this in turn and have to read as being over something. */
+    z-index: 15;
+    background: var(--bg);
+}
+
+.setup.start {
+    width: 100%;
+    max-width: 1080px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+}
+
+/* The wordmark and the way back share a line, so that leaving is where arriving is rather
+   than at the far end of a screen that scrolls. */
+.setup.start > .banner {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.setup.start h1 { font-size: clamp(34px, 7vw, 52px); margin: 0 0 10px; }
+
+/* A measure, not a column width. The line under the wordmark is the only prose on this
+   screen that is read rather than scanned, and on a wide window it would otherwise run the
+   whole thousand pixels. */
+.setup.start .lead { margin: 0; max-width: 46ch; }
+
+/* Two named groups with a rule between them instead of ten rows in a stack. Each heading is
+   also the label of the first row under it — the segments there are what it names — which
+   saves two labels and, more to the point, is what makes the grouping structural rather
+   than decorative. */
+.setup.start .group + .group {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+}
+
+.setup.start .group h2 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-style: italic;
+    font-weight: normal;
+    font-size: 16px;
+    color: var(--muted);
+    margin: 0 0 12px;
+}
+
+/* The note under a row that has no label has nothing to be indented past. */
+.setup.start .fine.note { margin: -2px 0 0; padding-left: 0; }
+
+/* The board the choices describe. Bounded by the window's height as well as by its column,
+   because on a short screen the thing that must not be pushed off it is the row of controls
+   the board is there to illustrate. */
+.setup.start .preview {
+    /* Nothing here is pressed. The board is a live component with live targets under it, and
+       `inert` in the markup is what actually takes it out of the tab order — this is the
+       same statement to a browser that has not heard of `inert`. */
+    pointer-events: none;
+}
+
+.setup.start .preview .board { max-width: min(46vh, 100%); margin: 0 auto; }
+.setup.start .preview .guide { margin-top: 22px; }
+
+.setup.start .go .actions { margin-top: 0; }
+
+.setup.start .foot {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+}
+
+.setup.start .foot .fine { margin: 0; flex: 1 1 260px; }
+
+@media (min-width: 900px) {
+    .setup.start {
+        grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+        column-gap: 56px;
+        align-items: start;
+    }
+
+    .setup.start > .banner { grid-column: 1 / -1; grid-row: 1; }
+    .setup.start > .choices { grid-column: 1; grid-row: 2; }
+    .setup.start > .go { grid-column: 1; grid-row: 3; }
+    .setup.start > .foot { grid-column: 1; grid-row: 4; }
+
+    /* Down the right of all three and level with the first of them: the board is what the
+       choices are being made about, so it has to be readable while they are being made
+       rather than after them. */
+    .setup.start > .preview { grid-column: 2; grid-row: 2 / span 3; }
+    .setup.start .preview .board { max-width: 100%; }
 }
 
 /* ================================================================== board ====
@@ -1295,10 +1434,20 @@ input.slider::-moz-range-thumb {
    show through it, or the two edges the bevel is made of are washed straight back out. */
 .board.carved .cell { fill: url(#tile-face); opacity: 1; }
 
+/* ---- and the same three, for a board that has been turned around -------------------
+   The half turn that puts the second seat at the near edge would carry the light round with
+   it, so the paint is pre-rotated by the same half turn to cancel it. Which of the two a
+   board uses is settled here, by the board's own class, rather than in the board's markup:
+   two boards can be on the page at once — the start screen draws the game about to be
+   played beside the game already in progress — and ids are a document-wide namespace, so
+   every board has to define the identical set or a `url(#…)` picks a winner between them. */
+.board.carved.turned .cell { fill: url(#tile-face-turned); }
+
 /* A square out of play becomes an opening you can see down into. The mouth is the wall of
    it, running dark on the side nearest the lamp — the side you are looking down past — to
    lit on the far one; the floor is what is at the bottom. */
 .board.carved .pit .mouth { fill: url(#pit-wall); stroke: none; }
+.board.carved.turned .pit .mouth { fill: url(#pit-wall-turned); }
 .board.carved .pit .floor { fill: var(--pit); }
 
 /* A portal is the other kind of opening, and a board that has one way of saying "this
@@ -1313,6 +1462,7 @@ input.slider::-moz-range-thumb {
 .board.carved #portal-b .glow { stop-color: var(--portal-b); }
 
 .board.carved .portal .bore { fill: url(#pit-wall); }
+.board.carved.turned .portal .bore { fill: url(#pit-wall-turned); }
 .board.carved .portal.pair-a .throat { fill: url(#portal-a); }
 .board.carved .portal.pair-b .throat { fill: url(#portal-b); }
 .board.carved .portal .iris { opacity: 0.45; }
@@ -1361,6 +1511,10 @@ input.slider::-moz-range-thumb {
    catches the same lamp as the walls and the tiles, which is the only reason it looks like
    it is on the board rather than printed onto it. */
 .board.carved .pawn-holder .dome { fill: url(#dome); }
+
+/* The turned board's copy of both, for the reason given over the tiles. */
+.board.carved.turned .pickup.skip .dome,
+.board.carved.turned .pawn-holder .dome { fill: url(#dome-turned); }
 
 /* And what it is standing on. It spreads while the piece travels and tightens under it as
    it lands — the shadow is the whole of how a slide reads as weight rather than as a sprite
@@ -1839,11 +1993,21 @@ input.slider::-moz-range-thumb {
 
     .result, .setup { padding: 24px 20px; }
     .result h1, .setup h1 { font-size: 30px; }
-    .setup .row { align-items: flex-start; flex-direction: column; gap: 4px; }
-    .setup .label { width: auto; margin-bottom: 4px; }
+
+    /* The label takes the whole line and the controls flow underneath it and wrap among
+       themselves. The row used to become a column here, which put every segment button on a
+       line of its own: four options under a label was five stacked lines and two hundred
+       pixels of a phone spent on one setting, and nine of those in a row is a good part of
+       what "the interface has become overloaded" was describing on a screen this size. */
+    .setup .row { align-items: center; row-gap: 6px; }
+    .setup .label { flex: 1 0 100%; width: auto; margin-bottom: 0; }
 
     /* The label has lost its column, so there is nothing left to indent past. */
     .setup .fine.why { padding-left: 0; }
+
+    /* A vertical hairline between two groups of segments needs a row to stand in. Where
+       they wrap it is a mark in the middle of nothing. */
+    .settings .split { display: none; }
 }
 
 /* ============================================================== turned over ====

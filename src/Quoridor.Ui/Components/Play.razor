@@ -211,12 +211,23 @@
         </aside>
     </main>
 
+    @* Nine rows, of which a player changed two. What went is written beside what stayed,
+       because the cut is the design: Theme and Style were two rows for one question and are
+       now one; the sound was a switch, a level, a second switch, a second level and a track
+       list — five controls for "how loud", now two sliders where nothing to hear is what off
+       means; the engine's three rows are one plus a toggle, and the pace of a watched game
+       is only asked about while one is being watched.
+
+       Nothing has been taken away. Every setting the panel used to carry is still set from
+       here, and the theme and the look are also the first thing the start screen can reach. *@
     @if (_showSettings)
     {
         <div class="overlay" @onclick="() => _showSettings = false">
             <div class="setup settings" @onclick:stopPropagation="true">
                 <h1>Settings</h1>
 
+                @* The two that survive on their own merits: both are read while a game is on,
+                   and both change what the board says rather than what it plays. *@
                 <div class="row">
                     <span class="label">Board</span>
                     <button class="seg @(_reading ? "on" : "")" @onclick="() => Choose(() => _reading = !_reading)">Read the position</button>
@@ -226,7 +237,15 @@
                 @* How long the engine may think, in the desktop build's words and with the
                    desktop build's own numbers. What the list stops at is not this screen's
                    decision — the host says, because the host is what knows whether the
-                   search has a thread of its own or is borrowing the one drawing the page. *@
+                   search has a thread of its own or is borrowing the one drawing the page.
+
+                   The ponder switch rides on the same row as one toggle rather than sitting
+                   on a row of its own as a pair. It was "Keeps searching / Idles" against a
+                   label, which is three things to read for a question that has a yes and a
+                   no — and it is the same subject as the budget beside it: both are the
+                   engine being told how much of the machine it may have. Only where there is
+                   a spare thread to search on; in a browser the answer is forced, and a
+                   control that cannot be moved is worse than no control. *@
                 <div class="row">
                     <span class="label">Engine thinks for</span>
                     @foreach (int option in HostProfile.Current.MoveTimes)
@@ -235,98 +254,92 @@
                         <button class="seg @(_moveTimeMs == choice ? "on" : "")"
                                 @onclick="() => Choose(() => _moveTimeMs = choice)">@HostProfile.Label(choice)</button>
                     }
+                    @if (HostProfile.Current.MayPonder)
+                    {
+                        <span class="split"></span>
+                        <button class="seg @(_ponder ? "on" : "")"
+                                @onclick="() => Choose(() => _ponder = !_ponder)">Keeps thinking while you do</button>
+                    }
                 </div>
                 @if (HostProfile.Current.IsLimited)
                 {
                     <p class="fine why">@HostProfile.Current.LimitNote</p>
                 }
 
-                @* Only where there is a spare thread to search on, which is the whole of what
-                   the question is about: in a browser the answer is forced and a control that
-                   cannot be moved is worse than no control. Where it is offered it is the
-                   player's, in the desktop's words — the engine's answer arrives no slower
-                   either way, so what this is really choosing is whether a core runs while
-                   somebody thinks, and on a phone that is battery and heat in a hand rather
-                   than a fan nobody hears. *@
-                @if (HostProfile.Current.MayPonder)
-                {
-                    <div class="row">
-                        <span class="label">While you think</span>
-                        <button class="seg @(_ponder ? "on" : "")" @onclick="() => Choose(() => _ponder = true)">Keeps searching</button>
-                        <button class="seg @(!_ponder ? "on" : "")" @onclick="() => Choose(() => _ponder = false)">Idles</button>
-                    </div>
-                }
-
-                @* How fast two engines play each other. The desktop's three, under the
-                   desktop's names and with the desktop's own numbers: a watched game is the
-                   one game on this screen whose pace is nobody's but the viewer's, because
-                   neither side is waiting for anybody. *@
-                <div class="row">
-                    <span class="label">Watched games</span>
-                    @foreach ((string name, int pace) in PaceChoices)
-                    {
-                        int choice = pace;
-                        <button class="seg @(_paceMs == choice ? "on" : "")"
-                                @onclick="() => Choose(() => _paceMs = choice)">@name</button>
-                    }
-                </div>
-
-                <div class="row">
-                    <span class="label">Theme</span>
-                    <button class="seg @(!_light ? "on" : "")" @onclick="() => Choose(() => _light = false)">Dark</button>
-                    <button class="seg @(_light ? "on" : "")" @onclick="() => Choose(() => _light = true)">Light</button>
-                </div>
-
-                @* Two boards, not two of anything else: the same game drawn flat, or drawn
-                   as a tray with the pieces standing in it. Flat is the one a first visit
-                   gets, because it is the one that never gets in the way of reading the
-                   position — the other is there for whoever wants the object. *@
-                <div class="row">
-                    <span class="label">Style</span>
-                    <button class="seg @(!_carved ? "on" : "")" @onclick="() => Choose(() => _carved = false)">Flat</button>
-                    <button class="seg @(_carved ? "on" : "")" @onclick="() => Choose(() => _carved = true)">Carved</button>
-                </div>
-
+                @* One control where there were three. Nothing to hear is what "off" means, so
+                   the level is the switch as well — which is how the desktop settled it, and a
+                   switch and a level that are able to disagree are two controls for one
+                   answer. The track list belongs to the music and rides with it; it is dead
+                   while there is no music to change, which is the only time it says nothing. *@
                 <div class="row">
                     <span class="label">Sound</span>
-                    <button class="seg @(_sound ? "on" : "")" @onclick="ToggleSound">@(_sound ? "On" : "Off")</button>
-                    <input class="slider" type="range" min="0" max="100" step="1" disabled="@(!_sound)"
+                    <input class="slider" type="range" min="0" max="100" step="1"
                            value="@_soundVolume"
                            @oninput="e => SetVolume(e.Value, music: false)" />
-                    <span class="reading">@_soundVolume%</span>
+                    <span class="reading">@Level(_soundVolume)</span>
                 </div>
 
                 <div class="row">
                     <span class="label">Music</span>
-                    <button class="seg @(_music ? "on" : "")" @onclick="ToggleMusic">@(_music ? "On" : "Off")</button>
-                    <input class="slider" type="range" min="0" max="100" step="1" disabled="@(!_music)"
+                    <input class="slider" type="range" min="0" max="100" step="1"
                            value="@_musicVolume"
                            @oninput="e => SetVolume(e.Value, music: true)" />
-                    <span class="reading">@_musicVolume%</span>
-                </div>
-
-                <div class="row">
-                    <span class="label">Track</span>
-                    <select class="pick" value="@_track" @onchange="PickTrack">
+                    <span class="reading">@Level(_musicVolume)</span>
+                    <select class="pick track" value="@_track" disabled="@(!_music)" @onchange="PickTrack">
                         <option value="0">Ink — calm, mid-register</option>
                         <option value="1">Slate — low and sparse</option>
                         <option value="2">Glass — bright, more movement</option>
                     </select>
                 </div>
 
-                <p class="fine">This game: @_session.Setup.Describe().</p>
+                @* Both looks on one row, because they are one question asked twice: what the
+                   game looks like sitting there. Neither is changed twice by the same person,
+                   and two rows for two switches that are never touched again was two rows
+                   spent on nothing. Carved leads because carved is what the game now opens as. *@
+                <div class="row">
+                    <span class="label">Look</span>
+                    <button class="seg @(!_light ? "on" : "")" @onclick="() => Choose(() => _light = false)">Dark</button>
+                    <button class="seg @(_light ? "on" : "")" @onclick="() => Choose(() => _light = true)">Light</button>
+                    <span class="split"></span>
+                    <button class="seg @(_carved ? "on" : "")" @onclick="() => Choose(() => _carved = true)">Carved</button>
+                    <button class="seg @(!_carved ? "on" : "")" @onclick="() => Choose(() => _carved = false)">Flat</button>
+                </div>
 
-                @if (_session.Setup.Pickups > 0)
+                @* How fast two engines play each other, asked only of somebody who is watching
+                   two engines. It was a row on every screen for a mode almost nobody is in,
+                   and a setting about a game that is not happening is a row to read past. *@
+                @if (PaceMatters)
                 {
-                    <PickupGuide Carved="_carved" />
+                    <div class="row">
+                        <span class="label">Watched games</span>
+                        @foreach ((string name, int pace) in PaceChoices)
+                        {
+                            int choice = pace;
+                            <button class="seg @(_paceMs == choice ? "on" : "")"
+                                    @onclick="() => Choose(() => _paceMs = choice)">@name</button>
+                        }
+                    </div>
                 }
 
-                @* What the board really carries, not what was asked for: a two set on a nine
-                   and then rolled onto a five is a rule the player would go looking for and
-                   never find. *@
-                @if (_session.Setup.ActualPortals > 0)
+                @* What is on the board right now, and what the things lying on it do. Only
+                   over a game: opened from the start screen there is no board to describe
+                   yet, and the screen behind is already showing the one being chosen. *@
+                @if (_started && !_showSetup)
                 {
-                    @PortalGuide
+                    <p class="fine">This game: @_session.Setup.Describe().</p>
+
+                    @if (_session.Setup.ActualPickups > 0)
+                    {
+                        <PickupGuide Carved="_carved" />
+                    }
+
+                    @* What the board really carries, not what was asked for: a two set on a
+                       nine and then rolled onto a five is a rule the player would go looking
+                       for and never find. *@
+                    @if (_session.Setup.ActualPortals > 0)
+                    {
+                        @PortalGuide
+                    }
                 }
 
                 <div class="actions">
@@ -358,297 +371,380 @@
         </div>
     }
 
+    @* =========================================================== the start screen ==
+
+       What the app opens on, and what "New game" comes back to. It was a card on a sheet
+       over a board nobody had set up yet — a modal standing in for a screen — which is why
+       ten rows had to be stacked down the width of a phone, and why the card was reliably
+       taller than the phone it was drawn on.
+
+       It owns the window now, the way the desktop's menu does: the choices down one side
+       and the board they describe down the other, in two columns where there are two
+       columns to be had and in one where there are not. The rows are the same rows; what
+       changed is that they are in two named groups with air between them instead of a
+       stack of ten, because a screen has room a card never had.
+
+       The desktop plays a real game on the board beside its menu — two engines pushing each
+       other about behind the choices. This one does not, and that is a decision rather than
+       an omission: see the preview below. *@
     @if (_showSetup)
     {
-        <div class="overlay">
-            <div class="setup">
-                <h1>Quoridor</h1>
-                <p class="lead">
-                    Cross the board first. Ten walls each to make the other route longer.
-                </p>
+        @* A card raised over this screen owns the keyboard while it is up, exactly as the
+           board behind is handed over while this screen is up. *@
+        <div class="overlay screen" inert="@(_showSettings || _showResult || _showLeave)">
+            <div class="setup start">
 
-                @* The fourth is the odd one out and is last for that reason: it is the only
-                   one that is not an opponent, because in it nobody at this screen plays at
-                   all. It is the desktop's "Watch two engines", and it is here now for the
-                   same reason the clock is — the game behind the screen could always do it. *@
-                <div class="row">
-                    <span class="label">Opponent</span>
-                    <button class="seg @(_mode == GameMode.VersusBot ? "on" : "")"
-                            @onclick="() => SelectMode(GameMode.VersusBot)">The engine</button>
-                    <button class="seg @(_mode == GameMode.Hotseat ? "on" : "")"
-                            @onclick="() => SelectMode(GameMode.Hotseat)">A friend, here</button>
-                    <button class="seg @(_mode == GameMode.Online ? "on" : "")"
-                            @onclick="() => SelectMode(GameMode.Online)">A friend, online</button>
-                    <button class="seg @(_mode == GameMode.Spectate ? "on" : "")"
-                            @onclick="() => SelectMode(GameMode.Spectate)">Two engines</button>
+                <div class="banner">
+                    <div>
+                        <h1>Quoridor</h1>
+                        <p class="lead">
+                            Cross the board first. Ten walls each to make the other route longer.
+                        </p>
+                    </div>
+
+                    @* A game already on the board is not lost by looking at this screen, and
+                       the way back to it has to be visible rather than known. There was none:
+                       the card had no exit but starting another game, so "New game" pressed
+                       by mistake ended the one in progress — with the phone's back gesture
+                       the single undocumented way out, and nothing at all in a browser. *@
+                    @if (_started)
+                    {
+                        <button class="ghost" @onclick="() => _showSetup = false">Back to your game</button>
+                    }
                 </div>
 
-                @* The three ways in. Most people want the first one and should not have
-                   to read past everything the third one can do to reach it. *@
-                <div class="row">
-                    <span class="label">Game</span>
-                    @foreach (GameFlavour option in new[] { GameFlavour.Standard, GameFlavour.Random, GameFlavour.Custom })
-                    {
-                        GameFlavour choice = option;
-                        <button class="seg @(_flavour == choice ? "on" : "")"
-                                @onclick="() => _flavour = choice">@choice</button>
-                    }
-                </div>
-                <p class="fine">@FlavourNote</p>
+                <div class="choices">
 
-                @* Also asked of a watched game, where it is the second engine's strength:
-                   the first is always the full search, so what the strength picks is who it
-                   is playing. The desktop asks the same question in the same place. *@
-                @if (_mode is GameMode.VersusBot or GameMode.Spectate)
-                {
-                    <div class="row">
-                        <span class="label">Strength</span>
-                        <select class="pick" value="@((int)_strength)"
-                                @onchange="e => _strength = (BotStrength)Number(e, 2)">
-                            <option value="0">Easy</option>
-                            <option value="1">Normal</option>
-                            <option value="2">Hard</option>
-                        </select>
-                    </div>
-                }
-
-                @* Offered where it can be kept: a network game would have to agree the clock
-                   and keep the two of them in step, and there is no message for either — so
-                   rather than show a control that quietly does nothing, it is not shown. A
-                   watched game has no clock for the same reason the desktop's has none:
-                   nobody is being kept waiting. *@
-                @if (_mode is GameMode.VersusBot or GameMode.Hotseat)
-                {
-                    <div class="row">
-                        <span class="label">Clock</span>
-                        @foreach (TimeControl option in ClockChoices)
-                        {
-                            TimeControl choice = option;
-                            <button class="seg @(_clock == choice ? "on" : "")"
-                                    @onclick="() => _clock = choice">@ClockLabel(choice)</button>
-                        }
-                    </div>
-                }
-
-                @if (_flavour == GameFlavour.Custom)
-                {
-                    @if (_mode is GameMode.VersusBot or GameMode.Online)
-                    {
-                        <div class="row">
-                            <span class="label">You play</span>
-                            <select class="pick" value="@_seat" @onchange="e => _seat = Number(e, 0)">
-                                <option value="0">First</option>
-                                <option value="1">Second</option>
-                            </select>
-                        </div>
-                    }
-
-                    @* Still shown while the link is out. The board is not read until the
-                       other player actually connects, so these stay live and the host can
-                       keep adjusting while they wait — and taking them away the instant
-                       the button was pressed made the card collapse and looked like the
-                       settings had been thrown away. Only the player joining loses them,
-                       because for them the board is the host's to choose. *@
-                    @if (_net.State != NetState.Joining)
-                    {
-                        <div class="row">
-                            <span class="label">Board</span>
-                            <select class="pick" value="@_size" @onchange="PickSize">
-                                <option value="9">9 × 9 — standard</option>
-                                <option value="7">7 × 7 — quick</option>
-                                <option value="5">5 × 5 — tiny</option>
-                            </select>
-                        </div>
-
-                        @* Every one of these lists is the chosen size's own, straight out of
-                           Core. A nine's numbers on a five are not a longer game there, they
-                           are a board that cannot carry them: 20 walls against 16 slots, and
-                           10 pickups against the 4 squares the holes leave. *@
-                        <div class="row">
-                            <span class="label">Walls each</span>
-                            <select class="pick" value="@_walls" @onchange="PickWalls">
-                                @foreach (int option in WallChoices)
-                                {
-                                    <option value="@option">@option</option>
-                                }
-                            </select>
-                        </div>
+                    @* Who is in the other seat. The fourth is the odd one out and is last for
+                       that reason: it is the only one that is not an opponent, because in it
+                       nobody at this screen plays at all. It is the desktop's "Watch two
+                       engines", and it is here for the same reason the clock is — the game
+                       behind the screen could always do it. *@
+                    <section class="group">
+                        <h2>Opponent</h2>
 
                         <div class="row">
-                            <span class="label">Holes</span>
-                            <select class="pick" value="@_holes" @onchange="PickHoles">
-                                @foreach (int option in HoleChoices)
-                                {
-                                    <option value="@option">@ScatterLabel(option, "scattered at random")</option>
-                                }
-                            </select>
+                            <button class="seg @(_mode == GameMode.VersusBot ? "on" : "")"
+                                    @onclick="() => SelectMode(GameMode.VersusBot)">The engine</button>
+                            <button class="seg @(_mode == GameMode.Hotseat ? "on" : "")"
+                                    @onclick="() => SelectMode(GameMode.Hotseat)">A friend, here</button>
+                            <button class="seg @(_mode == GameMode.Online ? "on" : "")"
+                                    @onclick="() => SelectMode(GameMode.Online)">A friend, online</button>
+                            <button class="seg @(_mode == GameMode.Spectate ? "on" : "")"
+                                    @onclick="() => SelectMode(GameMode.Spectate)">Two engines</button>
                         </div>
 
-                        <div class="row">
-                            <span class="label">Pickups</span>
-                            <select class="pick" value="@_pickups" @onchange="PickPickups">
-                                @foreach (int option in PickupChoices)
-                                {
-                                    <option value="@option">@ScatterLabel(option, "a spare wall or a free move")</option>
-                                }
-                            </select>
-                        </div>
-
-                        @* Said for the same reason the portal note is said: a size that offers
-                           fewer is following a rule of the game, and a rule nobody states reads
-                           as a list that has lost its options. *@
-                        @if (SizeNote.Length > 0)
+                        @* Also asked of a watched game, where it is the second engine's
+                           strength: the first is always the full search, so what the strength
+                           picks is who it is playing. The desktop asks the same question in
+                           the same place. *@
+                        @if (_mode is GameMode.VersusBot or GameMode.Spectate)
                         {
-                            <p class="fine why">@SizeNote</p>
-                        }
-
-                        @* Counted in portals, not in squares: a portal's two mouths are one
-                           object, unlike a pair of holes or of pickups. The list is the
-                           size's own, so a number this board cannot carry is never the one
-                           sent over a link. *@
-                        <div class="row">
-                            <span class="label">Portals</span>
-                            <select class="pick" value="@_portals"
-                                    disabled="@(PortalChoices.Length == 1)"
-                                    @onchange="e => _portals = Number(e, 0)">
-                                @foreach (int option in PortalChoices)
-                                {
-                                    <option value="@option">@PortalLabel(option)</option>
-                                }
-                            </select>
-                        </div>
-
-                        @* A control with nothing in it is a control that looks broken. What
-                           the size will and will not carry is a rule of the game, so it is
-                           said out loud rather than left to be inferred from a dead list. *@
-                        @if (PortalNote.Length > 0)
-                        {
-                            <p class="fine why">@PortalNote</p>
-                        }
-
-                        @if (_pickups > 0)
-                        {
-                            <PickupGuide Carved="_carved" />
-                        }
-                        @if (_portals > 0)
-                        {
-                            @PortalGuide
-                        }
-                    }
-                }
-                else if (_flavour == GameFlavour.Random)
-                {
-                    @* A rolled game may well put pickups or a portal on the board, and the
-                       first of either should not be a surprise nobody explained. *@
-                    <PickupGuide Carved="_carved" />
-                    @PortalGuide
-                }
-
-                @if (_mode == GameMode.Online)
-                {
-                    <div class="online">
-                        @if (_net.State == NetState.Idle)
-                        {
-                            @* Only the player who creates the game picks the board and the
-                               sides; the one who opens the link is told what they are. *@
                             <div class="row">
-                                <button class="ghost primary" @onclick="HostGame">Create a game</button>
-                            </div>
-                            <div class="row">
-                                <input class="code" placeholder="or paste an invite code"
-                                       value="@_joinCode"
-                                       @oninput="e => _joinCode = e.Value?.ToString() ?? string.Empty" />
-                                <button class="ghost" disabled="@string.IsNullOrWhiteSpace(_joinCode)"
-                                        @onclick="JoinGame">Join</button>
+                                <span class="label">Strength</span>
+                                <select class="pick" value="@((int)_strength)"
+                                        @onchange="e => _strength = (BotStrength)Number(e, 2)">
+                                    <option value="0">Easy</option>
+                                    <option value="1">Normal</option>
+                                    <option value="2">Hard</option>
+                                </select>
                             </div>
                         }
-                        else if (_net.State == NetState.Hosting)
+
+                        @* Offered where it can be kept: a network game would have to agree the
+                           clock and keep the two of them in step, and there is no message for
+                           either — so rather than show a control that quietly does nothing, it
+                           is not shown. A watched game has no clock for the same reason the
+                           desktop's has none: nobody is being kept waiting. *@
+                        @if (_mode is GameMode.VersusBot or GameMode.Hotseat)
                         {
-                            <p class="fine">
-                                @(string.IsNullOrEmpty(_net.Code)
-                                    ? "Setting up…"
-                                    : "Send this link to the other player. The game starts the moment they open it.")
-                            </p>
-                            @if (!string.IsNullOrEmpty(_net.Code))
+                            <div class="row">
+                                <span class="label">Clock</span>
+                                @foreach (TimeControl option in ClockChoices)
+                                {
+                                    TimeControl choice = option;
+                                    <button class="seg @(_clock == choice ? "on" : "")"
+                                            @onclick="() => _clock = choice">@ClockLabel(choice)</button>
+                                }
+                            </div>
+                        }
+                    </section>
+
+                    @* And what it is played on. The three ways in: most people want the first
+                       and should not have to read past everything the third can do to reach
+                       it, which is why the six rows behind Custom stay behind Custom. *@
+                    <section class="group">
+                        <h2>Board</h2>
+
+                        <div class="row">
+                            @foreach (GameFlavour option in new[] { GameFlavour.Standard, GameFlavour.Random, GameFlavour.Custom })
+                            {
+                                GameFlavour choice = option;
+                                <button class="seg @(_flavour == choice ? "on" : "")"
+                                        @onclick="() => SelectFlavour(choice)">@choice</button>
+                            }
+                        </div>
+                        <p class="fine note">@FlavourNote</p>
+
+                        @if (_flavour == GameFlavour.Custom)
+                        {
+                            @if (_mode is GameMode.VersusBot or GameMode.Online)
                             {
                                 <div class="row">
-                                    <input class="code wide" readonly value="@ShareLink" @onfocus="SelectAll" />
-                                    <button class="ghost copy" @onclick="() => Copy(ShareLink)">@CopyLabel</button>
+                                    <span class="label">You play</span>
+                                    <select class="pick" value="@_seat" @onchange="PickSeat">
+                                        <option value="0">First</option>
+                                        <option value="1">Second</option>
+                                    </select>
                                 </div>
-                                <p class="fine">
-                                    Or read out the code: <span class="mono">@_net.Code</span>
-                                    <button class="ghost copy" @onclick="() => Copy(_net.Code)">@CopyLabel</button>
-                                </p>
+                            }
+
+                            @* Still shown while the link is out. The board is not read until
+                               the other player actually connects, so these stay live and the
+                               host can keep adjusting while they wait — and taking them away
+                               the instant the button was pressed made the card collapse and
+                               looked like the settings had been thrown away. Only the player
+                               joining loses them, because for them the board is the host's to
+                               choose. *@
+                            @if (_net.State != NetState.Joining)
+                            {
+                                <div class="row">
+                                    <span class="label">Size</span>
+                                    <select class="pick" value="@_size" @onchange="PickSize">
+                                        <option value="9">9 × 9 — standard</option>
+                                        <option value="7">7 × 7 — quick</option>
+                                        <option value="5">5 × 5 — tiny</option>
+                                    </select>
+                                </div>
+
+                                @* Every one of these lists is the chosen size's own, straight
+                                   out of Core. A nine's numbers on a five are not a longer
+                                   game there, they are a board that cannot carry them: 20
+                                   walls against 16 slots, and 10 pickups against the 4 squares
+                                   the holes leave. *@
+                                <div class="row">
+                                    <span class="label">Walls each</span>
+                                    <select class="pick" value="@_walls" @onchange="PickWalls">
+                                        @foreach (int option in WallChoices)
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                <div class="row">
+                                    <span class="label">Holes</span>
+                                    <select class="pick" value="@_holes" @onchange="PickHoles">
+                                        @foreach (int option in HoleChoices)
+                                        {
+                                            <option value="@option">@ScatterLabel(option, "scattered at random")</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                <div class="row">
+                                    <span class="label">Pickups</span>
+                                    <select class="pick" value="@_pickups" @onchange="PickPickups">
+                                        @foreach (int option in PickupChoices)
+                                        {
+                                            <option value="@option">@ScatterLabel(option, "a spare wall or a free move")</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                @* Said for the same reason the portal note is said: a size that
+                                   offers fewer is following a rule of the game, and a rule
+                                   nobody states reads as a list that has lost its options. *@
+                                @if (SizeNote.Length > 0)
+                                {
+                                    <p class="fine why">@SizeNote</p>
+                                }
+
+                                @* Counted in portals, not in squares: a portal's two mouths are
+                                   one object, unlike a pair of holes or of pickups. The list is
+                                   the size's own, so a number this board cannot carry is never
+                                   the one sent over a link. *@
+                                <div class="row">
+                                    <span class="label">Portals</span>
+                                    <select class="pick" value="@_portals"
+                                            disabled="@(PortalChoices.Length == 1)"
+                                            @onchange="PickPortals">
+                                        @foreach (int option in PortalChoices)
+                                        {
+                                            <option value="@option">@PortalLabel(option)</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                @* A control with nothing in it is a control that looks broken.
+                                   What the size will and will not carry is a rule of the game,
+                                   so it is said out loud rather than left to be inferred from
+                                   a dead list. *@
+                                @if (PortalNote.Length > 0)
+                                {
+                                    <p class="fine why">@PortalNote</p>
+                                }
                             }
                         }
-                        else if (_net.State == NetState.Joining)
-                        {
-                            <p class="fine">Connecting…</p>
-                        }
-                        else if (_net.State == NetState.Failed)
-                        {
-                            <p class="fine">@_net.Trouble</p>
-                            <div class="row">
-                                <button class="ghost" @onclick="ResetNet">Try again</button>
-                            </div>
-                        }
-                    </div>
-                }
+                    </section>
+                </div>
 
-                @* The prose is welcome on the plain screen and in the way once every knob
-                   is open: with Custom showing, it is what pushes the button that actually
-                   starts the game below the fold. *@
-                @if (_flavour != GameFlavour.Custom)
-                {
-                    <p class="fine">
-                        @if (_mode == GameMode.Online)
-                        {
-                            <text>
-                                The two browsers talk directly to each other over WebRTC — there is no
-                                server of ours in the middle. A free public service is used once, only to
-                                introduce them; after that the moves never touch a third party. Strict
-                                networks sometimes block the direct connection.
-                            </text>
-                        }
-                        else if (_mode == GameMode.Spectate)
-                        {
-                            <text>
-                                Both sides are played by the engine. Routes are drawn for each. The first
-                                seat is always the full search; the strength above is what it is playing.
-                            </text>
-                        }
-                        else
-                        {
-                            <text>
-                                Click a square to step, or hover the groove between two squares to place a
-                                wall. Hard runs a real alpha-beta search — in a browser it gets one thread,
-                                so it thinks a little less deeply than the desktop build.
-                            </text>
-                        }
-                    </p>
+                @* ------------------------------------------------------ the board itself ----
 
-                    @* What the desktop build is still worth downloading for. It used to say
-                       clocks, engine against engine and game review, all three of which are
-                       on this page now — a line offering what the reader is already looking
-                       at is worse than no line. What is left is the thread: over there the
-                       search has one of its own, so it can be given longer and can go on
-                       running while you decide. *@
-                    <p class="fine">
-                        Prefer it on your desktop?
-                        <a href="https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe">
-                            Download the Windows app
-                        </a>
-                        — the search gets a thread of its own there, so it can be given longer,
-                        it keeps thinking while you do, and games run over your own network.
-                    </p>
-                }
+                   The desktop's menu has two engines playing a real game behind the choices,
+                   and it is what makes that screen feel like a game rather than a form. This
+                   is the same idea and not the same thing, deliberately.
 
-                @if (_mode != GameMode.Online)
-                {
-                    <div class="actions">
-                        <button class="ghost primary" @onclick="StartGame">Play</button>
-                    </div>
-                }
+                   A live demo does not earn its place here. In a browser the search runs on
+                   the one thread there is, so a demo would be a start screen whose buttons
+                   answer in bursts between searches; on a phone it is a core at full tilt, in
+                   a hand, before the player has asked for anything at all. Neither is what the
+                   desktop is paying for it, because the desktop has a thread going spare.
+
+                   So the board shows the game about to be started instead of one nobody
+                   chose. It costs one generation per change of a control and no search at
+                   all — nothing is running, so nothing has to be stopped when Play is
+                   pressed — and it answers a question the setup could never answer before:
+                   what four holes on a seven actually look like, where the mouths of a portal
+                   land, whether a five is too small for the game you had in mind. The knobs
+                   were the only part of this screen you had to commit to in order to see.
+
+                   This is the board Play deals and not one like it. See StartGame.
+
+                   Which way up it is drawn is asked of ShownFlipped rather than of the seat
+                   control directly, because those are not the same question — see there. *@
+                <div class="preview" inert="">
+                    <BoardView State="_shownBoard.State"
+                               Holes="_shownBoard.Holes"
+                               Carved="_carved"
+                               Flipped="@ShownFlipped"
+                               Generation="_shown.GetHashCode()" />
+
+                    @* The legend beside the thing it explains, which is where it should always
+                       have been: it used to be attached to the controls that asked for these,
+                       so a rolled board showed both legends whether or not it had rolled
+                       either. Asked of the board actually drawn above, so it appears exactly
+                       when there is something on it to explain. *@
+                    @if (_shown.ActualPickups > 0)
+                    {
+                        <PickupGuide Carved="_carved" />
+                    }
+                    @if (_shown.ActualPortals > 0)
+                    {
+                        @PortalGuide
+                    }
+                </div>
+
+                <div class="go">
+                    @if (_mode == GameMode.Online)
+                    {
+                        <div class="online">
+                            @if (_net.State == NetState.Idle)
+                            {
+                                @* Only the player who creates the game picks the board and the
+                                   sides; the one who opens the link is told what they are. *@
+                                <div class="row">
+                                    <button class="ghost primary" @onclick="HostGame">Create a game</button>
+                                </div>
+                                <div class="row">
+                                    <input class="code" placeholder="or paste an invite code"
+                                           value="@_joinCode"
+                                           @oninput="e => _joinCode = e.Value?.ToString() ?? string.Empty" />
+                                    <button class="ghost" disabled="@string.IsNullOrWhiteSpace(_joinCode)"
+                                            @onclick="JoinGame">Join</button>
+                                </div>
+                            }
+                            else if (_net.State == NetState.Hosting)
+                            {
+                                <p class="fine">
+                                    @(string.IsNullOrEmpty(_net.Code)
+                                        ? "Setting up…"
+                                        : "Send this link to the other player. The game starts the moment they open it.")
+                                </p>
+                                @if (!string.IsNullOrEmpty(_net.Code))
+                                {
+                                    <div class="row">
+                                        <input class="code wide" readonly value="@ShareLink" @onfocus="SelectAll" />
+                                        <button class="ghost copy" @onclick="() => Copy(ShareLink)">@CopyLabel</button>
+                                    </div>
+                                    <p class="fine">
+                                        Or read out the code: <span class="mono">@_net.Code</span>
+                                        <button class="ghost copy" @onclick="() => Copy(_net.Code)">@CopyLabel</button>
+                                    </p>
+                                }
+                            }
+                            else if (_net.State == NetState.Joining)
+                            {
+                                <p class="fine">Connecting…</p>
+                            }
+                            else if (_net.State == NetState.Failed)
+                            {
+                                <p class="fine">@_net.Trouble</p>
+                                <div class="row">
+                                    <button class="ghost" @onclick="ResetNet">Try again</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="actions">
+                            <button class="ghost primary" @onclick="StartGame">Play</button>
+                        </div>
+                    }
+
+                    @* Two of the four modes are worth a sentence and two are not. Playing the
+                       engine or somebody sitting beside you is what the button says it is; a
+                       link between two browsers and a game nobody at this screen plays are
+                       both something else, and neither is what "Play" normally means.
+
+                       The third paragraph that used to stand here taught the click and the
+                       hover. The board teaches that itself in the line under the status, in
+                       the words that suit the pointer actually being used — which this screen
+                       could not know. *@
+                    @if (_mode == GameMode.Online)
+                    {
+                        <p class="fine">
+                            The two browsers talk directly to each other over WebRTC — there is no
+                            server of ours in the middle. A free public service is used once, only to
+                            introduce them; after that the moves never touch a third party. Strict
+                            networks sometimes block the direct connection.
+                        </p>
+                    }
+                    else if (_mode == GameMode.Spectate)
+                    {
+                        <p class="fine">
+                            Both sides are played by the engine. Routes are drawn for each. The first
+                            seat is always the full search; the strength above is what it is playing.
+                        </p>
+                    }
+                </div>
+
+                <div class="foot">
+                    @* The panel is the game's, and the game is behind this screen — so without
+                       this the theme, the sound and everything else the panel now carries could
+                       not be reached until a game had been started. *@
+                    <button class="ghost" @onclick="() => _showSettings = true">Settings</button>
+
+                    @* What the desktop build is still worth downloading for, said only to the
+                       host that is missing it. It used to say clocks, engine against engine and
+                       game review, all three of which are on this page now — a line offering
+                       what the reader is already looking at is worse than no line. What is left
+                       is the thread, so it is said where there is no thread: on a phone the
+                       search already has one, and the line was an advertisement for something
+                       the reader had. *@
+                    @if (HostProfile.Current.IsLimited)
+                    {
+                        <p class="fine">
+                            Prefer it on your desktop?
+                            <a href="https://github.com/REPIRK/quoridor/releases/latest/download/Quoridor.exe">
+                                Download the Windows app
+                            </a>
+                            — the search gets a thread of its own there, so it can be given longer,
+                            it keeps thinking while you do, and games run over your own network.
+                        </p>
+                    }
+                </div>
             </div>
         </div>
     }
@@ -727,6 +823,17 @@
     private static readonly (string Name, int Pace)[] PaceChoices =
         { ("Brisk", 500), ("Steady", 1400), ("Calm", 2800) };
 
+    /// <summary>
+    /// Whether how fast two engines play each other is a question worth putting to the
+    /// person reading the panel. It is the one setting here that is about a single mode, and
+    /// it stood on every screen whether or not anybody was watching anything — asked of the
+    /// game being set up while the start screen is up, and of the game on the board when it
+    /// is not, because those are the two games the panel can be opened over.
+    /// </summary>
+    private bool PaceMatters => _showSetup
+        ? _mode == GameMode.Spectate
+        : _session.Options.Mode == GameMode.Spectate;
+
     /// <summary>The three above without their names, for checking a stored one against.</summary>
     private static readonly int[] PaceMilliseconds = { 500, 1400, 2800 };
 
@@ -752,7 +859,12 @@
 
     /// <summary>Whether the board is drawn as an object rather than as a diagram. Off is
     /// the board this game is really about, so off is what a first visit gets.</summary>
-    private bool _carved;
+    /// <summary>
+    /// The board is lit and has depth unless someone turns it off. It began the other way
+    /// round — the plain board was the default and this was the opt-in — and the owner,
+    /// having played both on a phone and a desktop, asked for it the other way.
+    /// </summary>
+    private bool _carved = true;
 
     /// <summary>
     /// Whether a card is up over the page. Each of the three is an opaque sheet across the
@@ -773,10 +885,18 @@
 
     private bool _touch;
     private bool _showHelp;
+
+    /// <summary>
+    /// Whether there is anything to hear, and how much of it. The pair is no longer two
+    /// controls: the slider is the switch, so these two are always each other's answer and
+    /// the flag exists only because it is what the stored line has always been written in —
+    /// a build without this change reads it back and still gets the truth.
+    /// </summary>
     private bool _sound = true;
     private bool _music;
     private int _soundVolume = 70;
-    private int _musicVolume = 50;
+    private int _musicVolume;
+
     private int _track;
     private string? _preview;
     private string _joinCode = string.Empty;
@@ -798,9 +918,16 @@
     private static int Number(ChangeEventArgs e, int fallback) =>
         int.TryParse(e.Value?.ToString(), out int value) ? value : fallback;
 
+    /// <summary>
+    /// What each of the three ways in will do. The rolled one has a sentence the others do
+    /// not need, and it is the sentence that makes the roll a choice rather than a surprise:
+    /// the board on the screen is the board Play deals, so a roll you do not like is one
+    /// press away from another.
+    /// </summary>
     private string FlavourNote => _flavour switch
     {
-        GameFlavour.Random => "Board, walls, holes, pickups, portals and who moves first — all rolled for you.",
+        GameFlavour.Random => "Board, walls, holes, pickups and portals — all rolled for you, and this is the roll: " +
+            "press Random again for another. Who moves first is settled when you press Play.",
         GameFlavour.Custom => "Everything is yours to set.",
         _ => "Nine by nine, ten walls each. The game as it is normally played.",
     };
@@ -951,14 +1078,40 @@
         _holes = Clamped(_holes, HoleChoices);
         _pickups = Clamped(_pickups, PickupChoices);
         _portals = Clamped(_portals, PortalChoices);
+
+        RefreshPreview();
     }
 
-    private void PickWalls(ChangeEventArgs e) =>
+    private void PickWalls(ChangeEventArgs e)
+    {
         _walls = Clamped(Number(e, Board.WallsPerPlayer), WallChoices);
+        RefreshPreview();
+    }
 
-    private void PickHoles(ChangeEventArgs e) => _holes = Clamped(Number(e, 0), HoleChoices);
+    private void PickHoles(ChangeEventArgs e)
+    {
+        _holes = Clamped(Number(e, 0), HoleChoices);
+        RefreshPreview();
+    }
 
-    private void PickPickups(ChangeEventArgs e) => _pickups = Clamped(Number(e, 0), PickupChoices);
+    private void PickPickups(ChangeEventArgs e)
+    {
+        _pickups = Clamped(Number(e, 0), PickupChoices);
+        RefreshPreview();
+    }
+
+    private void PickPortals(ChangeEventArgs e)
+    {
+        _portals = Clamped(Number(e, 0), PortalChoices);
+        RefreshPreview();
+    }
+
+    /// <summary>
+    /// Which of the two seats is the player's. It is the one setup control that changes
+    /// nothing about the board and so does not rebuild the preview — it only turns it
+    /// around, which is what taking the second seat does to the board in play.
+    /// </summary>
+    private void PickSeat(ChangeEventArgs e) => _seat = Number(e, 0);
 
     /// <summary>
     /// A count brought inside what a size offers: the largest option that size carries
@@ -1048,21 +1201,24 @@
     </div>;
 
     /// <summary>
-    /// The board this setup screen describes. Standard is the plain game; Random rolls
-    /// everything, seeded from the clock so two games are never the same; Custom is
-    /// whatever the knobs say, with a fresh seed so the same numbers still give a
-    /// different scatter each time.
+    /// A whole board on a scatter of its own, which is what a rematch on a rolled game asks
+    /// for. The seed is drawn rather than read off the clock: the clock only ticks every few
+    /// milliseconds, so a rematch taken straight away used to be handed the same number and
+    /// rebuilt the very board it was asked to replace, and a seed that climbs steadily makes
+    /// the boards it produces cycle instead of scatter.
     /// </summary>
-    private GameSetup BuildSetup() => BuildSetup(_flavour);
+    private GameSetup BuildSetup(GameFlavour flavour) => BuildSetup(flavour, Random.Shared.Next());
 
-    private GameSetup BuildSetup(GameFlavour flavour)
+    /// <summary>
+    /// The board these controls describe. Standard is the plain game; Random rolls
+    /// everything; Custom is whatever the knobs say, scattered from the same seed.
+    ///
+    /// The seed is a parameter and not drawn in here, so that the start screen can hold one
+    /// still: a scatter that moved every time the wall count was nudged would be a picture
+    /// of a different game each time, and the board that screen shows is the board it deals.
+    /// </summary>
+    private GameSetup BuildSetup(GameFlavour flavour, int seed)
     {
-        // The seed is drawn rather than read off the clock. The clock only ticks every
-        // few milliseconds, so a rematch taken straight away used to be handed the same
-        // number and rebuilt the very board it was asked to replace; and a seed that
-        // climbs steadily makes the boards it produces cycle instead of scatter.
-        int seed = Random.Shared.Next();
-
         if (flavour == GameFlavour.Standard) return GameSetup.Standard;
 
         if (flavour == GameFlavour.Custom)
@@ -1079,6 +1235,76 @@
         }
 
         return GameSetup.Roll(seed);
+    }
+
+    // ================================================================= the preview ==
+
+    /// <summary>
+    /// The board the start screen is currently describing, and the position it produces.
+    ///
+    /// Held rather than computed in the markup, and this is not an optimisation: every
+    /// flavour but Standard draws a fresh seed, so a setup built during a render would
+    /// re-scatter the holes on every keystroke, every hover and every repaint the clock
+    /// causes. It is rebuilt when a control is touched and at no other time, which is
+    /// exactly when the board it stands for has actually changed.
+    /// </summary>
+    private GameSetup _shown = GameSetup.Standard;
+
+    private BuiltBoard _shownBoard = GameSetup.Standard.Build();
+
+    /// <summary>
+    /// The scatter the preview is standing on. Held still while the counts are being set,
+    /// and drawn again only when a whole board is being asked for afresh — choosing a
+    /// flavour, or opening the screen. Without it, nudging the wall count would move every
+    /// hole on the board and the preview would read as a slot machine.
+    /// </summary>
+    private int _shownSeed = Random.Shared.Next();
+
+    /// <summary>
+    /// Whether the preview is drawn from the second seat, which is the one thing about it
+    /// that is not a property of the board at all.
+    ///
+    /// It has to be the same question the game itself will be asked, and the seat control is
+    /// not that question: <c>GameSession.LocalSeat</c> is -1 in a local match and in a watched
+    /// game — nobody at this screen has a seat in either, so both are always drawn the way up
+    /// they were dealt — and it is 1 only where the mode gives this browser the second seat.
+    /// Asked of the control alone, the preview turned over whenever a seat chosen against the
+    /// engine was still standing after the opponent was changed to a friend here, and stayed
+    /// upright when a seat chosen on a custom board was still standing after the board was
+    /// changed back to the standard one. Both are two clicks away, and both make the preview
+    /// a picture of a board that is not the one Play deals.
+    ///
+    /// A rolled game is the one case that genuinely cannot be known here: Play draws the
+    /// order of play along with everything else, so the seat this reads has not been decided
+    /// yet. Upright is the honest answer, and the note under the control already says the
+    /// order is settled when the button is pressed.
+    /// </summary>
+    private bool ShownFlipped =>
+        _flavour != GameFlavour.Random && _mode is GameMode.VersusBot or GameMode.Online && _seat == 1;
+
+    /// <summary>Redraws the preview from the controls as they now stand.</summary>
+    private void RefreshPreview()
+    {
+        _shown = BuildSetup(_flavour, _shownSeed);
+        _shownBoard = _shown.Build();
+    }
+
+    /// <summary>And the same on a fresh scatter, which is what asking for another board is.</summary>
+    private void RollPreview()
+    {
+        _shownSeed = Random.Shared.Next();
+        RefreshPreview();
+    }
+
+    /// <summary>
+    /// Chooses one of the three ways in. Pressing the one already chosen is not a no-op:
+    /// on Random it rolls again, which is the only way to ask a rolled game for a second
+    /// opinion before committing to it.
+    /// </summary>
+    private void SelectFlavour(GameFlavour flavour)
+    {
+        _flavour = flavour;
+        RollPreview();
     }
 
     /// <summary>A move chosen during the opponent's turn, played the moment ours starts.</summary>
@@ -1118,6 +1344,11 @@
 
         // Before anything is drawn, so that what is drawn is already the player's own.
         await LoadSettings();
+
+        // And the board on the start screen follows from those: the game last set up is
+        // what this build opens showing, so the preview has to be built after the line
+        // that says what it was.
+        RefreshPreview();
 
         _net = new NetLink(Js);
         _net.Changed += OnNetChanged;
@@ -1277,8 +1508,10 @@
     [JSInvokable]
     public void OnKey(string key)
     {
-        // While a game is being set up the board behind is not the player's yet.
-        if (_showSetup) return;
+        // Nearest the player first, which is the order the back gesture answers in and for
+        // the same reason: the settings panel can now be raised over the start screen, and
+        // asked in the other order an Escape at the panel would have closed the screen
+        // underneath it instead.
 
         // The leaving card is only ever raised by a back gesture, which is a phone's; a
         // keyboard is not, but a card that cannot be dismissed by the key everybody presses
@@ -1293,6 +1526,17 @@
         {
             // One way out of the panel, and it is the one everybody tries first.
             if (key is "Escape") { _showSettings = false; StateHasChanged(); }
+            return;
+        }
+
+        // While a game is being set up the board behind is not the player's yet — but where
+        // there is one behind, Escape is the way back to it, as it is out of every other
+        // screen here. On a cold start there is nothing to go back to and the key does
+        // nothing, which is better than a start screen that can be dismissed to an empty
+        // board.
+        if (_showSetup)
+        {
+            if (key is "Escape" && _started) { _showSetup = false; StateHasChanged(); }
             return;
         }
 
@@ -1750,6 +1994,11 @@
     private void OpenSetup()
     {
         _showSetup = true;
+
+        // A fresh board to look at each time the screen is opened, which is what a rolled
+        // game means by "another game" and costs a plain one nothing.
+        RollPreview();
+
         ResetNet();
     }
 
@@ -1764,7 +2013,18 @@
         // A rolled game rolls the order of play too.
         if (_flavour == GameFlavour.Random) _seat = Random.Shared.Next(2);
 
-        _session = new GameSession(OptionsFor(_mode, _strength, _clock, _seat, BuildSetup(), _flavour));
+        // The board that has been on the screen all along, and not another one built from
+        // the same numbers. Every flavour but Standard draws a seed, so building again here
+        // would deal a different scatter from the one the player has just spent a minute
+        // looking at — which would make the preview a picture of a game rather than of this
+        // game, and a rolled board something you can never actually choose. Rolling again is
+        // still one press: Random re-rolls, and opening the screen at all rolls afresh.
+        //
+        // Recomputed rather than trusted, so that a control added later which forgets to say
+        // it changed the board cannot make the two disagree silently.
+        RefreshPreview();
+
+        _session = new GameSession(OptionsFor(_mode, _strength, _clock, _seat, _shown, _flavour));
         _showSetup = false;
 
         // The game just set up is the one a returning player almost always wants next, so
@@ -1934,14 +2194,6 @@
         await Sfx(Ours(_session) ? "win" : "lose");
     }
 
-    private async Task ToggleMusic()
-    {
-        _music = !_music;
-        Remember();
-
-        await StartMusic();
-    }
-
     /// <summary>Switches pieces. Playing already means stopping and starting again.</summary>
     private async Task PickTrack(ChangeEventArgs e)
     {
@@ -1976,23 +2228,37 @@
         }
     }
 
-    /// <summary>Turning the effects on plays one, so the slider can be heard.</summary>
-    private async Task ToggleSound()
-    {
-        _sound = !_sound;
-        Remember();
+    /// <summary>How a volume reads beside its slider. Nothing to hear is not "0%".</summary>
+    private static string Level(int volume) => volume == 0 ? "off" : $"{volume}%";
 
-        if (_sound) await Sfx("move");
-    }
-
+    /// <summary>
+    /// Sets one of the two volumes, which is now also how either of them is switched off.
+    ///
+    /// There used to be a button beside each slider. Two controls for one answer is two
+    /// controls that can disagree — a switch reading On over a slider at zero says nothing
+    /// true — and it was two of the panel's nine rows spent on a question that has a number
+    /// for an answer already. The desktop settled this the same way, in the same words:
+    /// nothing to hear is what off means.
+    /// </summary>
     private async Task SetVolume(object? value, bool music)
     {
         if (!int.TryParse(value?.ToString(), out int level)) return;
 
         level = Math.Clamp(level, 0, 100);
 
-        if (music) _musicVolume = level;
-        else _soundVolume = level;
+        bool was = music ? _music : _sound;
+        bool now = level > 0;
+
+        if (music)
+        {
+            _musicVolume = level;
+            _music = now;
+        }
+        else
+        {
+            _soundVolume = level;
+            _sound = now;
+        }
 
         Remember();
 
@@ -2007,9 +2273,18 @@
             return;
         }
 
+        // The piece starts when the slider leaves zero and stops when it arrives there.
+        // Only on the crossing: starting it again on every step of a drag would restart the
+        // track from its opening bar a hundred times on the way from quiet to loud.
+        if (music)
+        {
+            if (was != now) await StartMusic();
+            return;
+        }
+
         // A volume you cannot hear is a volume you cannot set, so the effects slider
         // makes a sound as it moves.
-        if (!music && _sound) await Sfx("move");
+        if (now) await Sfx("move");
     }
 
     // ============================================================== remembered ==
@@ -2083,7 +2358,9 @@
             switch (name)
             {
                 case "theme": _light = value == "light"; break;
-                case "style": _carved = value == "carved"; break;
+                // Only the word that turns it off is honoured, so a line stored before
+                // this was the default does not carry the old one forward.
+                case "style": _carved = value != "flat"; break;
                 case "reading": _reading = value == "1"; break;
                 case "confirm": _confirm = value == "1"; break;
                 case "sound": _sound = value == "1"; break;
@@ -2121,6 +2398,17 @@
         _holes = Clamped(_holes, HoleChoices);
         _pickups = Clamped(_pickups, PickupChoices);
         _portals = Clamped(_portals, PortalChoices);
+
+        // The volume is the switch now, and the two used to be able to disagree — a line
+        // written by an older build can say "off, at seventy". It comes back as a zero,
+        // which is what that line meant, rather than as a slider sitting at seventy with
+        // nothing coming out of it. Both directions, because the flag is still written and
+        // is what an older build reads back out of the line this one leaves behind.
+        if (!_sound) _soundVolume = 0;
+        if (!_music) _musicVolume = 0;
+
+        _sound = _soundVolume > 0;
+        _music = _musicVolume > 0;
     }
 
     /// <summary>A stored number inside the range its control has, or the default. Written
@@ -2622,8 +2910,10 @@
             bool host = _net.Code.Length > 0;
 
             // The player who opened the link takes the second seat and the standard board
-            // until told otherwise, which happens immediately.
-            GameSetup setup = host ? BuildSetup() : GameSetup.Standard;
+            // until told otherwise, which happens immediately. The host plays the board that
+            // was on their start screen, for the same reason Play does: it is the one they
+            // chose, and it is encoded and sent from here so both sides build that one.
+            GameSetup setup = host ? _shown : GameSetup.Standard;
             if (!host) _seat = 1;
 
             // The host's flavour travels with the game, so a rematch on a rolled board

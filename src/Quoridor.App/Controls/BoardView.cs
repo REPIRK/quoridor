@@ -42,6 +42,27 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     private const double GrooveReach = 17;
 
     /// <summary>
+    /// How far the playing field is sunk inside the rim of the tray. Narrower than
+    /// <see cref="Pad"/> on purpose: the coordinate labels are drawn inside that margin, so
+    /// they land on the rim band and read as printed on the frame rather than floating in
+    /// the recess beside the squares.
+    /// </summary>
+    private const double Frame = 22;
+
+    /// <summary>
+    /// How far a placed wall stands proud of its groove, in the board's own units so it
+    /// scales with the board and is the same piece on a 5x5. The same number as --lift in
+    /// the shared stylesheet, because it is the same wall.
+    /// </summary>
+    private const double Lift = 4;
+
+    /// <summary>
+    /// How far inside the mouth of an opening its floor sits. Wide enough that the wall of
+    /// the opening is a band you can read the light across rather than a hairline.
+    /// </summary>
+    private const double PitDepth = 7;
+
+    /// <summary>
     /// How far apart the two pawns have to be, in steps, before the reading calls a square
     /// decisively one player's. Past this the stain stops deepening: the difference between
     /// six steps clear and nine is not a difference anyone plays on.
@@ -80,17 +101,25 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     private readonly Rectangle _caret = new();
 
     /// <summary>
-    /// Each pawn is three things that travel together: the shadow it puts on the board, the
-    /// ring that says whose turn it is, and the piece itself. The holder carries all three
-    /// across the board; the lift inside it carries the piece and its ring <em>over</em>
-    /// whatever is being jumped, while the shadow stays down on the squares.
+    /// Each pawn is four things that travel together: the shadow it puts on the board, the
+    /// ring that says whose turn it is, the disc itself, and the top of it that catches the
+    /// lamp. The holder carries all four across the board; the lift inside it carries the
+    /// piece <em>over</em> whatever is being jumped, while the shadow stays down on the
+    /// squares — which is the whole of how a jump reads as height rather than as a slide.
     /// </summary>
     private readonly Canvas[] _pawnHolder = new Canvas[2];
 
     private readonly Canvas[] _pawnLift = new Canvas[2];
-    private readonly Ellipse[] _pawnShapes = new Ellipse[2];
     private readonly Ellipse[] _pawnRing = new Ellipse[2];
     private readonly Ellipse[] _pawnShadow = new Ellipse[2];
+
+    /// <summary>
+    /// The top of each piece: one gradient over the disc, so a piece is something with a
+    /// shape rather than a circle cut out of paper. It is the same gradient for both players
+    /// and both themes, because how a piece is lit belongs to the room and not to whoever
+    /// owns it — which is also why it is held here rather than mixed from an accent.
+    /// </summary>
+    private readonly Ellipse[] _pawnDome = new Ellipse[2];
 
     private GameState _state;
     private bool _interactive;
@@ -120,6 +149,27 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     /// </summary>
     private readonly SolidColorBrush[,] _stainBrushes = new SolidColorBrush[2, Decisive + 1];
 
+    /// <summary>
+    /// The four brushes that carry the light: the bevel on a tile, the wall of an opening
+    /// cut through the board, the top of a piece, and what a piece puts down underneath
+    /// itself. Each is one brush shared by every shape that wears it — the bevel alone is
+    /// worn by eighty-one squares — and each is a gradient, so unlike the flat inks above
+    /// they cannot ride a shared <see cref="SolidColorBrush"/> and follow the theme by
+    /// themselves. They are mixed again on a theme change instead, in <see cref="MixInks"/>.
+    /// </summary>
+    private LinearGradientBrush _tileFace = null!;
+
+    private LinearGradientBrush _pitWall = null!;
+    private RadialGradientBrush _dome = null!;
+    private RadialGradientBrush _contact = null!;
+
+    /// <summary>
+    /// The side face of a spare wall, which is the board's own neutral ink with the light
+    /// taken off it — the same thing the two players' side faces are. Mixed rather than named
+    /// in the palette because one piece on the board wears it.
+    /// </summary>
+    private SolidColorBrush _pickupSide = null!;
+
     /// <summary>The square rectangles, in screen order, so holes can be restyled later.</summary>
     private readonly Rectangle[] _cells = new Rectangle[Board.CellCount];
 
@@ -127,6 +177,23 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     private readonly Rectangle _backdrop = new();
     private readonly Canvas _pickupLayer = new();
     private readonly Canvas _portalLayer = new();
+
+    /// <summary>
+    /// The recess the tiles are set into, drawn inside the rim. It carries nothing a player
+    /// reads, which is exactly its job: it is the reason the tray has a thickness and the
+    /// reason the coordinate labels sit on a frame rather than beside a rectangle.
+    /// </summary>
+    private readonly Rectangle _fieldWell = new();
+
+    /// <summary>
+    /// The lamp, laid across the whole board in one pass. It is over everything the board is
+    /// made of and under everything the board is telling you: a hint dot in the far corner
+    /// has to be exactly as loud as the same dot in the near one, while a tile there does not.
+    /// </summary>
+    private readonly Rectangle _lamp = new();
+
+    /// <summary>The floors of the openings, which is what makes a gap a thing with a bottom.</summary>
+    private readonly Canvas _pitLayer = new() { IsHitTestVisible = false };
 
     private UInt128 _holes;
 
@@ -153,6 +220,8 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     {
         _state = GameState.CreateInitial();
 
+        // Before the visuals, because half of what they are built out of is in here.
+        MixInks();
         BuildVisuals();
 
         // A smaller game is played on a centred square of the same grid, so the drawing
@@ -252,6 +321,8 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     /// </summary>
     private void RefreshCells()
     {
+        _pitLayer.Children.Clear();
+
         int from = Math.Max(0, _framedFrom);
         int last = Board.Size - 1 - from;
 
@@ -261,7 +332,9 @@ public sealed class BoardView : UserControl, Views.IBoardAim
             {
                 // The squares were laid out in screen order, so a model cell has to be
                 // mapped through the same turn the rest of the board uses.
-                Rectangle square = _cells[Board.Index(ViewIndex(row), ViewIndex(col))];
+                int viewRow = ViewIndex(row);
+                int viewCol = ViewIndex(col);
+                Rectangle square = _cells[Board.Index(viewRow, viewCol)];
 
                 if (row < from || row > last || col < from || col > last)
                 {
@@ -273,17 +346,41 @@ public sealed class BoardView : UserControl, Views.IBoardAim
                 bool hole = (_holes & Board.Bit(cell)) != 0;
 
                 square.Visibility = Visibility.Visible;
-
-                // A square out of play is a darker square, edged with the same hairline
-                // every other square has. Drawn as a dashed outline it read as a selection
-                // marquee somebody had left lying on the board; drawn as the board's own
-                // deepest tone it reads as what it is, somewhere there is nothing to stand
-                // on — and it keeps its place in the grid instead of becoming a gap in it.
-                square.Fill = hole ? Palette.BrushOf(Palette.Pit) : TileFill(cell);
-                square.Stroke = Palette.BrushOf(Palette.Line);
-                square.StrokeThickness = 0.75;
                 square.StrokeDashArray = null;
-                square.Opacity = hole ? 1 : 0.9;
+                square.Opacity = 1;
+
+                // A square in play is bevelled by its own fill: lit along the top edge,
+                // shaded along the bottom. One brush does all eighty-one of them at whatever
+                // size they are drawn, and the board gains no shape for it.
+                if (!hole)
+                {
+                    square.Fill = TileFill(cell);
+                    square.Stroke = Palette.BrushOf(Palette.CellEdge);
+                    square.StrokeThickness = 0.75;
+                    continue;
+                }
+
+                // A square out of play is an opening you can see down into. The square
+                // itself becomes the wall of it — dark on the side nearest the lamp, which
+                // is the side you are looking down past, and lit on the far one — and the
+                // floor is what is at the bottom. Drawn as a dashed outline it read as a
+                // selection marquee somebody had left lying on the board; drawn as a hole it
+                // reads as what it is, and it keeps its place in the grid rather than
+                // becoming a gap in it.
+                square.Fill = _pitWall;
+                square.Stroke = null;
+
+                var floor = new Rectangle
+                {
+                    Width = CellSize - PitDepth * 2,
+                    Height = CellSize - PitDepth * 2,
+                    RadiusX = 2,
+                    RadiusY = 2,
+                    Fill = Palette.BrushOf(Palette.Pit),
+                };
+
+                Place(floor, Origin(viewCol) + PitDepth, Origin(viewRow) + PitDepth);
+                _pitLayer.Children.Add(floor);
             }
         }
     }
@@ -299,7 +396,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     /// </summary>
     private Brush TileFill(int cell)
     {
-        if (!_reading || _owner[cell] < 0) return Palette.BrushOf(Palette.Cell);
+        if (!_reading || _owner[cell] < 0) return _tileFace;
 
         int player = _owner[cell];
         int depth = (int)Math.Round((_stain[cell] - FaintestStain) / (StrongestStain - FaintestStain) * Decisive);
@@ -335,18 +432,31 @@ public sealed class BoardView : UserControl, Views.IBoardAim
 
     private void BuildVisuals()
     {
+        // The tray, in two parts. The rim is the raised edge of the board and the part
+        // nearest the lamp; the field is the recess the squares are set into. One flat
+        // rectangle would be a board printed on the page — this is a board on the table,
+        // and the whole of the difference is that you can see one edge go down past another.
         _backdrop.Width = Extent;
         _backdrop.Height = Extent;
         _backdrop.RadiusX = 6;
         _backdrop.RadiusY = 6;
-        // A shallow top-to-bottom gradient rather than one flat tone, so the board sits
-        // on the page as an object. Built from the board colour so it follows the theme.
-        _backdrop.Fill = BoardSheen();
+        _backdrop.Fill = RimSheen();
         _backdrop.Stroke = Palette.BrushOf(Palette.Line);
         _backdrop.StrokeThickness = 1;
         Place(_backdrop, 0, 0);
         _root.Children.Add(_backdrop);
 
+        _fieldWell.Width = Extent - Frame * 2;
+        _fieldWell.Height = Extent - Frame * 2;
+        _fieldWell.RadiusX = 4;
+        _fieldWell.RadiusY = 4;
+        _fieldWell.Fill = FieldWell();
+        _fieldWell.IsHitTestVisible = false;
+        Place(_fieldWell, Frame, Frame);
+        _root.Children.Add(_fieldWell);
+
+        // The labels are drawn inside the rim band, which is the whole point of sinking the
+        // field: they stop floating beside the board and start reading as printed on its frame.
         _root.Children.Add(_coordinateLayer);
         BuildCoordinates();
 
@@ -363,8 +473,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
                     Height = CellSize,
                     RadiusX = 3,
                     RadiusY = 3,
-                    Fill = Palette.BrushOf(Palette.Cell),
-                    Opacity = 0.9,
+                    Fill = _tileFace,
                 };
                 Place(cell, Origin(col), Origin(row));
                 cellLayer.Children.Add(cell);
@@ -374,8 +483,35 @@ public sealed class BoardView : UserControl, Views.IBoardAim
 
         _root.Children.Add(cellLayer);
 
+        // What is at the bottom of the squares that are not there. Its own layer because a
+        // floor is drawn inside a mouth that is one of the squares above, and the squares
+        // are a fixed grid that is restyled rather than rebuilt.
+        _root.Children.Add(_pitLayer);
+
         _root.Children.Add(_goalLayer);
         BuildGoalMarks();
+
+        _portalLayer.IsHitTestVisible = false;
+        _root.Children.Add(_portalLayer);
+
+        _pickupLayer.IsHitTestVisible = false;
+        _root.Children.Add(_pickupLayer);
+
+        _root.Children.Add(_wallLayer);
+
+        // The lamp, and the line the board is divided by. Everything above it is something
+        // the board is made of — the tray, the tiles, the openings, the walls, the prizes —
+        // and everything below it is something the board is telling you, which has to be
+        // exactly as loud in the far corner as in the near one. A hint dot in the shaded
+        // corner would otherwise be dimmer than the same dot in the lit one.
+        _lamp.Width = Extent;
+        _lamp.Height = Extent;
+        _lamp.RadiusX = 6;
+        _lamp.RadiusY = 6;
+        _lamp.Fill = LampWash();
+        _lamp.IsHitTestVisible = false;
+        Place(_lamp, 0, 0);
+        _root.Children.Add(_lamp);
 
         _highlight.Width = CellSize;
         _highlight.Height = CellSize;
@@ -411,14 +547,6 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         _hintLayer.IsHitTestVisible = false;
         _root.Children.Add(_hintLayer);
 
-        _portalLayer.IsHitTestVisible = false;
-        _root.Children.Add(_portalLayer);
-
-        _pickupLayer.IsHitTestVisible = false;
-        _root.Children.Add(_pickupLayer);
-
-        _root.Children.Add(_wallLayer);
-
         _ghost.RadiusX = 2;
         _ghost.RadiusY = 2;
         _ghost.Fill = Palette.BrushOf(Palette.Wall);
@@ -448,7 +576,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
     }
 
     /// <summary>
-    /// One piece, in three parts about a common origin. Everything inside a holder is drawn
+    /// One piece, in four parts about a common origin. Everything inside a holder is drawn
     /// around (0,0), which is why the holder can simply be placed on a square centre and why
     /// the lift's transforms — a rise for a jump, a shrink for a portal — need no origin of
     /// their own: scaling and translating about (0,0) is scaling and translating about the
@@ -461,17 +589,22 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         // What the piece puts on the board rather than a glow coming off it. It is what
         // makes a jump read as height: it stays down on the squares while the piece rises,
         // and draws in and darkens as the piece gets further from it.
+        //
+        // Flattened and pushed away from the lamp rather than centred under the piece. A
+        // shadow is the piece seen from where the light is, so a round one directly beneath
+        // reads as a glow the piece is sitting in; this one says where the lamp is, and it
+        // says the same thing as every other shadow on the board.
         var shadow = new Ellipse
         {
-            Width = PawnRadius * 2.3,
-            Height = PawnRadius * 2.3,
-            Fill = ContactInk(),
+            Width = 38,
+            Height = 14,
+            Fill = _contact,
             Opacity = 0.8,
             RenderTransformOrigin = new Point(0.5, 0.5),
             RenderTransform = new ScaleTransform(1, 1),
         };
 
-        Place(shadow, -PawnRadius * 1.15, -PawnRadius * 1.15 + 2);
+        Place(shadow, -19 + 3, -7 + 6);
 
         // Switched on and off, never faded. Whose turn it is has to be unambiguous at every
         // instant, and a fade is a window in which it is neither — which is exactly the
@@ -499,6 +632,20 @@ public sealed class BoardView : UserControl, Views.IBoardAim
 
         Place(pawn, -PawnRadius, -PawnRadius);
 
+        // The top of the piece, over the disc and exactly the size of it: light collecting up
+        // and to the left and falling away to the far edge. One element and one gradient is
+        // the whole of the volume — it is the only reason a piece looks like it is standing
+        // on the board rather than printed onto it.
+        var dome = new Ellipse
+        {
+            Width = PawnRadius * 2,
+            Height = PawnRadius * 2,
+            Fill = _dome,
+            IsHitTestVisible = false,
+        };
+
+        Place(dome, -PawnRadius, -PawnRadius);
+
         var lift = new Canvas();
         lift.RenderTransform = new TransformGroup
         {
@@ -507,6 +654,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
 
         lift.Children.Add(ring);
         lift.Children.Add(pawn);
+        lift.Children.Add(dome);
 
         var holder = new Canvas();
         holder.Children.Add(shadow);
@@ -514,32 +662,153 @@ public sealed class BoardView : UserControl, Views.IBoardAim
 
         _pawnShadow[player] = shadow;
         _pawnRing[player] = ring;
-        _pawnShapes[player] = pawn;
+        _pawnDome[player] = dome;
         _pawnLift[player] = lift;
         _pawnHolder[player] = holder;
 
         _pawnLayer.Children.Add(holder);
     }
 
-    /// <summary>
-    /// The shadow a piece casts: the board's own darkest tone, faded out from the middle so
-    /// it has no edge of its own. A hard-edged disc would read as a second piece; a WPF
-    /// blur would re-rasterise the whole pawn every frame it moved.
-    /// </summary>
-    private static RadialGradientBrush ContactInk()
-    {
-        Color ink = Palette.ColorOf(Palette.Pit);
+    // ================================================================== light ==
 
-        return new RadialGradientBrush
+    /// <summary>
+    /// One lamp, fixed above and to the left of the table, and every gradient and every
+    /// offset below agrees with it. Mixed here rather than declared once because these are
+    /// derived colours: the flat inks are shared brushes that cross-fade through a theme
+    /// change by themselves, and a gradient cannot — so it is mixed again instead.
+    ///
+    /// <para>
+    /// None of it needs a sign for the second seat, unlike the browser's board. Turning this
+    /// board around is a remapping of indices and not a rotation of the drawing: every shape
+    /// is placed through <see cref="ViewIndex"/> and then drawn in screen coordinates, so an
+    /// offset of four units up and to the left is four units up and to the left on the screen
+    /// at either seat. The browser rotates the whole board group and has to negate every one
+    /// of these to put the light back where the room is.
+    /// </para>
+    /// </summary>
+    private void MixInks()
+    {
+        // Lit along the top edge, shaded along the bottom, flat between. Object-bound, so
+        // this one brush bevels all eighty-one squares and adds no shape to the board.
+        _tileFace = Vertical(
+            (Palette.ColorOf(Palette.TileLit), 0),
+            (Palette.ColorOf(Palette.Cell), 0.09),
+            (Palette.ColorOf(Palette.Cell), 0.88),
+            (Palette.ColorOf(Palette.TileShade), 1));
+
+        // Looking down into a square that is not there. The near wall of the opening is in
+        // its own shadow and the far one is the part the lamp still reaches, so this runs the
+        // same way across the board as everything else here.
+        _pitWall = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(1, 1),
+            GradientStops =
+            {
+                new GradientStop(Palette.ColorOf(Palette.Pit), 0),
+                new GradientStop(Palette.ColorOf(Palette.PitLit), 1),
+            },
+        };
+
+        Color lit = Palette.ColorOf(Palette.Lit);
+        Color shade = Palette.ColorOf(Palette.Shade);
+
+        // A piece with a top rather than a disc cut out of paper. One gradient serves both
+        // players and both themes, because how a piece is lit belongs to the room and not to
+        // whoever owns it.
+        _dome = new RadialGradientBrush
+        {
+            Center = new Point(0.5, 0.5),
+            GradientOrigin = new Point(0.33, 0.27),
+            RadiusX = 0.62,
+            RadiusY = 0.62,
+            GradientStops =
+            {
+                new GradientStop(Alpha(lit, 0.34), 0),
+                new GradientStop(Alpha(lit, 0), 0.52),
+                new GradientStop(Alpha(shade, 0.26), 1),
+            },
+        };
+
+        // And what a piece standing on the board puts underneath itself. A gradient and not a
+        // blur: WPF would re-rasterise a blurred pawn on every frame of the slide, and the
+        // slide is the one thing on this board that actually moves.
+        _contact = new RadialGradientBrush
         {
             GradientStops =
             {
-                new GradientStop(Color.FromArgb(0x6E, ink.R, ink.G, ink.B), 0),
-                new GradientStop(Color.FromArgb(0x40, ink.R, ink.G, ink.B), 0.55),
-                new GradientStop(Color.FromArgb(0x00, ink.R, ink.G, ink.B), 1),
+                new GradientStop(Alpha(Palette.ColorOf(Palette.Shadow), 0.55), 0),
+                new GradientStop(Alpha(Palette.ColorOf(Palette.Shadow), 0), 1),
             },
         };
+
+        _pickupSide = new SolidColorBrush(Palette.Mix(Palette.ColorOf(Palette.Muted), Colors.Black, 0.45));
+
+        _tileFace.Freeze();
+        _pitWall.Freeze();
+        _dome.Freeze();
+        _contact.Freeze();
+        _pickupSide.Freeze();
     }
+
+    /// <summary>
+    /// The rim of the tray: the raised edge of the board and so the part nearest the lamp,
+    /// catching it along the top and dropping away at the bottom.
+    /// </summary>
+    private static LinearGradientBrush RimSheen() => Vertical(
+        (Palette.ColorOf(Palette.RimTop), 0),
+        (Palette.ColorOf(Palette.RimBottom), 1));
+
+    /// <summary>
+    /// The recess the squares are set into. The dark of a recess collects in a narrow band
+    /// directly under the edge you are looking down past rather than washing evenly down the
+    /// whole of it, which is why the deep tone is gone by a tenth of the way in.
+    /// </summary>
+    private static LinearGradientBrush FieldWell() => Vertical(
+        (Palette.ColorOf(Palette.FieldDeep), 0),
+        (Palette.ColorOf(Palette.Field), 0.10),
+        (Palette.ColorOf(Palette.Field), 1));
+
+    /// <summary>
+    /// The lamp itself, running corner to corner of the board: light at the near corner,
+    /// nothing across the middle, and the room's shade at the far one. One pass over the
+    /// whole board rather than a highlight inside every shape, which is what makes the
+    /// dozens of gradients underneath agree instead of merely resembling one another.
+    /// </summary>
+    private static LinearGradientBrush LampWash()
+    {
+        Color lit = Palette.ColorOf(Palette.Lit);
+
+        return Diagonal(
+            (Alpha(lit, Palette.LitStrength), 0),
+            (Alpha(lit, 0), 0.5),
+            (Alpha(Palette.ColorOf(Palette.Shade), Palette.ShadeStrength), 1));
+    }
+
+    private static LinearGradientBrush Vertical(params (Color Colour, double At)[] stops) =>
+        Ramp(new Point(0, 0), new Point(0, 1), stops);
+
+    private static LinearGradientBrush Diagonal(params (Color Colour, double At)[] stops) =>
+        Ramp(new Point(0, 0), new Point(1, 1), stops);
+
+    /// <summary>
+    /// A gradient in the box of whatever wears it, stated by its two ends rather than by an
+    /// angle: WPF measures a gradient angle against the shape's own aspect, so the same
+    /// number is a different direction on a square tile and on a wall three times as long.
+    /// </summary>
+    private static LinearGradientBrush Ramp(Point from, Point to, (Color Colour, double At)[] stops)
+    {
+        var brush = new LinearGradientBrush { StartPoint = from, EndPoint = to };
+
+        foreach ((Color colour, double at) in stops)
+            brush.GradientStops.Add(new GradientStop(colour, at));
+
+        return brush;
+    }
+
+    /// <summary>One of the palette's colours at a fraction of its full strength.</summary>
+    private static Color Alpha(Color colour, double amount) =>
+        Color.FromArgb((byte)Math.Round(Math.Clamp(amount, 0, 1) * 255), colour.R, colour.G, colour.B);
 
     /// <summary>
     /// Each player's target row: a faint wash square by square so the grid keeps its
@@ -591,39 +860,33 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         }
     }
 
-    /// <summary>
-    /// The board's surface: its own colour, lifted a little at the top and dropped a
-    /// little at the bottom. Small enough to read as light rather than as a pattern.
-    /// </summary>
-    private static LinearGradientBrush BoardSheen()
-    {
-        Color the = ((SolidColorBrush)Palette.BrushOf(Palette.BoardSurface)).Color;
-
-        static Color Shift(Color colour, int by)
-        {
-            static byte Clamp(int v) => (byte)Math.Clamp(v, 0, 255);
-            return Color.FromRgb(Clamp(colour.R + by), Clamp(colour.G + by), Clamp(colour.B + by));
-        }
-
-        return new LinearGradientBrush(Shift(the, 5), Shift(the, -4), 90);
-    }
-
     private void RefreshThemeColours()
     {
-        // The gradient is mixed from the board colour, so it has to be mixed again when
-        // that colour changes. The rest of the board rides DynamicResource and does not.
-        _backdrop.Fill = BoardSheen();
+        // Everything the light is made of is a gradient or a mixed colour, and neither can
+        // ride a shared brush the way the flat inks do — a gradient's stops are copied when
+        // it is built rather than watched. So the light is mixed again here, and everything
+        // holding a piece of it is handed the new one. They land at once while the shared
+        // brushes cross-fade around them, which is a difference of a fifth of a second and
+        // only visible at all on the board's largest areas.
+        MixInks();
 
-        for (int player = 0; player < 2; player++) _pawnShadow[player].Fill = ContactInk();
+        _backdrop.Fill = RimSheen();
+        _fieldWell.Fill = FieldWell();
+        _lamp.Fill = LampWash();
+
+        for (int player = 0; player < 2; player++)
+        {
+            _pawnShadow[player].Fill = _contact;
+            _pawnDome[player].Fill = _dome;
+        }
 
         // Likewise derived rather than shared: the stains are mixed colours and the portal
-        // inks are raw ones, so neither can follow the theme by itself. They land at once
-        // while the shared brushes cross-fade around them, which is only visible at all
-        // with the reading held up during a theme switch.
+        // inks are raw ones, so neither can follow the theme by itself.
         Array.Clear(_stainBrushes);
 
         ApplyLastMoveInk();
         RefreshPortals();
+        RefreshPickups();
         RefreshCells();
     }
 
@@ -700,6 +963,17 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         _backdrop.Height = size;
         Place(_backdrop, offset, offset);
 
+        // The recess and the lamp are properties of the tray, so they are cut to whatever
+        // the tray now is. A lamp left at the full nine-square size would put its bright
+        // corner off the edge of a 5x5 and light the whole of what was left of it.
+        _fieldWell.Width = size - Frame * 2;
+        _fieldWell.Height = size - Frame * 2;
+        Place(_fieldWell, offset + Frame, offset + Frame);
+
+        _lamp.Width = size;
+        _lamp.Height = size;
+        Place(_lamp, offset, offset);
+
         BuildCoordinates();
         BuildGoalMarks();
         RefreshCells();
@@ -736,23 +1010,61 @@ public sealed class BoardView : UserControl, Views.IBoardAim
 
             if (isWall)
             {
-                // A spare wall, drawn as the thing it gives you.
-                var bar = new Rectangle
+                Rectangle Bar(double dx, double dy, Brush fill)
                 {
-                    Width = 26,
-                    Height = 8,
-                    RadiusX = 2,
-                    RadiusY = 2,
-                    Fill = ink,
-                    Opacity = 0.34,
-                };
-                Place(bar, x - 13, y - 4);
-                _pickupLayer.Children.Add(bar);
+                    var face = new Rectangle
+                    {
+                        Width = 26,
+                        Height = 8,
+                        RadiusX = 2,
+                        RadiusY = 2,
+                        Fill = fill,
+                    };
+
+                    Place(face, x - 13 + dx, y - 4 + dy);
+                    _pickupLayer.Children.Add(face);
+                    return face;
+                }
+
+                // The same three faces a played wall stands on, at the same lift and with its
+                // shadow falling the same way, in the board's neutral ink because the piece
+                // belongs to whoever reaches it rather than to either player. A spare wall
+                // lying loose on the square is exactly what it is, and nothing about a wall
+                // has to be explained to anybody twice.
+                Bar(Lift, Lift + 1, Palette.BrushOf(Palette.Shadow)).Opacity = 0.34;
+                Bar(0, 0, _pickupSide);
+
+                Rectangle top = Bar(-Lift, -Lift, Palette.BrushOf(Palette.Muted));
+                top.Stroke = Palette.BrushOf(Palette.LitEdge);
+                top.StrokeThickness = 0.75;
+
                 continue;
             }
 
-            // A free move: a turn coming round again, drawn as three quarters of a
-            // circle with an arrowhead on the end. It says "go again" without a word.
+            // A free move: a turn coming round again, drawn as three quarters of a circle
+            // with an arrowhead on the end. It says "go again" without a word — now stamped
+            // on a token standing on the square rather than printed onto the square itself.
+            var contact = new Ellipse
+            {
+                Width = 24,
+                Height = 10,
+                Fill = _contact,
+                Opacity = 0.7,
+            };
+
+            Place(contact, x - 12 + 3, y - 5 + 5);
+            _pickupLayer.Children.Add(contact);
+
+            void Token(Brush face)
+            {
+                var disc = new Ellipse { Width = 26, Height = 26, Fill = face };
+                Place(disc, x - 13, y - 13);
+                _pickupLayer.Children.Add(disc);
+            }
+
+            Token(Palette.BrushOf(Palette.Muted));
+            Token(_dome);
+
             var arc = new Path
             {
                 Data = Geometry.Parse("M 6.36 -6.36 A 9 9 0 1 1 -6.36 -6.36"),
@@ -760,7 +1072,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
                 StrokeThickness = 2.1,
                 StrokeStartLineCap = PenLineCap.Round,
                 StrokeEndLineCap = PenLineCap.Round,
-                Opacity = 0.5,
+                Opacity = 0.72,
                 RenderTransform = new TranslateTransform(x, y),
             };
             _pickupLayer.Children.Add(arc);
@@ -769,7 +1081,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
             {
                 Data = Geometry.Parse("M -2.83 -9.90 L -4.10 -4.10 L -8.63 -8.63 Z"),
                 Fill = ink,
-                Opacity = 0.5,
+                Opacity = 0.72,
                 RenderTransform = new TranslateTransform(x, y),
             };
             _pickupLayer.Children.Add(head);
@@ -796,60 +1108,86 @@ public sealed class BoardView : UserControl, Views.IBoardAim
             int low = System.Numerics.BitOperations.TrailingZeroCount(pairs);
             pairs &= pairs - 1;
 
-            Color ink = PortalInk(index++);
+            (Color ink, Color deep) = PortalInk(index++);
 
-            DrawMouth(low, ink);
-            DrawMouth(GameState.PortalPartner(low), ink);
+            DrawMouth(low, ink, deep);
+            DrawMouth(GameState.PortalPartner(low), ink, deep);
         }
 
-        void DrawMouth(int cell, Color ink)
+        void DrawMouth(int cell, Color ink, Color deep)
         {
             double x = CellCentreOf(Board.ColOf(cell));
             double y = CellCentreOf(Board.RowOf(cell));
 
-            // Two rings about one centre, which reads as an opening rather than as a token
-            // lying on the square. The outer one is wider than a pawn, so a pawn standing
-            // on a mouth sits inside it instead of covering it up.
-            var outer = new Ellipse
+            void Ring(double radius, Ellipse shape)
             {
-                Width = 46,
-                Height = 46,
+                shape.Width = shape.Height = radius * 2;
+                Place(shape, x - radius, y - radius);
+                _portalLayer.Children.Add(shape);
+            }
+
+            // A mouth is an opening rather than a ring drawn on the square, so it is bored
+            // through the board the same way a gap is: the same wall lit by the same lamp,
+            // because the board should have one way of saying "this square is not solid" and
+            // then one way of saying what is under it. A gap has a floor; a mouth has a
+            // throat with the far end's own light coming back up it, which is why the dark
+            // of it is in the middle and not at the edges.
+            //
+            // Wide enough that a pawn standing in one sits inside it rather than on top of
+            // it, so the square goes on saying where it leads while it is occupied — which
+            // is exactly the moment the question is being asked.
+            Ring(24, new Ellipse { Fill = _pitWall });
+
+            Ring(17, new Ellipse
+            {
+                Fill = new RadialGradientBrush
+                {
+                    GradientStops =
+                    {
+                        new GradientStop(deep, 0),
+                        new GradientStop(ink, 1),
+                    },
+                },
+            });
+
+            // The edge where the board's surface breaks, and one ring further down — which
+            // is what makes the pair read as depth rather than as a coloured disc lying on
+            // the square.
+            Ring(24, new Ellipse
+            {
                 Stroke = new SolidColorBrush(ink),
                 StrokeThickness = 2,
-                Fill = new SolidColorBrush(ink) { Opacity = 0.12 },
-                Opacity = 0.8,
-            };
+                Opacity = 0.85,
+            });
 
-            Place(outer, x - 23, y - 23);
-            _portalLayer.Children.Add(outer);
-
-            var inner = new Ellipse
+            Ring(9, new Ellipse
             {
-                Width = 24,
-                Height = 24,
                 Stroke = new SolidColorBrush(ink),
-                StrokeThickness = 1.4,
-                Opacity = 0.5,
-            };
-
-            Place(inner, x - 12, y - 12);
-            _portalLayer.Children.Add(inner);
+                StrokeThickness = 1.2,
+                Opacity = 0.45,
+            });
         }
     }
 
     /// <summary>
-    /// The ink for one portal pair. Neither is a player's colour: a mouth belongs to the
-    /// board rather than to a side, and a violet mouth beside a teal pawn cannot be read as
-    /// that player's property. Mixed here rather than added to the palette because nothing
-    /// outside the board ever draws one.
+    /// The two inks for one portal pair: the colour of the mouth, and the same hue taken down
+    /// toward the pit for the middle of it, since the middle is the part furthest from the
+    /// surface. Neither is a player's colour: a mouth belongs to the board rather than to a
+    /// side, and a violet mouth beside a teal pawn cannot be read as that player's property.
+    /// Mixed here rather than added to the palette because nothing outside the board ever
+    /// draws one.
     /// </summary>
-    private static Color PortalInk(int pair)
+    private static (Color Ink, Color Deep) PortalInk(int pair)
     {
         bool dark = Palette.Current == AppTheme.Dark;
 
-        return (pair & 1) == 0
-            ? dark ? Color.FromRgb(0x9B, 0x87, 0xCF) : Color.FromRgb(0x5A, 0x46, 0x8F)
-            : dark ? Color.FromRgb(0xC9, 0xA7, 0x52) : Color.FromRgb(0x83, 0x63, 0x14);
+        return ((pair & 1) == 0, dark) switch
+        {
+            (true, true) => (Color.FromRgb(0x9B, 0x87, 0xCF), Color.FromRgb(0x2A, 0x23, 0x40)),
+            (true, false) => (Color.FromRgb(0x5A, 0x46, 0x8F), Color.FromRgb(0x3B, 0x2D, 0x5E)),
+            (false, true) => (Color.FromRgb(0xC9, 0xA7, 0x52), Color.FromRgb(0x3A, 0x2C, 0x0D)),
+            (false, false) => (Color.FromRgb(0x83, 0x63, 0x14), Color.FromRgb(0x4A, 0x37, 0x08)),
+        };
     }
 
     /// <summary>Snaps the board to a position with no animation (new game, undo, restart).</summary>
@@ -913,7 +1251,7 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         }
         else
         {
-            Rectangle wall = CreateWall(move.Kind, move.Row, move.Col, mover);
+            FrameworkElement wall = CreateWall(move.Kind, move.Row, move.Col, mover);
             _wallLayer.Children.Add(wall);
             AnimateWallEntry(wall, move.IsHorizontal, () => Finish());
         }
@@ -1181,39 +1519,82 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         }
     }
 
-    private Rectangle CreateWall(MoveKind kind, int row, int col, int owner)
+    /// <summary>
+    /// A placed wall: a solid piece standing proud of its groove, in three faces and a
+    /// shadow-shaped offset. The side face fills the slot itself — exactly the footprint the
+    /// preview lies in — the top face is lifted toward the lamp, and the shadow falls the
+    /// other way onto the squares beside it.
+    ///
+    /// <para>
+    /// That difference is the lead idea of this board and the one thing on it that teaches a
+    /// rule without a word: a wall you are only pointing at is a flat bar lying in the
+    /// groove, and a wall that has been played is a piece standing in it. Nobody has to be
+    /// told which of the two they are looking at.
+    /// </para>
+    ///
+    /// <para>
+    /// Offsets rather than a blur. A <see cref="DropShadowEffect"/> is re-rasterised every
+    /// time the thing under it is redrawn, and there are up to twenty of these standing on a
+    /// board that redraws on every hover.
+    /// </para>
+    ///
+    /// <para>
+    /// Walls carry their owner's colour. The physical game uses neutral pieces, but on screen
+    /// it is the difference between reading the position at a glance and having to
+    /// reconstruct who built what — so the top face is that player's ink and the side is the
+    /// same ink with the light off it.
+    /// </para>
+    /// </summary>
+    private FrameworkElement CreateWall(MoveKind kind, int row, int col, int owner)
     {
         bool horizontal = kind == MoveKind.HorizontalWall;
 
-        // Walls carry their owner's colour. The physical game uses neutral pieces, but
-        // on screen it is the difference between reading the position at a glance and
-        // having to reconstruct who built what.
-        var wall = new Rectangle
+        double width = horizontal ? WallLength : GapSize;
+        double height = horizontal ? GapSize : WallLength;
+
+        // Sized, so the entrance below can scale it about its own centre; the faces that
+        // stand outside those bounds are not clipped, because a Canvas does not clip.
+        var piece = new Canvas
         {
-            Width = horizontal ? WallLength : GapSize,
-            Height = horizontal ? GapSize : WallLength,
-            RadiusX = 2,
-            RadiusY = 2,
-            Fill = Palette.BrushOf(owner == 0 ? Palette.Accent0 : Palette.Accent1),
-            Stroke = Palette.BrushOf(Palette.Wall),
-            StrokeThickness = 0.75,
+            Width = width,
+            Height = height,
             IsHitTestVisible = false,
             RenderTransformOrigin = new Point(0.5, 0.5),
-            Effect = new DropShadowEffect
-            {
-                Color = Colors.Black,
-                BlurRadius = 10,
-                ShadowDepth = 1.5,
-                Direction = 270,
-                Opacity = 0.22,
-            },
         };
 
-        Place(wall, WallXOf(kind, col), WallYOf(kind, row));
-        return wall;
+        Rectangle Face(double dx, double dy, Brush fill)
+        {
+            var face = new Rectangle
+            {
+                Width = width,
+                Height = height,
+                RadiusX = 2,
+                RadiusY = 2,
+                Fill = fill,
+            };
+
+            Place(face, dx, dy);
+            piece.Children.Add(face);
+            return face;
+        }
+
+        // Every offset here is stated in screen coordinates and needs no sign for the second
+        // seat: this board is turned around by remapping indices rather than by rotating the
+        // drawing, so up and to the left is up and to the left at either seat. See MixInks.
+        Face(Lift, Lift + 1, Palette.BrushOf(Palette.Shadow)).Opacity = 0.34;
+        Face(0, 0, Palette.BrushOf(owner == 0 ? Palette.Accent0Side : Palette.Accent1Side));
+
+        // The hairline moves from the face in the plane of the board to the face that is out
+        // of it: on a solid piece the lit edge is along the top.
+        Rectangle top = Face(-Lift, -Lift, Palette.BrushOf(owner == 0 ? Palette.Accent0 : Palette.Accent1));
+        top.Stroke = Palette.BrushOf(Palette.LitEdge);
+        top.StrokeThickness = 0.75;
+
+        Place(piece, WallXOf(kind, col), WallYOf(kind, row));
+        return piece;
     }
 
-    private static void AnimateWallEntry(Rectangle wall, bool horizontal, Action completed)
+    private static void AnimateWallEntry(FrameworkElement wall, bool horizontal, Action completed)
     {
         var scale = new ScaleTransform(horizontal ? 0.06 : 1, horizontal ? 1 : 0.06);
         wall.RenderTransform = scale;
@@ -2090,7 +2471,11 @@ public sealed class BoardView : UserControl, Views.IBoardAim
         Ellipse ring = _pawnRing[player];
         var scale = (ScaleTransform)ring.RenderTransform;
 
-        _pawnShapes[player].Opacity = active ? 1 : 0.72;
+        // The whole piece dims when it is not on move, rather than the disc alone. The disc
+        // and the top that catches the lamp are the same object, and fading one of the two
+        // would take it apart: a highlight at full strength lying on a faded body is not a
+        // dimmer piece, it is a piece with the light coming off the wrong thing.
+        _pawnLift[player].Opacity = active ? 1 : 0.72;
 
         ring.BeginAnimation(OpacityProperty, null);
         scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
